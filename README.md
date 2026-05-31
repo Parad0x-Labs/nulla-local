@@ -24,6 +24,17 @@ The main lane is simple:
 
 Everything else in this repo should be understood as a surface or supporting system around that lane.
 
+## 💸 Why people use it
+
+Cloud AI means monthly fees and your data living on someone else's servers. NULLA flips that:
+
+- 🖥️ **Runs on your machine** — no subscription, no per-token bill.
+- 🔒 **Your data stays home** — it only reaches out when you let it.
+- 🧠 **Remembers your work** — persistent memory across sessions.
+- 🆓 **Free and open** — your hardware, your AI.
+
+For anyone who wants a capable assistant without the cloud tab. *(Alpha — see status below.)*
+
 ### How this fits the Parad0x stack
 
 Parad0x Labs builds Web0 on Solana — money and agents that settle themselves. **You are here: 🧠 Local AI.**
