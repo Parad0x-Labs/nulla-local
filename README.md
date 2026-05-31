@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/assets/github-header-nulla-local.png" alt="NULLA Local - Local-first AI runtime with memory" width="100%" />
+</p>
+
 # NULLA Hive Mind
 
 NULLA is a local-first agent runtime. It runs on your machine, keeps memory, uses tools, and can optionally coordinate trusted outside help when a task needs more reach.
