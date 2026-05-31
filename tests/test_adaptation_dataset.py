@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -153,6 +154,7 @@ class AdaptationDatasetSchemaCompatibilityTests(unittest.TestCase):
         self.assertLess(float(scored["quality_score"]), 0.68)
 
     def test_curate_and_score_reward_proof_backed_and_commons_reviewed_signal(self) -> None:
+        recent_ts = datetime.now(timezone.utc).isoformat()
         rows = [
             {
                 "instruction": "Task type: research\nTask summary: Validate the strongest solver output.",
@@ -170,7 +172,7 @@ class AdaptationDatasetSchemaCompatibilityTests(unittest.TestCase):
                     "finality_state": "finalized",
                     "proof_backed": True,
                     "durability_reasons": ["artifact_backed", "proof_finalized", "proof_backed"],
-                    "created_at": "2026-03-10T10:00:00+00:00",
+                    "created_at": recent_ts,
                 },
             },
             {
@@ -188,7 +190,7 @@ class AdaptationDatasetSchemaCompatibilityTests(unittest.TestCase):
                     "training_signal_count": 1,
                     "eligibility_state": "eligible",
                     "archive_state": "approved",
-                    "created_at": "2026-03-10T10:05:00+00:00",
+                    "created_at": recent_ts,
                 },
             },
             {
@@ -206,7 +208,7 @@ class AdaptationDatasetSchemaCompatibilityTests(unittest.TestCase):
                     "archive_state": "transient",
                     "finality_state": "pending",
                     "proof_backed": False,
-                    "created_at": "2026-03-10T10:06:00+00:00",
+                    "created_at": recent_ts,
                 },
             },
         ]
