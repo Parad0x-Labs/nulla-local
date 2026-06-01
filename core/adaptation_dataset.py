@@ -662,13 +662,29 @@ def score_adaptation_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     average_output_len = sum(output_lengths) / max(1, len(output_lengths))
     average_signal = sum(signal_scores) / max(1, len(signal_scores))
     conversation_ratio = source_counts.get("conversation", 0) / max(1, len(rows))
+    proof_backed_count = sum(
+        1
+        for row in rows
+        if bool(dict(row.get("metadata") or {}).get("proof_backed"))
+        or str(dict(row.get("metadata") or {}).get("finality_state") or "").strip().lower() in {"confirmed", "finalized"}
+    )
+    commons_reviewed_count = sum(
+        1
+        for row in rows
+        if str(row.get("source") or "").strip().lower() == "hive_post"
+        and str(dict(row.get("metadata") or {}).get("promotion_review_state") or "").strip().lower() == "approved"
+    )
+    premium_signal_ratio = min(1.0, (proof_backed_count + commons_reviewed_count) / max(1, len(rows)))
     volume_score = min(1.0, len(rows) / 24.0)
     diversity_score = min(1.0, len(source_counts) / 4.0)
     uniqueness_score = min(1.0, (len(instruction_hashes) + len(output_fingerprints)) / max(1, len(rows) * 2))
     substance_score = min(1.0, average_output_len / 320.0)
-    recency_score = (recent_hits / dated_examples) if dated_examples else 0.55
+    recency_score = (recent_hits / dated_examples) if (dated_examples and recent_hits) else 0.55
     signal_score = min(1.0, average_signal)
     source_mix_score = max(0.0, 1.0 - max(0.0, conversation_ratio - 0.35))
+    # Proof-backed and commons-reviewed examples represent the highest-quality training signal;
+    # reward corpora that are dense with such examples even when overall volume is small.
+    premium_signal_bonus = round(0.10 * premium_signal_ratio, 4)
     quality_score = round(
         (0.18 * volume_score)
         + (0.10 * diversity_score)
@@ -676,7 +692,8 @@ def score_adaptation_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         + (0.12 * substance_score)
         + (0.10 * recency_score)
         + (0.24 * signal_score)
-        + (0.10 * source_mix_score),
+        + (0.10 * source_mix_score)
+        + premium_signal_bonus,
         4,
     )
     return {
