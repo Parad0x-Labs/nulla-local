@@ -10,20 +10,21 @@ from installer.provider_probe import build_probe_report, list_ollama_models, rem
 
 
 def test_probe_report_prefers_bundle_local_stack_on_24gb_mps_host_with_required_models() -> None:
-    report = build_probe_report(
-        machine=MachineProbe(cpu_cores=10, ram_gb=24.0, gpu_name="Apple Silicon", vram_gb=24.0, accelerator="mps"),
-        ollama_binary="/usr/local/bin/ollama",
-        ollama_models=[
-            {"name": "qwen3:8b", "id": "a", "size": "5.2 GB", "modified": "today"},
-            {"name": "deepseek-r1:8b", "id": "b", "size": "5.2 GB", "modified": "today"},
-        ],
-        env_statuses={
-            "kimi": {"configured": False},
-            "generic_remote": {"configured": False},
-            "tether": {"configured": False},
-            "qvac": {"configured": False},
-        },
-    )
+    with mock.patch("core.install_recommendations._free_gb", return_value=120.0):
+        report = build_probe_report(
+            machine=MachineProbe(cpu_cores=10, ram_gb=24.0, gpu_name="Apple Silicon", vram_gb=24.0, accelerator="mps"),
+            ollama_binary="/usr/local/bin/ollama",
+            ollama_models=[
+                {"name": "qwen3:8b", "id": "a", "size": "5.2 GB", "modified": "today"},
+                {"name": "deepseek-r1:8b", "id": "b", "size": "5.2 GB", "modified": "today"},
+            ],
+            env_statuses={
+                "kimi": {"configured": False},
+                "generic_remote": {"configured": False},
+                "tether": {"configured": False},
+                "qvac": {"configured": False},
+            },
+        )
 
     assert report["recommended_stack_id"] == "local_only"
     assert report["recommended_install_profile_id"] == "local-only"

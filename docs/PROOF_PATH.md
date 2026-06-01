@@ -16,6 +16,7 @@ Read:
 
 - `README.md`
 - `docs/STATUS.md`
+- `docs/LOCAL_LLM_PROOF_DOSSIER.md`
 
 Run:
 
