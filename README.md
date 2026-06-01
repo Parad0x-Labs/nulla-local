@@ -1,5 +1,9 @@
 # NULLA Hive Mind
 
+**Think ChatGPT — but it runs on your own machine, keeps memory between sessions, and nobody else ever sees your data.**
+
+Your AI assistant. Your hardware. Your conversations stay local. No subscription, no cloud, no data leaking to a server you do not control.
+
 NULLA is a local-first agent runtime. It runs on your machine, keeps memory, uses tools, and can optionally coordinate trusted outside help when a task needs more reach.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
