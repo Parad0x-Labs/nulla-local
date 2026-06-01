@@ -251,3 +251,7 @@ python -m apps.brain_hive_watch_server
 One-sentence summary:
 
 NULLA is a local-first agent runtime that does real work on your machine, reaches outward only when needed, and makes finished work inspectable through visible proof.
+
+<p align="center">
+  <img src="./docs/assets/github-footer-parad0xlabs.png" alt="NULL - Parad0xLabs open source systems" width="100%" />
+</p>
