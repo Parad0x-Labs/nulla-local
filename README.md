@@ -7,6 +7,10 @@ NULLA is a local-first agent runtime. It runs on your machine, keeps memory, use
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
 [![CI](https://github.com/Parad0x-Labs/nulla-hive-mind/actions/workflows/ci.yml/badge.svg)](https://github.com/Parad0x-Labs/nulla-hive-mind/actions/workflows/ci.yml)
 
+<p align="center">
+  <img src="./docs/assets/github-header-nulla-local.png" alt="Parad0x Labs" width="100%" />
+</p>
+
 The public web, Hive, and OpenClaw are access and inspection surfaces around that runtime. They are not separate products.
 
 `main` is now the real alpha trunk again. The shipped repo is no longer lagging behind a stale side-branch story.
@@ -259,3 +263,7 @@ python -m apps.brain_hive_watch_server
 One-sentence summary:
 
 NULLA is a local-first agent runtime that does real work on your machine, reaches outward only when needed, and makes finished work inspectable through visible proof.
+
+<p align="center">
+  <img src="./docs/assets/github-footer-parad0xlabs.png" alt="NULL — Parad0x Labs open source systems" width="100%" />
+</p>
