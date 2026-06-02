@@ -35,22 +35,21 @@ import json
 import os
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Optional
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _sha256_hex(*parts: "str | bytes") -> str:
+def _sha256_hex(*parts: str | bytes) -> str:
     h = hashlib.sha256()
     for part in parts:
         h.update(part if isinstance(part, bytes) else part.encode())
     return h.hexdigest()
 
 
-def _sha256_bytes(*parts: "str | bytes") -> bytes:
+def _sha256_bytes(*parts: str | bytes) -> bytes:
     h = hashlib.sha256()
     for part in parts:
         h.update(part if isinstance(part, bytes) else part.encode())
@@ -81,7 +80,7 @@ class TaskChallenge:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "TaskChallenge":
+    def from_dict(cls, d: dict) -> TaskChallenge:
         return cls(**d)
 
 
@@ -105,7 +104,7 @@ class ChallengeIssuedTask:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "ChallengeIssuedTask":
+    def from_dict(cls, d: dict) -> ChallengeIssuedTask:
         return cls(**d)
 
     def to_json(self) -> str:
@@ -148,14 +147,14 @@ class WorkProof:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "WorkProof":
+    def from_dict(cls, d: dict) -> WorkProof:
         return cls(**d)
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2)
 
     @classmethod
-    def from_json(cls, s: str) -> "WorkProof":
+    def from_json(cls, s: str) -> WorkProof:
         return cls.from_dict(json.loads(s))
 
     def canonical_id(self) -> str:
@@ -407,12 +406,12 @@ class ProofOfWorkMinter:
         rpc_url: str, keypair_b58: str, memo_payload: bytes
     ) -> str:
         """Path taken when solders + solana-py are installed."""
-        from solders.keypair import Keypair          # type: ignore
-        from solders.pubkey import Pubkey            # type: ignore
+        import base58  # type: ignore
+        from solana.rpc.api import Client  # type: ignore
+        from solders.instruction import AccountMeta, Instruction  # type: ignore
+        from solders.keypair import Keypair  # type: ignore
+        from solders.pubkey import Pubkey  # type: ignore
         from solders.transaction import Transaction  # type: ignore
-        from solders.instruction import Instruction, AccountMeta  # type: ignore
-        from solana.rpc.api import Client            # type: ignore
-        import base58                                # type: ignore
 
         kp = Keypair.from_bytes(base58.b58decode(keypair_b58))
         client = Client(rpc_url)
@@ -687,7 +686,7 @@ def _run_tests() -> None:
     # ------------------------------------------------------------------ #
     # Test 1: valid proof passes verification
     # ------------------------------------------------------------------ #
-    task = minter.issue_task_challenge(
+    minter.issue_task_challenge(
         task_id="task-001",
         issuer_id="issuer-A",
         task_description="Summarise the document",
@@ -757,7 +756,7 @@ def _run_tests() -> None:
     # Test 4: expired challenge is rejected
     # ------------------------------------------------------------------ #
     minter4 = ProofOfWorkMinter()
-    task4 = minter4.issue_task_challenge(
+    minter4.issue_task_challenge(
         task_id="task-exp",
         issuer_id="issuer-B",
         expires_in_seconds=1.0,   # expires almost immediately
@@ -784,7 +783,7 @@ def _run_tests() -> None:
     # Test 5: replay attack rejected (same proof twice)
     # ------------------------------------------------------------------ #
     minter5 = ProofOfWorkMinter()
-    task5 = minter5.issue_task_challenge(
+    minter5.issue_task_challenge(
         task_id="task-replay",
         issuer_id="issuer-C",
         expires_in_seconds=3600,

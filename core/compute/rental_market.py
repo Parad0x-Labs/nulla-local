@@ -11,9 +11,8 @@ from __future__ import annotations
 import subprocess
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
-
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -461,7 +460,7 @@ if __name__ == "__main__":
     session.tokens_generated = listing.tokens_per_second * 60  # ~1 min worth
 
     proof = market.release(session)
-    print(f"Session released. WorkProof:")
+    print("Session released. WorkProof:")
     print(f"  tokens_generated : {proof.tokens_generated}")
     print(f"  total_cost       : {proof.total_cost} {proof.currency}")
     print(f"  signature        : {proof.signature}")

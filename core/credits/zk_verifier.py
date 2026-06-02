@@ -31,8 +31,7 @@ import json
 import logging
 import os
 import struct
-import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -157,11 +156,11 @@ class ZKComputationProof:
         return json.dumps(self.to_dict(), indent=2)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "ZKComputationProof":
+    def from_dict(cls, d: dict) -> ZKComputationProof:
         return cls(**d)
 
     @classmethod
-    def from_json(cls, s: str) -> "ZKComputationProof":
+    def from_json(cls, s: str) -> ZKComputationProof:
         return cls.from_dict(json.loads(s))
 
 
@@ -422,12 +421,12 @@ class ZKVerifier:
         rpc_url: str, keypair_b58: str, instruction_data: bytes
     ) -> str:
         """Preferred path: solders + solana-py installed."""
-        from solders.keypair import Keypair           # type: ignore
-        from solders.pubkey import Pubkey             # type: ignore
-        from solders.transaction import Transaction   # type: ignore
-        from solders.instruction import Instruction, AccountMeta  # type: ignore
-        from solana.rpc.api import Client             # type: ignore
-        import base58                                 # type: ignore
+        import base58  # type: ignore
+        from solana.rpc.api import Client  # type: ignore
+        from solders.instruction import AccountMeta, Instruction  # type: ignore
+        from solders.keypair import Keypair  # type: ignore
+        from solders.pubkey import Pubkey  # type: ignore
+        from solders.transaction import Transaction  # type: ignore
 
         kp = Keypair.from_bytes(base58.b58decode(keypair_b58))
         client = Client(rpc_url)
