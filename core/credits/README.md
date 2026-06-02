@@ -1,5 +1,95 @@
 # NULLA Credit System — Proof-of-Work Credits
 
+## THREE-LAYER ANTI-CHEAT
+
+Layer 1 — Challenge-Response: can't fake result without computing it
+Layer 2 — NULL Staking: economic punishment for cheating costs more than cheating
+Layer 3 — ZK Proof: cryptographic proof computation was done correctly
+
+---
+
+### Layer 1: Challenge-Response (`proof_of_work.py`)
+
+`ProofOfWorkMinter` uses a two-phase commit/reveal protocol:
+
+1. Issuer publishes `challenge_hash = sha256(nonce)` — nonce stays secret.
+2. Worker commits to `result_hash = sha256(result_bytes)`.
+3. Issuer reveals nonce; worker produces `challenge_response = sha256(nonce + result_bytes)`.
+4. `verify_proof_with_challenge()` confirms the worker had **both** the nonce
+   AND the real result bytes — neither alone is sufficient.
+
+Replay attacks are blocked by tracking `canonical_id()` of every accepted proof.
+Expired challenges are rejected.
+
+---
+
+### Layer 2: NULL Staking (`staking_guard.py`)
+
+`StakingGuard` requires workers to lock NULL tokens before submitting work.
+
+| Complexity | Min stake | Credits earned | Cheat cost |
+|------------|-----------|----------------|------------|
+| simple     | 10 NULL   | 2              | 10 NULL    |
+| medium     | 50 NULL   | 10             | 50 NULL    |
+| complex    | 200 NULL  | 50             | 200 NULL   |
+| expert     | 1 000 NULL| 200            | 1 000 NULL |
+
+Slash conditions:
+- `wrong_result` → 100% slashed
+- `challenge_fail` → 100% slashed
+- `timeout` → 50% slashed
+- `spam` → 25% slashed
+
+High-reputation workers (≥ 85% honest completions) earn a 20% stake discount.
+`SlashEvidence` records are keyed by `sha256(evidence_bytes)` for on-chain anchoring.
+
+---
+
+### Layer 3: ZK Proof (`zk_verifier.py`)
+
+`ZKVerifier` bridges NULLA task results to `dark_bn254_gate` on Solana mainnet
+(`GCptvBYF8S6eVYoh15B7WAESc54FUHCpN1Ui6aHeQYZd`).
+
+A Groth16 proof cryptographically guarantees computation was performed correctly
+**without revealing the private inputs** (the actual result).
+
+Supported circuits:
+- `range_proof` — proves result value is in range without revealing it (inference tasks)
+- `hash_preimage` — proves knowledge of preimage (compute integrity)
+- `merkle_membership` — proves set membership without revealing which item
+
+Instruction layout sent to `dark_bn254_gate` (512 bytes):
+```
+[0..7]    magic        b"GROTH16\x00"
+[8..263]  proof_bytes  raw 256-byte Groth16 proof
+[264..295] vk_hash     sha256 of verification key (VK pinning prevents substitution)
+[296..327] inputs_hash sha256(packed public inputs)
+[328..359] task_id     utf-8 zero-padded 32 bytes
+[360..391] worker_id   utf-8 zero-padded 32 bytes
+[392..399] credits     uint64 little-endian
+[400..511] reserved    zero-padded
+```
+
+---
+
+## How the layers compose
+
+```
+Worker starts task
+  → Layer 2: StakingGuard.require_stake() locks NULL
+  → Layer 1: Issuer issues challenge (nonce secret)
+  → Worker computes result
+  → Worker commits result_hash
+  → Issuer reveals nonce
+  → Worker produces challenge_response
+  → Layer 1: verify_proof_with_challenge() confirms authenticity
+  → Layer 3: ZKVerifier.verify_on_chain() submits Groth16 proof to dark_bn254_gate
+  → Layer 2: StakingGuard.release_stake() returns stake + awards credits
+              OR slashes stake if any layer rejects
+```
+
+---
+
 ## How it works
 
 ### 1. Complete a task → earn a WorkProof
@@ -8,19 +98,15 @@ When a NULLA node finishes a task (inference, routing, data relay, etc.) the
 `ProofOfWorkMinter` issues a `WorkProof` object:
 
 ```
-task_id          — what was done
-node_id          — who did it
-task_hash        — sha256(task_id + node_id)
-result_hash      — sha256(result_bytes)
-credits_earned   — how many NULLA credits this work is worth
-timestamp        — when the proof was minted
-signature        — sha256(task_hash + result_hash + str(credits))
-solana_anchor_tx — None until anchored on-chain
+task_id             — what was done
+worker_node_id      — who did it
+result_hash         — sha256(result_bytes)
+challenge_response  — sha256(challenge_nonce + result_bytes)
+credits_earned      — how many NULLA credits this work is worth
+timestamp           — when the proof was minted
+solana_anchor_tx    — None until anchored on-chain
+is_valid            — set True by verify_proof_with_challenge()
 ```
-
-The signature binds the work output to the node identity and the credit
-amount.  No central authority can issue fake proofs because they would need
-the original result bytes to produce a matching result_hash.
 
 ---
 
@@ -33,14 +119,6 @@ on-chain using the receipt_anchor memo pattern:
 [0x01][0x00][32 bytes — sha256(proof canonical fields)]
 ```
 
-This writes a 34-byte memo into a Solana transaction.  The transaction
-signature is stored in `proof.solana_anchor_tx`.
-
-Once anchored:
-- The proof is **immutable** — the Solana ledger is the source of truth.
-- Anyone can verify the work happened by checking the on-chain memo.
-- The timestamp is cryptographically bound to the slot in which the tx landed.
-
 Set the `SOLANA_DEPLOYER_KEYPAIR` environment variable (base58 private key)
 to submit real transactions.  Without it the minter runs in dry-run mode and
 returns a deterministic `DRY_RUN:<hash>` identifier — useful for testing.
@@ -49,40 +127,17 @@ returns a deterministic `DRY_RUN:<hash>` identifier — useful for testing.
 
 ### 3. Sell your WorkProof = sell your work history / credits
 
-`CreditMarket` lets nodes list their WorkProof objects for sale at a USDC
-price:
-
-```python
-listing_id = market.list_for_sale(proof, price_usdc=1.50)
-```
-
-Another node buys it:
-
-```python
-transferred_proof = market.buy(listing_id, buyer_node_id="node-xyz")
-```
-
-Ownership transfer works by re-binding the `node_id` field to the buyer and
-issuing a new signature that includes the buyer's identity.  The original
-`task_hash` and `result_hash` are preserved, so the provenance chain —
-*who originally did the work* — is never erased.
-
-**Credits are the proofs themselves.**  There is no separate token ledger:
-if you hold a valid signed WorkProof, you hold the credits.
+`CreditMarket` lets nodes list their WorkProof objects for sale at a USDC price.
+Ownership transfer preserves the original `result_hash` and `challenge_response`
+so the provenance chain is never erased.
 
 ---
 
 ### 4. Buyers use credits for priority routing in the mesh
 
-NULLA nodes accept WorkProofs as proof of contribution history.  A node that
-presents N credits (WorkProofs) earns:
-
-- Priority job dispatch — your tasks are routed first.
+- Priority job dispatch — tasks routed first.
 - Discounted compute — workers may offer lower rates to high-credit nodes.
-- Reputation score — the on-chain anchor history is public and queryable.
-
-The market price of a WorkProof is set by supply and demand: scarce compute
-tasks (high-demand models, rare hardware) produce more valuable proofs.
+- Reputation score — on-chain anchor history is public and queryable.
 
 ---
 
@@ -90,30 +145,38 @@ tasks (high-demand models, rare hardware) produce more valuable proofs.
 
 ```python
 from core.credits.proof_of_work import ProofOfWorkMinter, CreditMarket
+from core.credits.staking_guard import StakingGuard
+from core.credits.zk_verifier import ZKVerifier
 
+# --- Layer 2: stake before work ---
+guard = StakingGuard()
+guard.deposit("my-node", 1000)
+stake = guard.require_stake("task-001", "my-node", "expert")
+
+# --- Layer 1: challenge-response ---
 minter = ProofOfWorkMinter()
+issued = minter.issue_task_challenge("task-001", "issuer-A", credits_offered=200)
+nonce = minter.reveal_challenge("task-001")
 
-# 1. Node completes a task and earns a proof
-proof = minter.mint_proof(
+result_bytes = b"<model output>"
+proof = minter.mint_proof_with_challenge("task-001", result_bytes, nonce, "my-node", 200)
+valid = minter.verify_proof_with_challenge(proof, nonce, result_bytes)
+
+# --- Layer 3: ZK proof ---
+verifier = ZKVerifier()
+zk_proof = verifier.build_zk_work_proof(
     task_id="task-001",
-    result_bytes=b"<model output>",
-    node_id="my-node",
-    credits=10,
+    worker_id="my-node",
+    circuit_type="range_proof",
+    proof_bytes=bytes(256),   # replace with real Groth16 proof
+    public_inputs=["0xcommitment", "100", "0xnullifier"],
+    credits=200,
 )
+tx = verifier.verify_on_chain(zk_proof, rpc_url="https://api.mainnet-beta.solana.com")
 
-# 2. Verify locally
-assert minter.verify_proof(proof)
-
-# 3. Anchor on Solana (set SOLANA_DEPLOYER_KEYPAIR env var for real tx)
-tx = minter.anchor_proof(proof, rpc_url="https://api.mainnet-beta.solana.com")
-print(f"Anchored: {tx}")
-
-# 4. List for sale
-market = CreditMarket()
-listing_id = market.list_for_sale(proof, price_usdc=2.00)
-
-# 5. Buyer acquires the proof
-transferred = market.buy(listing_id, buyer_node_id="buyer-node")
+# --- Layer 2: release stake + earn credits ---
+result = guard.release_stake(stake, work_proof_valid=valid)
+print(f"Released: {result['released_null']} NULL, earned: {result['credits_earned']} credits")
 ```
 
 ---
@@ -122,6 +185,8 @@ transferred = market.buy(listing_id, buyer_node_id="buyer-node")
 
 ```
 core/credits/
-  proof_of_work.py   — WorkProof dataclass, ProofOfWorkMinter, CreditMarket
+  proof_of_work.py   — WorkProof, ProofOfWorkMinter (Layer 1), CreditMarket
+  staking_guard.py   — StakingGuard, StakeRecord, SlashEvidence (Layer 2)
+  zk_verifier.py     — ZKVerifier, ZKComputationProof, dark_bn254_gate bridge (Layer 3)
   README.md          — this file
 ```
