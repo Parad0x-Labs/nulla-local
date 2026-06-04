@@ -6,12 +6,12 @@ connect to each other without a central server.  One node broadcasts a task, pee
 on it, the winning node executes and submits a proof-of-work receipt, and the ledger
 settles in NULL credit units.
 """
-from core.mesh.task_router import LocalNodeRegistry, MeshTaskRouter, TaskBid
 from core.mesh.credit_ledger import CreditLedger
+from core.mesh.task_router import LocalNodeRegistry, MeshTaskRouter, TaskBid
 
 __all__ = [
-    "TaskBid",
-    "MeshTaskRouter",
-    "LocalNodeRegistry",
     "CreditLedger",
+    "LocalNodeRegistry",
+    "MeshTaskRouter",
+    "TaskBid",
 ]

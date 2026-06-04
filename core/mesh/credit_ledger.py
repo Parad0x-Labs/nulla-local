@@ -440,7 +440,7 @@ def _validate_proof_hash(h: str) -> None:
 
 def _spend_proof_hash(task_id: str, node_id: str, recipient: str, amount: float) -> str:
     """Deterministic proof hash for a spend event (no external result needed)."""
-    raw = f"{task_id}:{node_id}:{recipient}:{amount:.8f}:{time.time_ns()}".encode("utf-8")
+    raw = f"{task_id}:{node_id}:{recipient}:{amount:.8f}:{time.time_ns()}".encode()
     return hashlib.sha256(raw).hexdigest()
 
 

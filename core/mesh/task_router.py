@@ -105,7 +105,7 @@ class MeshTaskRouter:
 
     def __init__(
         self,
-        node_registry: "LocalNodeRegistry | None" = None,
+        node_registry: LocalNodeRegistry | None = None,
         *,
         bid_timeout_seconds: float = 4.0,
     ) -> None:
