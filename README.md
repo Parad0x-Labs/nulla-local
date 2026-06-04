@@ -224,7 +224,8 @@ If you are skeptical, use the shortest proof path instead of free-scanning the w
 2. [`docs/CONTROL_PLANE.md`](docs/CONTROL_PLANE.md)
 3. [`docs/PROOF_PATH.md`](docs/PROOF_PATH.md)
 4. [`docs/STATUS.md`](docs/STATUS.md)
-5. [`CONTRIBUTING.md`](CONTRIBUTING.md)
+5. [`docs/LOCAL_LLM_PROOF_DOSSIER.md`](docs/LOCAL_LLM_PROOF_DOSSIER.md)
+6. [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
 ## For Developers
 

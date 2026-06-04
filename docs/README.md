@@ -42,6 +42,7 @@ These docs are supposed to describe the current `main` trunk, not an older side-
 ## Operations And Proof
 
 - [LOCAL_ACCEPTANCE.md](LOCAL_ACCEPTANCE.md)
+- [LOCAL_LLM_PROOF_DOSSIER.md](LOCAL_LLM_PROOF_DOSSIER.md)
 - [LLM_ACCEPTANCE_REPORT.md](LLM_ACCEPTANCE_REPORT.md)
 - [PUBLIC_LAUNCH_READINESS.md](PUBLIC_LAUNCH_READINESS.md)
 - [OVERNIGHT_SOAK_RUNBOOK.md](OVERNIGHT_SOAK_RUNBOOK.md)
