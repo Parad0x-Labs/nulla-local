@@ -8,11 +8,16 @@ Payments: NULL credits (on-chain) or USDC via x402 payment rail.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import subprocess
 import time
 import uuid
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from core.x402.client import X402Config, X402Receipt
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -38,6 +43,8 @@ class RentalSession:
     started_at: float                # unix timestamp
     tokens_generated: int = 0
     active: bool = True
+    x402_receipt: Optional["X402Receipt"] = field(default=None, repr=False)
+    """Set when the session was opened with a live x402 payment."""
 
 
 @dataclass
@@ -50,9 +57,25 @@ class WorkProof:
     total_cost: float
     currency: str
     ended_at: float
-    # In production: sign this struct with the node's Ed25519 key and
-    # submit to the NULL on-chain Proof-of-Right (POR) program.
+    # When backed by a real x402 receipt:
+    #   signature = "x402:<receipt_hash>" — submit to receipt_anchor (Solana SPL Memo).
+    # Without x402:
+    #   signature = "stub-sig-<uuid>" (local only, not on-chain).
     signature: Optional[str] = None
+    receipt_hash: Optional[str] = None   # x402 receipt hash for on-chain anchoring
+
+    def canonical_hash(self) -> str:
+        """SHA-256 over the core proof fields — stable identifier for anchoring."""
+        payload = json.dumps({
+            "session_id":       self.session_id,
+            "node_id":          self.node_id,
+            "tokens_generated": self.tokens_generated,
+            "total_cost":       round(self.total_cost, 8),
+            "currency":         self.currency,
+            "ended_at":         round(self.ended_at, 3),
+            "receipt_hash":     self.receipt_hash or "",
+        }, sort_keys=True)
+        return hashlib.sha256(payload.encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -221,12 +244,18 @@ class ComputeRentalMarket:
     payments settled via the x402 NULL payment rail.
     """
 
-    def __init__(self, node_id: Optional[str] = None, currency: str = "NULL"):
+    def __init__(
+        self,
+        node_id: Optional[str] = None,
+        currency: str = "NULL",
+        x402_config: "Optional[X402Config]" = None,
+    ):
         self.node_id: str = node_id or f"node-{uuid.uuid4().hex[:8]}"
         self.currency: str = currency          # "NULL" or "USDC"
         self._listings: dict[str, ComputeListing] = {}
         self._sessions: dict[str, RentalSession] = {}
         self._probe = HardwareProbe()
+        self._x402_config = x402_config        # None → stub/local-only mode
 
     # ------------------------------------------------------------------
     # Provider side
@@ -330,8 +359,13 @@ class ComputeRentalMarket:
         """
         Open a rental session against a listing.
 
-        In production this locks NULL collateral on-chain via x402 and
-        returns a signed capability token the renter presents to the node.
+        If self._x402_config is set, an x402 USDC payment is made upfront
+        for the estimated session cost before the session is opened. The
+        receipt is attached to the session and included in the WorkProof on
+        release.
+
+        When x402_config is None (default), the method behaves exactly as
+        before — no payment is attempted.
 
         Parameters
         ----------
@@ -345,8 +379,11 @@ class ComputeRentalMarket:
 
         Raises
         ------
-        ValueError if duration is below the listing minimum or the
-        listing is not available.
+        ValueError
+            If duration is below the listing minimum or the listing is not
+            available.
+        X402PaymentError  (from core.x402.client)
+            If the x402 payment fails (devnet/mainnet modes only).
         """
         if not listing.available:
             raise ValueError(f"Listing {listing.node_id} is not available.")
@@ -356,15 +393,58 @@ class ComputeRentalMarket:
                 f"minimum {listing.min_rental_minutes} for this listing."
             )
 
+        session_id = f"sess-{uuid.uuid4().hex[:12]}"
+
+        # ── x402 payment (skipped when no config / stub mode) ────────────
+        receipt = None
+        if self._x402_config is not None and listing.currency == "USDC":
+            receipt = self._pay_x402(listing, duration_minutes, session_id)
+
         session = RentalSession(
-            session_id=f"sess-{uuid.uuid4().hex[:12]}",
+            session_id=session_id,
             listing=listing,
             duration_minutes=duration_minutes,
             started_at=time.time(),
+            x402_receipt=receipt,
         )
         listing.available = False  # mark as occupied (single-tenant stub)
         self._sessions[session.session_id] = session
         return session
+
+    def _pay_x402(
+        self,
+        listing: ComputeListing,
+        duration_minutes: int,
+        session_id: str,
+    ) -> "X402Receipt":
+        """
+        Calculate estimated cost and execute x402 USDC payment.
+
+        The payment covers the estimated token cost for the full session.
+        Actual cost is reconciled at release() — any credit/debit is
+        recorded in the WorkProof for future on-chain settlement.
+        """
+        from core.x402.client import X402Client
+
+        # Estimate session cost in USDC
+        estimated_tokens = listing.tokens_per_second * duration_minutes * 60
+        if listing.currency == "USDC":
+            cost_usdc = (estimated_tokens / 1000) * listing.price_per_1k_tokens
+        else:
+            # NULL-priced listing: convert via the 1 USDC = NULL_PER_USDC rate
+            cost_usdc = (estimated_tokens / 1000) * (
+                listing.price_per_1k_tokens / NULL_PER_USDC
+            )
+
+        # Clamp to a minimum of 0.000001 USDC (1 micro-USDC) to avoid zero payments
+        cost_usdc = max(round(cost_usdc, 6), 0.000001)
+
+        client = X402Client(self._x402_config)
+        return client.pay(
+            amount_usdc=cost_usdc,
+            recipient_wallet=listing.node_id,
+            session_id=session_id,
+        )
 
     def release(self, session: RentalSession) -> WorkProof:
         """
@@ -401,6 +481,17 @@ class ComputeRentalMarket:
             (tokens / 1000) * session.listing.price_per_1k_tokens, 8
         )
 
+        receipt = session.x402_receipt
+        receipt_hash = receipt.receipt_hash if receipt else None
+
+        # Signature field:
+        #   x402 backed → "x402:<receipt_hash>" (submit to receipt_anchor)
+        #   stub / NULL  → "stub-sig-<uuid>"    (local only)
+        if receipt_hash:
+            signature = f"x402:{receipt_hash}"
+        else:
+            signature = f"stub-sig-{uuid.uuid4().hex[:16]}"
+
         proof = WorkProof(
             session_id=session.session_id,
             node_id=session.listing.node_id,
@@ -409,8 +500,8 @@ class ComputeRentalMarket:
             total_cost=total_cost,
             currency=session.listing.currency,
             ended_at=ended_at,
-            # TODO: replace with node's Ed25519 signature over canonical hash
-            signature=f"stub-sig-{uuid.uuid4().hex[:16]}",
+            signature=signature,
+            receipt_hash=receipt_hash,
         )
         return proof
 
