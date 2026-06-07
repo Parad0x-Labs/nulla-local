@@ -43,7 +43,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
-
 # ---------------------------------------------------------------------------
 # USDC constants
 # ---------------------------------------------------------------------------
@@ -325,16 +324,17 @@ class X402Client:
                 "keypair_path is required for DEVNET/MAINNET mode"
             )
 
+        from solana.rpc.api import Client as SolanaClient  # type: ignore
+        from solana.transaction import Transaction  # type: ignore
         from solders.keypair import Keypair as SoldersKeypair  # type: ignore
-        from solders.pubkey import Pubkey                       # type: ignore
-        from solana.rpc.api import Client as SolanaClient      # type: ignore
-        from solana.transaction import Transaction              # type: ignore
-        from spl.token.instructions import (                   # type: ignore
-            transfer as spl_transfer,
+        from solders.pubkey import Pubkey  # type: ignore
+        from spl.token.instructions import (
             TransferParams,
             get_associated_token_address,
         )
-        from solders.system_program import ID as SYS_PROGRAM_ID  # type: ignore
+        from spl.token.instructions import (  # type: ignore
+            transfer as spl_transfer,
+        )
 
         with open(self.config.keypair_path) as f:
             kp_data = _json.load(f)

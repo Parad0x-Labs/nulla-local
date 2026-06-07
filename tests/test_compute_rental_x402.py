@@ -18,13 +18,15 @@ All tests run without a Solana wallet or network connection.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import time
 import uuid
 
 import pytest
 
+from core.compute.rental_market import (
+    ComputeListing,
+    ComputeRentalMarket,
+)
 from core.x402.client import (
     X402Client,
     X402Config,
@@ -33,14 +35,6 @@ from core.x402.client import (
     X402Quote,
     X402Receipt,
 )
-from core.compute.rental_market import (
-    ComputeListing,
-    ComputeRentalMarket,
-    HardwareProbe,
-    WorkProof,
-    NULL_PER_USDC,
-)
-
 
 # ────────────────────────────────────────────────────────────────────────────
 # Helpers

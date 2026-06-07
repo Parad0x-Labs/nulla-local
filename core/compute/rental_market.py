@@ -43,7 +43,7 @@ class RentalSession:
     started_at: float                # unix timestamp
     tokens_generated: int = 0
     active: bool = True
-    x402_receipt: Optional["X402Receipt"] = field(default=None, repr=False)
+    x402_receipt: Optional[X402Receipt] = field(default=None, repr=False)
     """Set when the session was opened with a live x402 payment."""
 
 
@@ -248,7 +248,7 @@ class ComputeRentalMarket:
         self,
         node_id: Optional[str] = None,
         currency: str = "NULL",
-        x402_config: "Optional[X402Config]" = None,
+        x402_config: Optional[X402Config] = None,
     ):
         self.node_id: str = node_id or f"node-{uuid.uuid4().hex[:8]}"
         self.currency: str = currency          # "NULL" or "USDC"
@@ -416,7 +416,7 @@ class ComputeRentalMarket:
         listing: ComputeListing,
         duration_minutes: int,
         session_id: str,
-    ) -> "X402Receipt":
+    ) -> X402Receipt:
         """
         Calculate estimated cost and execute x402 USDC payment.
 
