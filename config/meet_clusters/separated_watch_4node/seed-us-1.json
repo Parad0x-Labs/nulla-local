@@ -6,7 +6,7 @@
   "priority": 10,
   "bind_host": "0.0.0.0",
   "bind_port": 8766,
-  "auth_token": "2e4ac333c8be3c94dfeffec45df65fc30f879ad223ab222ee557645335dc5d47",
+  "auth_token": "set-via-env-before-startup",
   "allow_insecure_public_http": true,
   "sync_interval_seconds": 15,
   "service_config": {
@@ -26,7 +26,7 @@
     "local_region": "us",
     "cross_region_summary_only": true,
     "cross_region_force_snapshot": true,
-    "auth_token": "set-strong-meet-token-before-startup"
+    "auth_token": "set-via-env-before-startup"
   },
   "seed_peers": [
     {

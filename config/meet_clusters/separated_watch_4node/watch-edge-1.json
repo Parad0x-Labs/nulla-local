@@ -4,7 +4,7 @@
   "bind_host": "0.0.0.0",
   "bind_port": 8788,
   "request_timeout_seconds": 6,
-  "auth_token": "set-strong-meet-token-before-startup",
+  "auth_token": "set-via-env-before-startup",
   "upstream_base_urls": [
     "https://meet-eu.parad0xlabs.com",
     "https://meet-us.parad0xlabs.com",
