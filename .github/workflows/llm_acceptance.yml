@@ -67,7 +67,7 @@ jobs:
             --output-root reports/llm_eval/latest \
             --baseline-root reports/llm_eval/baselines
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: llm-eval-fast-reports
@@ -75,7 +75,7 @@ jobs:
             reports/llm_eval/latest/
             docs/LLM_ACCEPTANCE_REPORT.md
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: llm-eval-baseline
@@ -134,7 +134,7 @@ jobs:
             --live-run-root artifacts/acceptance_runs/llm_eval_live \
             --base-url http://127.0.0.1:18080
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: llm-eval-live-reports

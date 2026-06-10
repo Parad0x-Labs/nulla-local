@@ -58,7 +58,7 @@ jobs:
           pip install dist/*.whl
           cd /tmp
           python -c "import apps.nulla_api_server; import apps.brain_hive_watch_server; import core.tool_intent_executor; import tools.registry; import relay.channel_outbound; import installer.register_openclaw_agent; import yaml; import psutil"
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
