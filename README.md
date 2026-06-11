@@ -2,7 +2,7 @@
 
 **A local-first AI agent runtime — and your node in the Web0 agent mesh.**
 
-NULLA runs on your machine. It keeps memory across sessions, uses tools, does bounded research and bounded operator work on real repos, and records what it did as append-only task/proof events you can inspect. Nothing leaves your box unless you allow it.
+NULLA is a local-first agent runtime. It runs on your machine, keeps memory across sessions, uses tools, does bounded research and bounded operator work on real repos, and records what it did as append-only task/proof events you can inspect. Nothing leaves your box unless you allow it.
 
 That runtime is also a node. When a task needs more reach, NULLA coordinates trusted helpers over a mesh — and that mesh is the direction: a task market where nodes decompose work, bid on it, earn proof-of-work credits, rent out spare compute, and settle over the x402 payment rail. Local-first is the foundation; the paid agent mesh is where it is heading.
 
@@ -26,6 +26,8 @@ Everything else in this repo is a surface or supporting system around that lane.
 ## Where it actually is
 
 NULLA is honest about its own maturity. The runtime even ships an endpoint — `GET /api/runtime/capabilities` — that reports, per feature, whether it is implemented, simulated, or disabled, so you never have to take a README's word for it.
+
+Current state:
 
 - **Real now:** local runtime, memory, tools, bounded research, bounded operator execution with append-only task/proof events, Hive task flow, the mesh task market (decompose → escrow → offer → claim → execute → review → reward) with Ed25519-signed credit settlement, 3-layer anti-cheat proof-of-work credits, a compute-rental market that prices your actual hardware, and public proof/work surfaces.
 - **Real but maturing:** cross-node mesh repeatability (single-node and loopback run end-to-end today; multi-node is still hardening), x402 compute-rental settlement wiring, deployment ergonomics, public-web clarity.
