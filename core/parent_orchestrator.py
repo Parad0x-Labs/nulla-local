@@ -9,6 +9,7 @@ from core.capacity_predictor import predict_local_override_necessity
 from core.consensus_validator import decide_consensus_for_task
 from core.finalizer import finalize_parent_response
 from core.local_worker_pool import resolve_local_worker_capacity
+from core.task_capsule import resign_task_capsule
 from core.task_decomposer import broadcast_decomposed_subtasks, decompose_task, should_decompose
 from core.task_reassembler import check_and_reassemble as reassemble_parent_task
 from core.task_state_machine import transition
@@ -294,8 +295,11 @@ def orchestrate_parent_task(
 
             for sub in decomposed:
                 sub.offer.reward_hint.points = 0
-                sub.offer.priority = "background"  # type: ignore
+                sub.offer.priority = "background"
                 sub.capsule.learning_allowed = True
+                # The capsule was hashed + signed at build time; mutating it
+                # invalidates both, so helpers would reject the offer.
+                sub.capsule = resign_task_capsule(sub.capsule)
                 sub.offer.capsule = sub.capsule.model_dump(mode="json")
 
     sent = broadcast_decomposed_subtasks(

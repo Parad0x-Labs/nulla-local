@@ -61,7 +61,7 @@ class TaskOffer(BaseModel):
     summary: str = Field(max_length=512)
     required_capabilities: list[str] = Field(max_length=16)
     max_helpers: int = Field(ge=1, le=10)
-    priority: Literal["low", "normal", "high"] = "normal"
+    priority: Literal["background", "low", "normal", "high"] = "normal"
     reward_hint: RewardHint = Field(default_factory=RewardHint)
     capsule: dict[str, Any]
     deadline_ts: datetime

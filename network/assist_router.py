@@ -141,8 +141,7 @@ def _nonce() -> str:
 
 
 def _extract_parent_task_ref(capsule: TaskCapsule) -> str | None:
-    ctx = capsule.sanitized_context or {}
-    constraints = ctx.get("known_constraints") or []
+    constraints = capsule.sanitized_context.known_constraints or []
     for item in constraints:
         if not isinstance(item, str):
             continue
@@ -153,8 +152,7 @@ def _extract_parent_task_ref(capsule: TaskCapsule) -> str | None:
 
 
 def _extract_verification_of_task_id(capsule: TaskCapsule) -> str | None:
-    ctx = capsule.sanitized_context or {}
-    constraints = ctx.get("known_constraints") or []
+    constraints = capsule.sanitized_context.known_constraints or []
     for item in constraints:
         if not isinstance(item, str):
             continue

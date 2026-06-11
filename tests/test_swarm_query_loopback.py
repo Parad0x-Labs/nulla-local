@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+from network import rate_limiter
+from network.assist_router import RouteResult
+from network.signer import get_local_peer_id as local_peer_id
 from retrieval.swarm_query import broadcast_task_offer, request_specific_shard
+from storage.db import get_connection
+from storage.migrations import run_migrations
+from tests.task_offer_fixtures import build_signed_task_offer_message
 
 
 class _FakeOrderBook:
@@ -11,20 +17,40 @@ class _FakeOrderBook:
         self.pushed.append((raw_bytes, source_addr, offer_dict))
 
 
-def test_broadcast_task_offer_enqueues_local_loopback_when_no_helpers(monkeypatch) -> None:
-    fake_book = _FakeOrderBook()
+def _clear_task_tables() -> None:
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM task_assignments")
+        conn.execute("DELETE FROM task_claims")
+        conn.execute("DELETE FROM task_capsules")
+        conn.execute("DELETE FROM task_offers")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _patch_loopback_env(monkeypatch, fake_book: _FakeOrderBook) -> None:
     monkeypatch.setattr("retrieval.swarm_query.get_best_helpers", lambda **kwargs: [])
     monkeypatch.setattr("retrieval.swarm_query.endpoint_for_peer", lambda peer_id: ("127.0.0.1", 49152))
     monkeypatch.setattr("retrieval.swarm_query.send_message", lambda *args, **kwargs: False)
     monkeypatch.setattr("retrieval.swarm_query.audit_logger.log", lambda *args, **kwargs: None)
-    monkeypatch.setattr("retrieval.swarm_query.policy_engine.get", lambda path, default=None: True if path == "orchestration.local_loopback_offer_on_no_helpers" else default)
+    monkeypatch.setattr(
+        "retrieval.swarm_query.policy_engine.get",
+        lambda path, default=None: True if path == "orchestration.local_loopback_offer_on_no_helpers" else default,
+    )
     monkeypatch.setattr("core.order_book.global_order_book", fake_book)
 
+
+def test_loopback_offer_is_stored_locally_before_order_book_push(monkeypatch) -> None:
+    run_migrations()
+    _clear_task_tables()
+    rate_limiter.reset_peer(local_peer_id())
+    fake_book = _FakeOrderBook()
+    _patch_loopback_env(monkeypatch, fake_book)
+
+    _raw, offer, capsule = build_signed_task_offer_message()
     sent = broadcast_task_offer(
-        offer_payload={
-            "task_id": "task-loopback-1",
-            "reward_hint": {"points": 5},
-        },
+        offer_payload=offer.model_dump(mode="json"),
         required_capabilities=["research"],
         limit=3,
     )
@@ -32,6 +58,42 @@ def test_broadcast_task_offer_enqueues_local_loopback_when_no_helpers(monkeypatc
     assert sent == 1
     assert len(fake_book.pushed) == 1
     assert fake_book.pushed[0][1] == ("127.0.0.1", 49152)
+
+    # The self TASK_CLAIM has a FOREIGN KEY on task_offers; the loopback
+    # path must persist the offer + capsule, not just enqueue raw bytes.
+    conn = get_connection()
+    try:
+        offer_row = conn.execute(
+            "SELECT * FROM task_offers WHERE task_id = ?", (offer.task_id,)
+        ).fetchone()
+        capsule_row = conn.execute(
+            "SELECT * FROM task_capsules WHERE capsule_id = ?", (capsule.capsule_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert offer_row is not None
+    assert capsule_row is not None
+
+
+def test_loopback_skips_order_book_when_local_ingest_fails(monkeypatch) -> None:
+    run_migrations()
+    rate_limiter.reset_peer(local_peer_id())
+    fake_book = _FakeOrderBook()
+    _patch_loopback_env(monkeypatch, fake_book)
+    monkeypatch.setattr(
+        "network.assist_router.handle_incoming_assist_message",
+        lambda **kwargs: RouteResult(False, "Envelope rejected: test", []),
+    )
+
+    _raw, offer, _capsule = build_signed_task_offer_message()
+    sent = broadcast_task_offer(
+        offer_payload=offer.model_dump(mode="json"),
+        required_capabilities=["research"],
+        limit=3,
+    )
+
+    assert sent == 0
+    assert fake_book.pushed == []
 
 
 def test_request_specific_shard_falls_back_to_second_endpoint(monkeypatch) -> None:

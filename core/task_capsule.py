@@ -206,6 +206,18 @@ def build_task_capsule(
     return TaskCapsule.model_validate(base)
 
 
+def resign_task_capsule(capsule: TaskCapsule) -> TaskCapsule:
+    """
+    Recompute capsule_hash and signature after a locally-owned capsule was
+    mutated. Without this, helpers reject the capsule with a hash mismatch.
+    Only valid on the node that owns the parent signing key.
+    """
+    base = capsule.model_dump()
+    base["capsule_hash"] = compute_capsule_hash(base)
+    base["signature"] = signer.sign(canonical_unsigned_bytes(base))
+    return TaskCapsule.model_validate(base)
+
+
 def verify_task_capsule(capsule: dict[str, Any]) -> TaskCapsule:
     obj = TaskCapsule.model_validate(capsule)
     raw = obj.model_dump()

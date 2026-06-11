@@ -265,6 +265,19 @@ def peek_message_type(raw_bytes: bytes) -> str | None:
         return None
 
 
+def peek_sender_peer_id(raw_bytes: bytes) -> str | None:
+    """
+    Cheap, non-validating parser used only for routing.
+    It does NOT touch nonce cache or signatures.
+    """
+    try:
+        raw_obj = json.loads(raw_bytes.decode("utf-8"))
+        sender = raw_obj.get("sender_peer_id")
+        return str(sender) if isinstance(sender, str) else None
+    except Exception:
+        return None
+
+
 class Protocol:
     """
     Class interface wrapping standalone functions to maintain compatibility with Node Stub.
