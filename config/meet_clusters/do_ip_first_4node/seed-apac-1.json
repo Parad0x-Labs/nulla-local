@@ -1,6 +1,6 @@
 {
   "node_id": "seed-apac-1",
-  "public_base_url": "https://159.65.136.157:8766",
+  "public_base_url": "https://203.0.113.13:8766",
   "region": "apac",
   "role": "seed",
   "priority": 10,

@@ -36,7 +36,7 @@ class BrainHiveWatchConfigLoaderTests(unittest.TestCase):
         )
         self.assertEqual(config.host, "0.0.0.0")
         self.assertEqual(config.port, 8788)
-        self.assertIn("https://104.248.81.71:8766", config.upstream_base_urls)
+        self.assertIn("https://203.0.113.11:8766", config.upstream_base_urls)
         self.assertTrue(config.tls_insecure_skip_verify)
         self.assertIsNone(config.tls_certfile)
         self.assertIsNone(config.tls_keyfile)

@@ -36,7 +36,7 @@ class MeetAndGreetConfigLoaderTests(unittest.TestCase):
         self.assertEqual(config.node_id, "seed-eu-1")
         self.assertEqual(config.region, "eu")
         self.assertEqual(config.bind_port, 8766)
-        self.assertEqual(config.public_base_url, "https://104.248.81.71:8766")
+        self.assertEqual(config.public_base_url, "https://203.0.113.11:8766")
         self.assertEqual(config.service_config.local_region, "eu")
         self.assertTrue(bool(str(config.replication_config.auth_token or "").strip()))
         self.assertTrue(config.replication_config.tls_insecure_skip_verify)

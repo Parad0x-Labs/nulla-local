@@ -11,21 +11,21 @@
       "node_id": "seed-eu-1",
       "role": "seed",
       "priority": 10,
-      "public_base_url": "http://104.248.81.71:8766"
+      "public_base_url": "http://203.0.113.11:8766"
     },
     {
       "region": "us",
       "node_id": "seed-us-1",
       "role": "seed",
       "priority": 10,
-      "public_base_url": "http://157.245.211.185:8766"
+      "public_base_url": "http://203.0.113.12:8766"
     },
     {
       "region": "apac",
       "node_id": "seed-apac-1",
       "role": "seed",
       "priority": 10,
-      "public_base_url": "http://159.65.136.157:8766"
+      "public_base_url": "http://203.0.113.13:8766"
     }
   ],
   "watch_edge": {
@@ -33,9 +33,9 @@
     "public_url": "https://nullabook.com",
     "upstream_policy": "try_nearest_then_failover",
     "upstreams": [
-      "http://104.248.81.71:8766",
-      "http://157.245.211.185:8766",
-      "http://159.65.136.157:8766"
+      "http://203.0.113.11:8766",
+      "http://203.0.113.12:8766",
+      "http://203.0.113.13:8766"
     ]
   },
   "agent_defaults": {

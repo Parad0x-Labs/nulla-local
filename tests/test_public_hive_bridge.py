@@ -469,9 +469,9 @@ def test_public_hive_bridge_ignores_discovered_auth_token_from_local_watch_confi
 
 def test_public_hive_bridge_ignores_discovered_region_tokens_for_selected_watch_urls() -> None:
     do_ip_watch_urls = [
-        "https://104.248.81.71:8766",
-        "https://157.245.211.185:8766",
-        "https://159.65.136.157:8766",
+        "https://203.0.113.11:8766",
+        "https://203.0.113.12:8766",
+        "https://203.0.113.13:8766",
     ]
     separated_watch_urls = [
         "https://meet-eu.parad0xlabs.com",
@@ -700,11 +700,11 @@ def test_ensure_public_hive_auth_hydrates_target_from_discovered_local_cluster_w
         (cluster_dir / "watch-edge-1.json").write_text(
             json.dumps(
                 {
-                    "public_base_url": "https://161.35.145.74:8788",
+                    "public_base_url": "https://203.0.113.14:8788",
                     "upstream_base_urls": [
-                        "https://104.248.81.71:8766",
-                        "https://157.245.211.185:8766",
-                        "https://159.65.136.157:8766",
+                        "https://203.0.113.11:8766",
+                        "https://203.0.113.12:8766",
+                        "https://203.0.113.13:8766",
                     ],
                     "tls_insecure_skip_verify": True,
                 }
@@ -714,7 +714,7 @@ def test_ensure_public_hive_auth_hydrates_target_from_discovered_local_cluster_w
         (cluster_dir / "seed-eu-1.json").write_text(
             json.dumps(
                 {
-                    "public_base_url": "https://104.248.81.71:8766",
+                    "public_base_url": "https://203.0.113.11:8766",
                     "auth_token": "eu-token",
                 }
             ),
@@ -723,7 +723,7 @@ def test_ensure_public_hive_auth_hydrates_target_from_discovered_local_cluster_w
         (cluster_dir / "seed-us-1.json").write_text(
             json.dumps(
                 {
-                    "public_base_url": "https://157.245.211.185:8766",
+                    "public_base_url": "https://203.0.113.12:8766",
                     "auth_token": "us-token",
                 }
             ),
@@ -732,7 +732,7 @@ def test_ensure_public_hive_auth_hydrates_target_from_discovered_local_cluster_w
         (cluster_dir / "seed-apac-1.json").write_text(
             json.dumps(
                 {
-                    "public_base_url": "https://159.65.136.157:8766",
+                    "public_base_url": "https://203.0.113.13:8766",
                     "auth_token": "apac-token",
                 }
             ),
@@ -750,14 +750,14 @@ def test_ensure_public_hive_auth_hydrates_target_from_discovered_local_cluster_w
     assert result["ok"] is True
     assert result["status"] == "hydrated_from_local_cluster"
     assert payload["meet_seed_urls"] == [
-        "https://104.248.81.71:8766",
-        "https://157.245.211.185:8766",
-        "https://159.65.136.157:8766",
+        "https://203.0.113.11:8766",
+        "https://203.0.113.12:8766",
+        "https://203.0.113.13:8766",
     ]
     assert payload["auth_tokens_by_base_url"] == {
-        "https://104.248.81.71:8766": "eu-token",
-        "https://157.245.211.185:8766": "us-token",
-        "https://159.65.136.157:8766": "apac-token",
+        "https://203.0.113.11:8766": "eu-token",
+        "https://203.0.113.12:8766": "us-token",
+        "https://203.0.113.13:8766": "apac-token",
     }
     assert payload["tls_insecure_skip_verify"] is True
     find_ssh_key.assert_not_called()

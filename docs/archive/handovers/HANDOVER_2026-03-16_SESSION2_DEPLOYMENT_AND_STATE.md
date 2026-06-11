@@ -21,10 +21,10 @@ Status: **definitive handover -- supersedes ALL previous handovers for deploymen
 
 | Role | IP | SSH User | Config File | NULLA_HOME | PID (current) |
 |------|----|----------|-------------|------------|----------------|
-| **EU Meet** | 104.248.81.71 | root | seed-eu-1.json | /var/lib/nulla/meet-eu-1 | 337823 |
-| **US Meet** | 157.245.211.185 | root | seed-us-1.json | /var/lib/nulla/meet-us-1 | 305369 |
-| **APAC Meet** | 159.65.136.157 | root | seed-apac-1.json | /var/lib/nulla/meet-apac-1 | 325216 |
-| **Watch** | 161.35.145.74 | root | watch-edge-1.json | /var/lib/nulla/watch-edge-1 | 227099 |
+| **EU Meet** | 203.0.113.11 | root | seed-eu-1.json | /var/lib/nulla/meet-eu-1 | 337823 |
+| **US Meet** | 203.0.113.12 | root | seed-us-1.json | /var/lib/nulla/meet-us-1 | 305369 |
+| **APAC Meet** | 203.0.113.13 | root | seed-apac-1.json | /var/lib/nulla/meet-apac-1 | 325216 |
+| **Watch** | 203.0.113.14 | root | watch-edge-1.json | /var/lib/nulla/watch-edge-1 | 227099 |
 
 ### SSH Key
 
@@ -43,7 +43,7 @@ The key is also discovered by `core/public_hive_bridge.py` via `find_public_hive
 
 ### DNS
 
-`nullabook.com` -> `161.35.145.74` (Cloudflare DNS-only, gray cloud, NOT proxied)
+`nullabook.com` -> `203.0.113.14` (Cloudflare DNS-only, gray cloud, NOT proxied)
 
 **WARNING**: DO NOT enable Cloudflare proxy (orange cloud). It breaks the site.
 
@@ -65,14 +65,14 @@ Watch Server (port 8788, self-signed TLS)
     |
     v (proxies to)
 3x Meet Nodes (port 8766, mTLS)
-    |-- EU:   104.248.81.71
-    |-- US:   157.245.211.185
-    |-- APAC: 159.65.136.157
+    |-- EU:   203.0.113.11
+    |-- US:   203.0.113.12
+    |-- APAC: 203.0.113.13
 ```
 
 ### Caddy Config
 
-File: `/etc/caddy/Caddyfile` on watch node (161.35.145.74)
+File: `/etc/caddy/Caddyfile` on watch node (203.0.113.14)
 
 ```
 nullabook.com, www.nullabook.com {
@@ -98,7 +98,7 @@ SSH_KEY="$HOME/Desktop/ssh/nulla-ssh/nulla_do_ed25519_v2"
 SRC="$HOME/Desktop/Decentralized_NULLA"
 
 # Sync a file to all nodes
-for IP in 104.248.81.71 157.245.211.185 159.65.136.157 161.35.145.74; do
+for IP in 203.0.113.11 203.0.113.12 203.0.113.13 203.0.113.14; do
   rsync -az -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
     "$SRC/core/brain_hive_dashboard.py" \
     "root@${IP}:/opt/Decentralized_NULLA/core/brain_hive_dashboard.py"
@@ -111,7 +111,7 @@ done
 SSH_KEY="$HOME/Desktop/ssh/nulla-ssh/nulla_do_ed25519_v2"
 SRC="$HOME/Desktop/Decentralized_NULLA/"
 
-for IP in 104.248.81.71 157.245.211.185 159.65.136.157 161.35.145.74; do
+for IP in 203.0.113.11 203.0.113.12 203.0.113.13 203.0.113.14; do
   rsync -az --delete \
     --exclude '.venv' \
     --exclude '.nulla_local' \
@@ -136,21 +136,21 @@ Each meet node MUST be started with `NULLA_HOME` pointing to its dedicated direc
 SSH_KEY="$HOME/Desktop/ssh/nulla-ssh/nulla_do_ed25519_v2"
 
 # EU
-ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no root@104.248.81.71 \
+ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no root@203.0.113.11 \
   "pkill -f 'seed-eu-1' || true; sleep 2; cd /opt/Decentralized_NULLA; \
    nohup env NULLA_HOME=/var/lib/nulla/meet-eu-1 .venv/bin/python \
    ops/run_meet_node_from_config.py --config config/meet_clusters/do_ip_first_4node/seed-eu-1.json \
    > /var/log/nulla/meet-eu-1.log 2>&1 </dev/null &"
 
 # US
-ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no root@157.245.211.185 \
+ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no root@203.0.113.12 \
   "pkill -f 'seed-us-1' || true; sleep 2; cd /opt/Decentralized_NULLA; \
    nohup env NULLA_HOME=/var/lib/nulla/meet-us-1 .venv/bin/python \
    ops/run_meet_node_from_config.py --config config/meet_clusters/do_ip_first_4node/seed-us-1.json \
    > /var/log/nulla/meet-us-1.log 2>&1 </dev/null &"
 
 # APAC
-ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no root@159.65.136.157 \
+ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no root@203.0.113.13 \
   "pkill -f 'seed-apac-1' || true; sleep 2; cd /opt/Decentralized_NULLA; \
    nohup env NULLA_HOME=/var/lib/nulla/meet-apac-1 .venv/bin/python \
    ops/run_meet_node_from_config.py --config config/meet_clusters/do_ip_first_4node/seed-apac-1.json \
@@ -160,7 +160,7 @@ ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no root@159.65.136.157 \
 ### Restart Watch Node
 
 ```bash
-ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no root@161.35.145.74 \
+ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no root@203.0.113.14 \
   "pkill -f 'run_brain_hive_watch' || true; sleep 2; cd /opt/Decentralized_NULLA; \
    nohup env NULLA_HOME=/var/lib/nulla/watch-edge-1 .venv/bin/python \
    ops/run_brain_hive_watch_from_config.py \

@@ -11,10 +11,12 @@ fi
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TLS_DIR_LOCAL="$(mktemp -d /tmp/nulla-ipfirst-tls.XXXXXX)"
-EU_IP="104.248.81.71"
-US_IP="157.245.211.185"
-APAC_IP="159.65.136.157"
-WATCH_IP="161.35.145.74"
+# Example IPs (RFC 5737 TEST-NET-3, non-routable). Replace with your real node
+# IPs before running — or export EU_IP/US_IP/APAC_IP/WATCH_IP in the environment.
+EU_IP="${EU_IP:-203.0.113.11}"
+US_IP="${US_IP:-203.0.113.12}"
+APAC_IP="${APAC_IP:-203.0.113.13}"
+WATCH_IP="${WATCH_IP:-203.0.113.14}"
 NODES=("$EU_IP" "$US_IP" "$APAC_IP" "$WATCH_IP")
 MESH_PSK_B64="${NULLA_MESH_PSK_B64:-}"
 REMOTE_MESH_ENV=""

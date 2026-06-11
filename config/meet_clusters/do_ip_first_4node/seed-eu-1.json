@@ -1,6 +1,6 @@
 {
   "node_id": "seed-eu-1",
-  "public_base_url": "https://104.248.81.71:8766",
+  "public_base_url": "https://203.0.113.11:8766",
   "region": "eu",
   "role": "seed",
   "priority": 10,

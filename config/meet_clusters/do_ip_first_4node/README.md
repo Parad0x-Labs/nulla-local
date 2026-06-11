@@ -6,6 +6,8 @@ This pack is the fastest low-cost way to run closed production-style testing on 
 
 It now expects IP-based HTTPS with a private closed-test CA, not raw public HTTP.
 
+> **Note:** the configs in this pack ship with **example IPs** (`203.0.113.x`, RFC 5737 TEST-NET-3, non-routable). Replace them with your real node IPs before deploying, or export `EU_IP`/`US_IP`/`APAC_IP`/`WATCH_IP` for `do_ip_first_bootstrap.sh`. Auth tokens are env placeholders (`set-via-env-before-startup`) injected at deploy time from `CLUSTER_MEET_TOKEN`.
+
 It uses:
 
 - 3 meet seed nodes (`eu`, `us`, `apac`)

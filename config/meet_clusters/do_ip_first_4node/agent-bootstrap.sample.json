@@ -1,9 +1,9 @@
 {
   "home_region": "eu",
   "meet_seed_urls": [
-    "https://104.248.81.71:8766",
-    "https://157.245.211.185:8766",
-    "https://159.65.136.157:8766"
+    "https://203.0.113.11:8766",
+    "https://203.0.113.12:8766",
+    "https://203.0.113.13:8766"
   ],
   "tls_insecure_skip_verify": true,
   "prefer_home_region_first": true,

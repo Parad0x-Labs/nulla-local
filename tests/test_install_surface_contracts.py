@@ -117,16 +117,16 @@ def test_do_ip_first_cluster_pack_is_shipped_with_direct_ip_runtime_defaults() -
     watch_edge = json.loads((cluster_root / "watch-edge-1.json").read_text(encoding="utf-8"))
 
     assert agent_bootstrap["meet_seed_urls"] == [
-        "https://104.248.81.71:8766",
-        "https://157.245.211.185:8766",
-        "https://159.65.136.157:8766",
+        "https://203.0.113.11:8766",
+        "https://203.0.113.12:8766",
+        "https://203.0.113.13:8766",
     ]
     assert agent_bootstrap["tls_insecure_skip_verify"] is True
-    assert watch_edge["public_url"] == "https://161.35.145.74:8788"
+    assert watch_edge["public_url"] == "https://203.0.113.14:8788"
     assert watch_edge["upstream_base_urls"] == [
-        "https://104.248.81.71:8766",
-        "https://157.245.211.185:8766",
-        "https://159.65.136.157:8766",
+        "https://203.0.113.11:8766",
+        "https://203.0.113.12:8766",
+        "https://203.0.113.13:8766",
     ]
     assert watch_edge["tls_insecure_skip_verify"] is True
     assert not str(watch_edge.get("auth_token") or "").strip()
