@@ -20,7 +20,8 @@ class BrainHiveWatchConfigLoaderTests(unittest.TestCase):
         self.assertEqual(config.request_timeout_seconds, 6)
         self.assertEqual(len(config.upstream_base_urls), 3)
         self.assertIn("https://meet-eu.parad0xlabs.com", config.upstream_base_urls)
-        self.assertTrue(str(config.auth_token or "").startswith("set-strong-meet-token"))
+        # Must be the committed env placeholder, never a real secret (scrubbed 2026-06-08).
+        self.assertTrue(str(config.auth_token or "").startswith("set-via-env-before-startup"))
         self.assertIsNone(config.tls_certfile)
         self.assertIsNone(config.tls_keyfile)
         self.assertIsNone(config.tls_ca_file)

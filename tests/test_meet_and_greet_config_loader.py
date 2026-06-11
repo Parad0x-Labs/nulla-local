@@ -20,7 +20,8 @@ class MeetAndGreetConfigLoaderTests(unittest.TestCase):
         self.assertEqual(config.region, "eu")
         self.assertEqual(config.service_config.local_region, "eu")
         self.assertTrue(config.replication_config.cross_region_summary_only)
-        self.assertTrue(str(config.replication_config.auth_token or "").startswith("replace-with-strong-meet-token"))
+        # Must be the committed env placeholder, never a real secret (scrubbed 2026-06-08).
+        self.assertTrue(str(config.replication_config.auth_token or "").startswith("set-via-env-before-startup"))
         self.assertEqual(len(config.seed_peers), 2)
         self.assertEqual({seed.region for seed in config.seed_peers}, {"us", "apac"})
 
