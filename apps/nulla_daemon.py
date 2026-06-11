@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import argparse
+
+# Repo-root bootstrap: allow running as a file (python3 apps/<x>.py), not just -m.
+import os as _bootstrap_os
 import signal
 import sys
+import sys as _bootstrap_sys
 import threading
 from datetime import datetime, timezone
 from typing import Any
+
+_repo_root = _bootstrap_os.path.dirname(_bootstrap_os.path.dirname(_bootstrap_os.path.abspath(__file__)))
+if _repo_root not in _bootstrap_sys.path:
+    _bootstrap_sys.path.insert(0, _repo_root)
 
 from core import audit_logger, policy_engine
 from core.capability_tokens import expire_stale_capability_tokens

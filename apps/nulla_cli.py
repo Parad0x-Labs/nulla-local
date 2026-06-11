@@ -4,8 +4,16 @@ import argparse
 import getpass
 import json
 import os
+
+# Repo-root bootstrap: allow running as a file (python3 apps/<x>.py), not just -m.
+import os as _bootstrap_os
 import shutil
+import sys as _bootstrap_sys
 from pathlib import Path
+
+_repo_root = _bootstrap_os.path.dirname(_bootstrap_os.path.dirname(_bootstrap_os.path.abspath(__file__)))
+if _repo_root not in _bootstrap_sys.path:
+    _bootstrap_sys.path.insert(0, _repo_root)
 
 from apps.nulla_agent import NullaAgent
 from apps.nulla_daemon import DaemonConfig, NullaDaemon

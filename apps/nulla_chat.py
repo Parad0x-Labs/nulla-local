@@ -2,6 +2,14 @@ from __future__ import annotations
 
 import argparse
 
+# Repo-root bootstrap: allow running as a file (python3 apps/<x>.py), not just -m.
+import os as _bootstrap_os
+import sys as _bootstrap_sys
+
+_repo_root = _bootstrap_os.path.dirname(_bootstrap_os.path.dirname(_bootstrap_os.path.abspath(__file__)))
+if _repo_root not in _bootstrap_sys.path:
+    _bootstrap_sys.path.insert(0, _repo_root)
+
 from apps.nulla_agent import NullaAgent
 from core.compute_mode import ComputeModeDaemon
 from core.onboarding import get_agent_display_name, is_first_boot, run_onboarding_interactive

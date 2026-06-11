@@ -1,4 +1,11 @@
+# Repo-root bootstrap: allow running as a file (python3 apps/<x>.py), not just -m.
+import os as _bootstrap_os
+import sys as _bootstrap_sys
 from dataclasses import dataclass
+
+_repo_root = _bootstrap_os.path.dirname(_bootstrap_os.path.dirname(_bootstrap_os.path.abspath(__file__)))
+if _repo_root not in _bootstrap_sys.path:
+    _bootstrap_sys.path.insert(0, _repo_root)
 
 from network import quarantine, rate_limiter
 from network.protocol import Protocol

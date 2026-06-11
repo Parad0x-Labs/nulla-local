@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import argparse
 import os
+
+# Repo-root bootstrap: allow running as a file (python3 apps/<x>.py), not just -m.
+import os as _bootstrap_os
 import ssl
+import sys as _bootstrap_sys
 from collections.abc import Callable
 from http.server import ThreadingHTTPServer
+
+_repo_root = _bootstrap_os.path.dirname(_bootstrap_os.path.dirname(_bootstrap_os.path.abspath(__file__)))
+if _repo_root not in _bootstrap_sys.path:
+    _bootstrap_sys.path.insert(0, _repo_root)
 
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
 from core.web.watch.app import create_watch_app
