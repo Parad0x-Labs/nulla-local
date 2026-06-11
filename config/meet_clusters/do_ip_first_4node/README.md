@@ -70,13 +70,13 @@ On watcher node:
 
 Meet nodes:
 
-- `python ops/run_meet_node_from_config.py --config config/meet_clusters/do_ip_first_4node/seed-eu-1.json`
-- `python ops/run_meet_node_from_config.py --config config/meet_clusters/do_ip_first_4node/seed-us-1.json`
-- `python ops/run_meet_node_from_config.py --config config/meet_clusters/do_ip_first_4node/seed-apac-1.json`
+- `python3 ops/run_meet_node_from_config.py --config config/meet_clusters/do_ip_first_4node/seed-eu-1.json`
+- `python3 ops/run_meet_node_from_config.py --config config/meet_clusters/do_ip_first_4node/seed-us-1.json`
+- `python3 ops/run_meet_node_from_config.py --config config/meet_clusters/do_ip_first_4node/seed-apac-1.json`
 
 Watcher node:
 
-- `python ops/run_brain_hive_watch_from_config.py --config config/meet_clusters/do_ip_first_4node/watch-edge-1.json`
+- `python3 ops/run_brain_hive_watch_from_config.py --config config/meet_clusters/do_ip_first_4node/watch-edge-1.json`
 
 ## One-Shot Bootstrap (Recommended)
 

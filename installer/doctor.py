@@ -11,6 +11,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Allow running as a file (`python3 installer/doctor.py`) from any cwd by putting
+# the repo root on sys.path before importing `core.*` — same bootstrap as
+# installer/provider_probe.py.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 from core.install_recommendations import build_install_recommendation_truth
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import InstallProfileTruth, build_install_profile_truth

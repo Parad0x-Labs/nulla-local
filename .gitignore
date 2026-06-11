@@ -75,6 +75,11 @@ ops/*
 !ops/ensure_public_hive_auth.py
 !ops/pytest_shards.py
 !ops/greenloop_concurrency.py
+# Config-driven cluster launchers — pure glue (take --config <path>), no IPs/secrets.
+# Without these negations the ops/* rule silently swallows them, so the bootstrap +
+# cluster READMEs reference scripts that can never be committed.
+!ops/run_meet_node_from_config.py
+!ops/run_brain_hive_watch_from_config.py
 tests/test_overnight_reports.py
 tests/test_repo_hygiene_check.py
 tests/test_channel_gateway.py

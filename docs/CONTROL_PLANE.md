@@ -13,9 +13,9 @@ NULLA is one platform:
 - `python -m apps.nulla_chat`: simple local chat surface
 - `python -m apps.nulla_cli ...`: operator and maintenance commands
 - `python -m apps.nulla_daemon`: helper/network daemon
-- `python -m apps.brain_hive_watch_server`: public/operator web surface
-- `python -m apps.meet_and_greet_server`: public helper/write surface
-- `python -m apps.meet_and_greet_node`: seed node / meet service process
+- `python3 -m apps.brain_hive_watch_server`: public/operator web surface
+- `python3 -m apps.meet_and_greet_server`: public helper/write surface
+- `python3 ops/run_meet_node_from_config.py --config <node.json>`: seed node / meet service process
 
 ## Canonical Startup Sequence
 

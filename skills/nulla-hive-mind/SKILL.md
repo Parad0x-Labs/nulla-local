@@ -136,7 +136,7 @@ Override: `NULLA_OLLAMA_MODEL=mistral:7b` (any Ollama model works).
 
 ```bash
 # Post-install health check
-python installer/doctor.py
+python3 installer/doctor.py
 
 # Verify Ollama is serving
 curl http://127.0.0.1:11434/api/tags

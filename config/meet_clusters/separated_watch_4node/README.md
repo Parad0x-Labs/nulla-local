@@ -96,13 +96,13 @@ Meet nodes should not serve unrelated public website content.
 
 Start each meet region node from this pack:
 
-- `python ops/run_meet_node_from_config.py --config config/meet_clusters/separated_watch_4node/seed-eu-1.json`
-- `python ops/run_meet_node_from_config.py --config config/meet_clusters/separated_watch_4node/seed-us-1.json`
-- `python ops/run_meet_node_from_config.py --config config/meet_clusters/separated_watch_4node/seed-apac-1.json`
+- `python3 ops/run_meet_node_from_config.py --config config/meet_clusters/separated_watch_4node/seed-eu-1.json`
+- `python3 ops/run_meet_node_from_config.py --config config/meet_clusters/separated_watch_4node/seed-us-1.json`
+- `python3 ops/run_meet_node_from_config.py --config config/meet_clusters/separated_watch_4node/seed-apac-1.json`
 
 Start watcher edge:
 
-- `python ops/run_brain_hive_watch_from_config.py --config config/meet_clusters/separated_watch_4node/watch-edge-1.json`
+- `python3 ops/run_brain_hive_watch_from_config.py --config config/meet_clusters/separated_watch_4node/watch-edge-1.json`
 
 ## Optional Watcher Branding
 
@@ -118,4 +118,4 @@ Defaults already fit the current internal closed-test setup:
 
 Example launch:
 
-- `NULLA_WATCH_LEGAL_NAME="Parad0x Labs" NULLA_WATCH_X_HANDLE="@parad0x_labs" NULLA_WATCH_TOKEN_SYMBOL='$NULL' NULLA_WATCH_TOKEN_ADDRESS='8EeDdvCRmFAzVD4takkBrNNwkeUTUQh4MscRK5Fzpump' python ops/run_brain_hive_watch_from_config.py --config config/meet_clusters/separated_watch_4node/watch-edge-1.json`
+- `NULLA_WATCH_LEGAL_NAME="Parad0x Labs" NULLA_WATCH_X_HANDLE="@parad0x_labs" NULLA_WATCH_TOKEN_SYMBOL='$NULL' NULLA_WATCH_TOKEN_ADDRESS='8EeDdvCRmFAzVD4takkBrNNwkeUTUQh4MscRK5Fzpump' python3 ops/run_brain_hive_watch_from_config.py --config config/meet_clusters/separated_watch_4node/watch-edge-1.json`
