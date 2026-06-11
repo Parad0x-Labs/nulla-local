@@ -7,26 +7,18 @@ from unittest import mock
 
 from core.credit_ledger import award_credits, get_credit_balance, get_free_tier_dispatch_usage
 from core.parent_orchestrator import orchestrate_parent_task
+from core.task_capsule import verify_task_capsule
+from network.assist_models import TaskOffer
 from storage.db import get_connection
 from storage.migrations import run_migrations
+from tests.task_offer_fixtures import build_offer_for_capsule, build_signed_capsule
 
 
-class _FakeCapsule:
-    def __init__(self) -> None:
-        self.learning_allowed = False
-
-    def model_dump(self, mode: str = "json") -> dict:
-        return {"learning_allowed": self.learning_allowed}
-
-
-def _fake_subtask(points: int) -> SimpleNamespace:
-    capsule = _FakeCapsule()
-    offer = SimpleNamespace(
-        reward_hint=SimpleNamespace(points=points, wnull_pending=0),
-        priority="normal",
-        capsule={"learning_allowed": False},
-    )
-    return SimpleNamespace(subtask_id=f"sub-{uuid.uuid4().hex}", offer=offer, capsule=capsule, required_capabilities=["research"])
+def _real_subtask(points: int) -> SimpleNamespace:
+    task_id = f"sub-{uuid.uuid4().hex}"
+    capsule = build_signed_capsule(task_id=task_id, points=points)
+    offer = build_offer_for_capsule(capsule, points=points)
+    return SimpleNamespace(subtask_id=task_id, offer=offer, capsule=capsule, required_capabilities=["research"])
 
 
 class ParentOrchestratorBudgetTests(unittest.TestCase):
@@ -43,7 +35,7 @@ class ParentOrchestratorBudgetTests(unittest.TestCase):
     def test_paid_dispatch_preserves_offer_priority(self) -> None:
         peer_id = "peer-paid-orch"
         award_credits(peer_id, 20.0, "seed", receipt_id=f"seed-{uuid.uuid4().hex}")
-        subtasks = [_fake_subtask(5), _fake_subtask(5)]
+        subtasks = [_real_subtask(5), _real_subtask(5)]
         with mock.patch("core.parent_orchestrator._subtask_ids_for_parent", return_value=[]), mock.patch(
             "core.parent_orchestrator.should_decompose", return_value=True
         ), mock.patch("core.parent_orchestrator.predict_local_override_necessity", return_value=False), mock.patch(
@@ -65,7 +57,7 @@ class ParentOrchestratorBudgetTests(unittest.TestCase):
 
     def test_free_tier_dispatch_downgrades_rewards_and_priority(self) -> None:
         peer_id = "peer-free-orch"
-        subtasks = [_fake_subtask(4), _fake_subtask(4)]
+        subtasks = [_real_subtask(4), _real_subtask(4)]
         with mock.patch("core.parent_orchestrator._subtask_ids_for_parent", return_value=[]), mock.patch(
             "core.parent_orchestrator.should_decompose", return_value=True
         ), mock.patch("core.parent_orchestrator.predict_local_override_necessity", return_value=False), mock.patch(
@@ -90,10 +82,18 @@ class ParentOrchestratorBudgetTests(unittest.TestCase):
         self.assertTrue(all(sub.capsule.learning_allowed for sub in subtasks))
         self.assertTrue(all(sub.offer.capsule["learning_allowed"] for sub in subtasks))
         self.assertAlmostEqual(get_free_tier_dispatch_usage(peer_id), 8.0)
+        for sub in subtasks:
+            # The downgrade mutates the capsule, so it must be re-hashed and
+            # re-signed or honest helpers reject it with a hash mismatch.
+            verified = verify_task_capsule(sub.offer.capsule)
+            self.assertTrue(verified.learning_allowed)
+            # The downgraded offer must still validate as a wire payload.
+            revalidated = TaskOffer.model_validate(sub.offer.model_dump(mode="json"))
+            self.assertEqual(revalidated.priority, "background")
 
     def test_dispatch_blocks_when_free_tier_budget_is_exhausted(self) -> None:
         peer_id = "peer-blocked-orch"
-        subtasks = [_fake_subtask(3), _fake_subtask(3)]
+        subtasks = [_real_subtask(3), _real_subtask(3)]
         with mock.patch("core.credit_ledger.policy_engine.get") as get_policy:
             get_policy.side_effect = lambda path, default=None: {
                 "economics.free_tier_daily_swarm_points": 6.0,

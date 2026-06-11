@@ -18,7 +18,7 @@ from network.assist_router import handle_incoming_assist_message
 from network.knowledge_models import validate_knowledge_payload
 from network.knowledge_router import handle_knowledge_message
 from network.presence_router import handle_presence_message
-from network.protocol import Protocol, encode_message, peek_message_type
+from network.protocol import Protocol, encode_message, peek_message_type, peek_sender_peer_id
 from network.rate_limiter import allow as rate_allow
 from network.signer import get_local_peer_id as local_peer_id
 from retrieval.swarm_query import request_specific_shard
@@ -72,7 +72,15 @@ def on_message(daemon: Any, raw: bytes, addr: tuple[str, int]) -> None:
             ),
         )
 
+        reply_to_self = peek_sender_peer_id(raw) == local_peer_id()
         for msg in result.generated_messages:
+            if reply_to_self:
+                # Replies to our own messages (zero-peer loopback, e.g. a
+                # TASK_ASSIGN answering a self TASK_CLAIM) must be handled
+                # in-process: the datagram's source addr is an ephemeral
+                # send socket that is already closed.
+                on_message(daemon, msg, addr)
+                continue
             daemon._send_or_log(
                 addr[0],
                 int(addr[1]),

@@ -140,8 +140,14 @@ def broadcast_task_offer(
     if sent == 0 and bool(policy_engine.get("orchestration.local_loopback_offer_on_no_helpers", True)):
         try:
             from core.order_book import global_order_book
+            from network.assist_router import handle_incoming_assist_message
 
             local_endpoint = endpoint_for_peer(local_peer_id()) or ("127.0.0.1", 49152)
+            # Store the offer + capsule rows locally first; the later self
+            # TASK_CLAIM has a FOREIGN KEY on task_offers and dies without them.
+            route = handle_incoming_assist_message(raw_bytes=msg, source_addr=local_endpoint)
+            if not route.ok:
+                raise RuntimeError(f"loopback offer rejected: {route.reason}")
             global_order_book.push(msg, local_endpoint, offer_payload)
             sent += 1
             audit_logger.log(
