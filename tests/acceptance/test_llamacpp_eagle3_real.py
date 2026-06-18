@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -24,6 +25,15 @@ import requests
 
 _SERVER_BASE = "http://127.0.0.1:8090"
 _MODEL = "qwen3:8b-gguf"
+
+_DRAFT_GGUF = os.path.expanduser("~/.nulla_local/models/qwen3_14b_eagle3_q8.gguf")
+_START_SCRIPT = "/tmp/start-nulla-llamacpp.sh"
+_NULLA_HOME = str(Path.home())
+
+_LOCAL_SETUP = pytest.mark.skipif(
+    not os.path.exists(_DRAFT_GGUF),
+    reason="requires local llama.cpp setup with eagle3 draft model at ~/.nulla_local/",
+)
 
 # M4 + qwen3:8b Q4_K_M: 120 GB/s ÷ 4.9 GB = 24.5 t/s theoretical max decode
 # Conservative gate: 10 t/s (real measured: 18-20 t/s single)
@@ -63,6 +73,7 @@ def _chat(prompt: str, max_tokens: int = 32) -> dict[str, Any]:
 # Non-live structural contracts (always run)
 # ---------------------------------------------------------------------------
 
+@_LOCAL_SETUP
 def test_eagle3_draft_model_file_exists_and_is_valid_size() -> None:
     draft = os.path.expanduser("~/.nulla_local/models/qwen3_14b_eagle3_q8.gguf")
     assert os.path.exists(draft), f"EAGLE-3 draft GGUF missing at {draft}"
@@ -70,6 +81,10 @@ def test_eagle3_draft_model_file_exists_and_is_valid_size() -> None:
     assert 400 < size_mb < 1000, f"unexpected draft size {size_mb:.0f} MB (expected 400-1000 MB)"
 
 
+@pytest.mark.skipif(
+    not os.path.exists(_START_SCRIPT),
+    reason="requires llama.cpp start script at /tmp/start-nulla-llamacpp.sh",
+)
 def test_llamacpp_start_script_references_8b_model() -> None:
     with open("/tmp/start-nulla-llamacpp.sh") as f:
         content = f.read()
@@ -78,16 +93,18 @@ def test_llamacpp_start_script_references_8b_model() -> None:
     assert "--reasoning off" in content, "start script must disable reasoning (nothink mode)"
 
 
+@_LOCAL_SETUP
 def test_llamacpp_env_config_declares_8b_model() -> None:
     import subprocess
     result = subprocess.run(
         ["grep", "NULLA_LLAMACPP_MODEL=", ".nulla_local/config/provider-env.sh"],
         capture_output=True, text=True,
-        cwd="/home/nulla-user/nulla",
+        cwd=_NULLA_HOME,
     )
     assert "qwen3:8b-gguf" in result.stdout, f"provider-env.sh must declare qwen3:8b-gguf as model, got: {result.stdout!r}"
 
 
+@_LOCAL_SETUP
 def test_eagle3_acceleration_truth_detects_configured_status() -> None:
     from core.backend_acceleration_truth import backend_acceleration_proof
     proof = backend_acceleration_proof(

@@ -2,9 +2,11 @@
 
 **Local-first AI agent runtime. Your machine. Your memory. Your mesh.**
 
-NULLA runs on your hardware, remembers everything across sessions, uses tools to do real engineering work, and coordinates trusted helpers over a peer mesh when a task needs more reach. Nothing leaves your box unless you say so.
+NULLA is a local-first agent runtime — runs on your hardware, remembers everything across sessions, uses tools to do real engineering work, and coordinates trusted helpers over a peer mesh when a task needs more reach. Nothing leaves your box unless you say so.
 
 It's also a node in Web0 — the direction where tasks decompose, agents bid, compute gets rented, and work settles over the x402 payment rail.
+
+Current state: **Alpha** — core runtime, memory, and tool loop working on `main`. Mesh economics hardening. See [docs/STATUS.md](docs/STATUS.md).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)](docs/STATUS.md)
@@ -100,7 +102,7 @@ Parad0x Labs builds Web0 on Solana — money and agents that settle themselves. 
 
 ## Install
 
-macOS / Linux:
+Bootstrap install script:
 
 ```bash
 curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh
@@ -150,6 +152,20 @@ Full install docs: [docs/INSTALL.md](docs/INSTALL.md)
 - **Role-aware provider routing** — local drone lanes vs synthesis lanes, local llama.cpp, vLLM, and Kimi lanes when configured.
 - **Honest capability API** — `GET /api/runtime/capabilities` — implemented / simulated / disabled, per feature.
 - **CI** — sharded local regression + GitHub Actions + fast LLM acceptance suite.
+
+---
+
+## Try It
+
+After install, start the API and chat:
+
+```bash
+python3 -m apps.nulla_api_server        # local API on :11435
+python3 -m apps.nulla_agent --interactive
+curl http://127.0.0.1:11435/api/runtime/capabilities
+```
+
+Full install docs: [docs/INSTALL.md](docs/INSTALL.md)
 
 ---
 
