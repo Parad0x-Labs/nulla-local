@@ -87,6 +87,32 @@ def stream_response(
     )
 
 
+def _attach_work_receipt(
+    payload: dict[str, Any],
+    *,
+    result: dict[str, Any],
+    session_id: str,
+) -> dict[str, Any]:
+    """Issue a Web0WorkReceipt for the completed turn; return payload unchanged on failure."""
+    try:
+        import os
+
+        from core.web0_work_receipt import issue_work_receipt
+        response_text = str(result.get("response") or "").strip()
+        if not response_text:
+            return payload
+        receipt = issue_work_receipt(
+            task_id=session_id,
+            result=response_text,
+            worker_id=str(os.environ.get("NULLA_WORKER_ID") or "nulla"),
+        )
+        payload = dict(payload)
+        payload["web0_receipt"] = receipt.to_dict()
+    except Exception:
+        pass
+    return payload
+
+
 def apply_runtime_headers(response: ApiResponse, runtime: RuntimeServices) -> ApiResponse:
     headers = runtime_headers(runtime)
     headers.update(response.headers)
@@ -385,6 +411,61 @@ def dispatch_post(
 ) -> ApiResponse:
     normalized_path = path.rstrip("/") or "/"
 
+    if normalized_path in {"/api/null", "/v1/null"}:
+        uri_str = str(body.get("uri") or "").strip()
+        prompt = str(body.get("prompt") or body.get("task") or "").strip()
+        if not uri_str:
+            return apply_runtime_headers(json_response(400, {"error": "missing 'uri' field"}), runtime)
+        try:
+            from core.null_protocol import NullResponse, resolve_null_request
+            null_req = resolve_null_request(uri_str)
+        except Exception as exc:
+            return apply_runtime_headers(json_response(400, {"error": str(exc)}), runtime)
+        task_text = prompt or null_req.uri.path or null_req.uri.service
+        try:
+            null_result = run_agent_provider(
+                runtime,
+                task_text,
+                session_id=null_req.session_id,
+                source_context={"surface": "null_protocol", "null_uri": uri_str, "service": null_req.uri.service},
+                workspace_root_provider=workspace_root_provider,
+            )
+        except Exception as exc:
+            return apply_runtime_headers(json_response(500, {"error": str(exc)}), runtime)
+        response_text = str(null_result.get("response") or "").strip()
+        null_receipt = None
+        try:
+            import os
+
+            from core.web0_work_receipt import issue_work_receipt
+            null_receipt = issue_work_receipt(
+                task_id=null_req.session_id,
+                result=response_text or task_text,
+                worker_id=str(os.environ.get("NULLA_WORKER_ID") or "nulla"),
+            )
+        except Exception:
+            pass
+        null_resp = NullResponse(
+            session_id=null_req.session_id,
+            service=null_req.uri.service,
+            path=null_req.uri.path,
+            result=response_text,
+            receipt_id=null_receipt.receipt_id if null_receipt else None,
+        )
+        null_payload: dict[str, Any] = {
+            "session_id": null_resp.session_id,
+            "service":    null_resp.service,
+            "path":       null_resp.path,
+            "result":     null_resp.result,
+            "receipt_id": null_resp.receipt_id,
+            "zk_proof":   null_resp.zk_proof,
+            "quote": {
+                "amount_usdc":      null_req.quote.amount_usdc,
+                "recipient_wallet": null_req.quote.recipient_wallet,
+            } if null_req.quote else None,
+        }
+        return apply_runtime_headers(json_response(200, null_payload), runtime)
+
     if normalized_path == "/gate/unlock":
         from core.web0_gated_html import NullaGateHandler, gate_cors_headers
         from core.web0_tools import web0_gate_key_store
@@ -474,6 +555,7 @@ def dispatch_post(
         except Exception as exc:
             return apply_runtime_headers(json_response(500, {"error": str(exc)}), runtime)
         payload = openai_chat_response(result, model) if normalized_path.startswith("/v1/") else ollama_chat_response(result, model, runtime)
+        payload = _attach_work_receipt(payload, result=result, session_id=session_id)
         return apply_runtime_headers(json_response(200, payload), runtime)
 
     if normalized_path == "/api/generate":
