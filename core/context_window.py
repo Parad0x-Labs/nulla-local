@@ -42,7 +42,7 @@ KEEP_RECENT = 8             # messages kept verbatim after compression
 RETRIEVAL_TOP_K = 3         # candidate nodes to fetch from L3
 RETRIEVAL_MIN_SCORE = 0.4   # minimum cosine similarity to surface a node
 MAX_INJECT_TOKENS = 300     # max tokens added by a single inject_relevant() call
-STORE_MIN_CHARS = 80        # only persist nodes for turns >= this length
+STORE_MIN_CHARS = 30        # short facts ("port is 5433") are still worth storing
 DEDUP_THRESHOLD = 0.60      # word-overlap ratio above which a node is "already covered"
 DEDUP_MIN_SUBSTRING = 40    # min chars for literal substring dedup check
 

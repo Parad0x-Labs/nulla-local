@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from core import policy_engine
+from core.context_retrieval import inject_retrieved as _inject_retrieved
 from core.conversation_summarizer import KEEP_RECENT, SUMMARY_THRESHOLD, compress_if_needed
 from core.persistent_memory import describe_session_memory_policy, load_memory_excerpt
 from core.prompt_assembly_report import ContextItem
@@ -208,9 +209,12 @@ def canonical_runtime_transcript(
         )
         if transcript:
             if client_history and len(client_history) > len(transcript):
-                return client_history, "client_conversation_history"
+                transcript = _inject_retrieved(normalized_session_id, current_user_text, client_history)
+                return transcript, "client_conversation_history"
+            transcript = _inject_retrieved(normalized_session_id, current_user_text, transcript)
             return transcript, "structured_dialogue_memory"
     if client_history:
+        client_history = _inject_retrieved(normalized_session_id, current_user_text, client_history)
         return client_history, "client_conversation_history"
     return [], "none"
 

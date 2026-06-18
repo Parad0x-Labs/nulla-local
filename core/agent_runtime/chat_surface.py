@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from core import audit_logger
+from core.context_retrieval import store_turn as _store_memory_turn
 from core.curiosity_roamer import AdaptiveResearchResult
 from core.human_input_adapter import adapt_user_input
 from core.identity_manager import load_active_persona
@@ -752,6 +753,7 @@ def chat_surface_model_wording_result(
         source_context=source_context,
         response_class=turn_result.response_class.value,
     )
+    _store_memory_turn(session_id, user_input, decorated_response)
     confidence = max(
         0.35,
         min(
