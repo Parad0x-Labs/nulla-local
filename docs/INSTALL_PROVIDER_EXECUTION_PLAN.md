@@ -8,7 +8,7 @@ This is not a roadmap fantasy. It is the exact execution plan for making NULLA i
 
 - Local Ollama install path is real.
 - Clean one-line reinstall on this Mac is now real for the local Ollama + OpenClaw lane.
-- The repo has a real locked local acceptance gate in [`docs/LOCAL_ACCEPTANCE.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/LOCAL_ACCEPTANCE.md).
+- The repo has a real locked local acceptance gate in [`docs/LOCAL_ACCEPTANCE.md`](/home/nulla-user/nulla/docs/LOCAL_ACCEPTANCE.md).
 - The repo does **not** yet have a first-class Kimi install/bootstrap lane.
 - The repo does **not** yet have a first-class Tether/QVAC lane.
 - The runtime does have a generic OpenAI-compatible adapter, so Kimi should land as a named profile on that adapter instead of as a parallel architecture.
@@ -153,7 +153,7 @@ Evidence:
 - direct runtime checks succeeded after reinstall:
   - Desktop folder listing
   - Hive task truth
-- locked local acceptance under [`docs/LOCAL_ACCEPTANCE.md`](/Users/sauliuskruopis/Desktop/Decentralized_NULLA/docs/LOCAL_ACCEPTANCE.md) finished `GREEN`
+- locked local acceptance under [`docs/LOCAL_ACCEPTANCE.md`](/home/nulla-user/nulla/docs/LOCAL_ACCEPTANCE.md) finished `GREEN`
 
 ### Slice 5
 

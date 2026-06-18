@@ -192,13 +192,13 @@ def test_regression_payload_sanitizes_baseline_command_paths(monkeypatch, tmp_pa
         "run_pytest_pack",
         lambda **kwargs: {
             "name": "recent_48h_llm_regression",
-            "command": ["/Users/sauliuskruopis/nulla-hive-mind/.venv/bin/python", "-m", "pytest"],
+            "command": ["/home/nulla-user/nulla/.venv/bin/python", "-m", "pytest"],
             "targets": ["tests/test_run_local_acceptance.py"],
             "exit_code": 0,
             "duration_seconds": 1.23,
             "summary": {"passed": 1, "failed": 0, "skipped": 0, "xfailed": 0, "xpassed": 0},
             "status": "pass",
-            "stdout": "/Users/sauliuskruopis/nulla-hive-mind/.venv/bin/python -m pytest\n",
+            "stdout": "/home/nulla-user/nulla/.venv/bin/python -m pytest\n",
             "stderr": "",
         },
     )
@@ -221,9 +221,9 @@ def test_regression_payload_sanitizes_baseline_command_paths(monkeypatch, tmp_pa
     )
 
     baseline_text = (baseline_root / "recent_48h_regression.json").read_text(encoding="utf-8")
-    assert "/Users/sauliuskruopis" not in baseline_text
+    assert "/home/nulla-user" not in baseline_text
     assert "<repo>/.venv/bin/python" in baseline_text
-    assert "/Users/sauliuskruopis" not in json.dumps(payload)
+    assert "/home/nulla-user" not in json.dumps(payload)
     assert "<repo>/.venv/bin/python" in json.dumps(payload)
 
 
@@ -593,8 +593,8 @@ def test_run_sanitizes_summary_artifacts_before_writing(monkeypatch, tmp_path: P
             "current": {
                 "status": "pass",
                 "targets": ["tests/test_run_local_acceptance.py"],
-                "command": ["/Users/sauliuskruopis/nulla-hive-mind/.venv/bin/python", "-m", "pytest"],
-                "stdout": "/Users/sauliuskruopis/nulla-hive-mind/.venv/bin/python -m pytest\n",
+                "command": ["/home/nulla-user/nulla/.venv/bin/python", "-m", "pytest"],
+                "stdout": "/home/nulla-user/nulla/.venv/bin/python -m pytest\n",
                 "stderr": "",
                 "summary": {"passed": 1, "failed": 0, "skipped": 0, "xfailed": 0, "xpassed": 0},
                 "duration_seconds": 0.1,
@@ -617,7 +617,7 @@ def test_run_sanitizes_summary_artifacts_before_writing(monkeypatch, tmp_path: P
                     "duration_seconds": 0.1,
                     "summary": {"passed": 1, "failed": 0, "errors": 0, "skipped": 0, "xfailed": 0, "xpassed": 0, "deselected": 0},
                     "exit_code": 0,
-                    "stdout": "/Users/sauliuskruopis/private/log\n",
+                    "stdout": "/home/nulla-user/private/log\n",
                     "stderr": "",
                 }
             ],
@@ -640,5 +640,5 @@ def test_run_sanitizes_summary_artifacts_before_writing(monkeypatch, tmp_path: P
 
     assert llm_eval.run(args) == 0
     summary_text = (output_root / "summary.json").read_text(encoding="utf-8")
-    assert "/Users/sauliuskruopis" not in summary_text
+    assert "/home/nulla-user" not in summary_text
     assert "/Users/<redacted>" in summary_text

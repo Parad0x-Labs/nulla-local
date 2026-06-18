@@ -5,8 +5,8 @@ Scope: local only. No commits, no pushes, no GitHub writes.
 
 ## Repos
 
-- OpenClaw: `/Users/sauliuskruopis/Desktop/OpenClaw`
-- NULLA: `/Users/sauliuskruopis/nulla-hive-mind`
+- OpenClaw: `/home/nulla-user/openclaw`
+- NULLA: `/home/nulla-user/nulla`
 
 ## Hard Guardrails
 
@@ -121,7 +121,7 @@ from core.runtime_execution_tools import execute_runtime_tool
 result = execute_runtime_tool(
     "web.browser_render",
     {"url": "https://example.com", "timeout_ms": 10000, "max_scroll": 0},
-    source_context={"surface": "openclaw", "workspace_root": "/Users/sauliuskruopis/nulla-hive-mind"},
+    source_context={"surface": "openclaw", "workspace_root": "/home/nulla-user/nulla"},
 )
 ```
 
@@ -210,14 +210,14 @@ There are additional existing dirty OpenClaw UI/session files from prior local N
 llama.cpp specialist model:
 
 ```text
-/Users/sauliuskruopis/.nulla_runtime/models/llamacpp/qwen2.5-coder-14b-instruct-q4_k_m.gguf
+/home/nulla-user/.nulla_runtime/models/llamacpp/qwen2.5-coder-14b-instruct-q4_k_m.gguf
 ```
 
 Runtime env config files used:
 
 ```text
-/Users/sauliuskruopis/.nulla_runtime/config/provider-env.sh
-/Users/sauliuskruopis/nulla-hive-mind/.nulla_local/config/provider-env.sh
+/home/nulla-user/.nulla_runtime/config/provider-env.sh
+/home/nulla-user/nulla/.nulla_local/config/provider-env.sh
 ```
 
 Important env values:
@@ -321,10 +321,10 @@ eagle_status=unsupported_by_backend
 3. Re-run full suites after any meaningful change:
 
 ```bash
-cd /Users/sauliuskruopis/nulla-hive-mind
+cd /home/nulla-user/nulla
 python3 -m pytest -q tests/
 
-cd /Users/sauliuskruopis/Desktop/OpenClaw
+cd /home/nulla-user/openclaw
 node scripts/run-vitest.mjs ui/src/ui/views/chat.test.ts ui/src/ui/views/sessions.test.ts ui/src/ui/thinking.ts
 ```
 

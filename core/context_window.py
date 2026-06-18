@@ -44,6 +44,7 @@ RETRIEVAL_MIN_SCORE = 0.4   # minimum cosine similarity to surface a node
 MAX_INJECT_TOKENS = 300     # max tokens added by a single inject_relevant() call
 STORE_MIN_CHARS = 80        # only persist nodes for turns >= this length
 DEDUP_THRESHOLD = 0.60      # word-overlap ratio above which a node is "already covered"
+DEDUP_MIN_SUBSTRING = 40    # min chars for literal substring dedup check
 
 
 class ContextWindow:
@@ -160,6 +161,8 @@ class ContextWindow:
         selected: list[tuple] = []
         for node, score in hits:
             if _content_covered(node.content, context_text, DEDUP_THRESHOLD):
+                continue
+            if _content_covered_substring(node.content, context_text, DEDUP_MIN_SUBSTRING):
                 continue
             selected.append((node, score))
             budget_chars -= len(node.content)
@@ -281,6 +284,27 @@ def _content_covered(content: str, context_text: str, threshold: float = DEDUP_T
         return False
     covered = sum(1 for w in words if w in context_text)
     return (covered / len(words)) >= threshold
+
+
+def _content_covered_substring(content: str, context_text: str, min_len: int = DEDUP_MIN_SUBSTRING) -> bool:
+    """
+    Return True if any contiguous chunk of *content* (at least min_len chars,
+    or the whole content if shorter) appears literally in *context_text*.
+
+    Catches verbatim repetition even when word-overlap scoring misses it due
+    to stemming differences or low-frequency terms.
+    """
+    lower = content.lower().strip()
+    if not lower:
+        return False
+    check_len = min(len(lower), min_len)
+    if check_len < 8:
+        return False
+    step = max(1, check_len // 4)
+    for start in range(0, len(lower) - check_len + 1, step):
+        if lower[start:start + check_len] in context_text:
+            return True
+    return False
 
 
 def _extract_keywords(text: str, max_kw: int = 8) -> list[str]:

@@ -83,7 +83,7 @@ def test_llamacpp_env_config_declares_8b_model() -> None:
     result = subprocess.run(
         ["grep", "NULLA_LLAMACPP_MODEL=", ".nulla_local/config/provider-env.sh"],
         capture_output=True, text=True,
-        cwd="/Users/sauliuskruopis/nulla-hive-mind",
+        cwd="/home/nulla-user/nulla",
     )
     assert "qwen3:8b-gguf" in result.stdout, f"provider-env.sh must declare qwen3:8b-gguf as model, got: {result.stdout!r}"
 
