@@ -7,7 +7,6 @@ from unittest import mock
 from core.web.api.runtime import RuntimeServices
 from core.web.api.service import _attach_work_receipt, dispatch_post
 
-
 # ---------------------------------------------------------------------------
 # _attach_work_receipt helper
 # ---------------------------------------------------------------------------
