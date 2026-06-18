@@ -95,6 +95,21 @@ def build_provider_registry_snapshot(
             prewarm_results = tuple(active_registry.prewarm_enabled_providers(provider_ids=visible_provider_ids or None))
         except Exception:
             prewarm_results = tuple()
+    # Web0 capability announce — fire-and-forget, no-op when gate is off
+    try:
+        from core.web0_capability_broadcast import announce_from_env, build_manifest
+        top = max(capability_truth, key=lambda c: float(c.tokens_per_second or 0), default=None)
+        _manifest = build_manifest(
+            worker_id=str(env_map.get("NULLA_WORKER_ID") or "nulla"),
+            provider_ids=tuple(c.provider_id for c in capability_truth),
+            top_tps=float(top.tokens_per_second or 0) if top else 0.0,
+            top_tier=str(top.role_fit or "drone") if top else "drone",
+            context_window=int(top.context_window or 32768) if top else 32768,
+            tools=tuple(str(t) for t in (top.tool_support or ())) if top else (),
+        )
+        announce_from_env(_manifest, env=env_map)
+    except Exception:
+        pass
     return ProviderRegistrySnapshot(
         warnings=warnings,
         audit_rows=audit_rows,
