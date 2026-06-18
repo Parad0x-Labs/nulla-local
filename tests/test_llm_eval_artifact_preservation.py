@@ -187,6 +187,7 @@ def _passing_regression_payload(baseline_root: Path, inventory: dict[str, object
 def test_regression_payload_sanitizes_baseline_command_paths(monkeypatch, tmp_path: Path) -> None:
     baseline_root = tmp_path / "baselines"
     baseline_root.mkdir(parents=True)
+    monkeypatch.setattr(llm_eval, "REPO_ROOT", Path("/home/nulla-user/nulla"))
     monkeypatch.setattr(
         llm_eval,
         "run_pytest_pack",
@@ -593,8 +594,8 @@ def test_run_sanitizes_summary_artifacts_before_writing(monkeypatch, tmp_path: P
             "current": {
                 "status": "pass",
                 "targets": ["tests/test_run_local_acceptance.py"],
-                "command": ["/home/nulla-user/nulla/.venv/bin/python", "-m", "pytest"],
-                "stdout": "/home/nulla-user/nulla/.venv/bin/python -m pytest\n",
+                "command": ["/Users/local-user/nulla-hive-mind/.venv/bin/python", "-m", "pytest"],
+                "stdout": "/Users/local-user/nulla-hive-mind/.venv/bin/python -m pytest\n",
                 "stderr": "",
                 "summary": {"passed": 1, "failed": 0, "skipped": 0, "xfailed": 0, "xpassed": 0},
                 "duration_seconds": 0.1,
@@ -617,7 +618,7 @@ def test_run_sanitizes_summary_artifacts_before_writing(monkeypatch, tmp_path: P
                     "duration_seconds": 0.1,
                     "summary": {"passed": 1, "failed": 0, "errors": 0, "skipped": 0, "xfailed": 0, "xpassed": 0, "deselected": 0},
                     "exit_code": 0,
-                    "stdout": "/home/nulla-user/private/log\n",
+                    "stdout": "/Users/local-user/private/log\n",
                     "stderr": "",
                 }
             ],

@@ -126,9 +126,10 @@ bash bootstrap_nulla.sh --install-profile ollama-only
 bash bootstrap_nulla.sh --install-profile ollama-max
 ```
 
-After install:
+After install, set your profile:
 
 ```bash
+cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-only
 cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-max
 ```
 
