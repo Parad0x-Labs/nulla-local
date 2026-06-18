@@ -124,6 +124,9 @@ bash bootstrap_nulla.sh --install-profile ollama-only
 
 # Full local power — 24 GiB+ unified memory or equivalent
 bash bootstrap_nulla.sh --install-profile ollama-max
+
+# Max performance — Ollama + native llama.cpp (local_plus_llamacpp)
+bash bootstrap_nulla.sh --install-profile local_plus_llamacpp
 ```
 
 After install, set your profile:
