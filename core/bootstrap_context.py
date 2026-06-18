@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from core import policy_engine
+from core.conversation_summarizer import KEEP_RECENT, SUMMARY_THRESHOLD, compress_if_needed
 from core.persistent_memory import describe_session_memory_policy, load_memory_excerpt
 from core.prompt_assembly_report import ContextItem
 from core.runtime_paths import project_path
@@ -108,6 +109,31 @@ def _trim_history_window(
     return list(reversed(selected_reversed))
 
 
+def _compress_history(
+    items: list[dict[str, str]],
+    *,
+    max_messages: int,
+    max_chars: int,
+) -> list[dict[str, str]]:
+    """
+    Smart history: LLM-compress when long, hard-trim when short.
+
+    For short histories (≤ SUMMARY_THRESHOLD) the existing sliding-window
+    behaviour is preserved. For longer ones, compress_if_needed() replaces
+    older turns with a structured <context_summary> that preserves exact
+    facts verbatim — instead of silently discarding them.
+    """
+    if len(items) > SUMMARY_THRESHOLD:
+        compressed, was_compressed = compress_if_needed(
+            items,
+            threshold=SUMMARY_THRESHOLD,
+            keep_recent=KEEP_RECENT,
+        )
+        if was_compressed:
+            return compressed
+    return _trim_history_window(items, max_messages=max_messages, max_chars=max_chars)
+
+
 def _client_conversation_history(
     source_context: dict[str, Any] | None,
     *,
@@ -133,7 +159,7 @@ def _client_conversation_history(
     current_user = _normalized_dialogue_text(current_user_text)
     if normalized and normalized[-1]["role"] == "user" and normalized[-1]["content"] == current_user:
         normalized = normalized[:-1]
-    return _trim_history_window(
+    return _compress_history(
         normalized,
         max_messages=max_messages,
         max_chars=max_chars,
@@ -175,7 +201,7 @@ def canonical_runtime_transcript(
         current_user = _normalized_dialogue_text(current_user_text)
         if transcript and transcript[-1]["role"] == "user" and transcript[-1]["content"] == current_user:
             transcript = transcript[:-1]
-        transcript = _trim_history_window(
+        transcript = _compress_history(
             transcript,
             max_messages=max_messages,
             max_chars=max_chars,
