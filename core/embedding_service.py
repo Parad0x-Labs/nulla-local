@@ -12,13 +12,14 @@ without requiring any model download.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import math
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from functools import lru_cache
-from typing import Sequence
 
 _OLLAMA_BASE = "http://127.0.0.1:11434"
 _EMBED_MODELS = ["nomic-embed-text", "mxbai-embed-large", "all-minilm"]
@@ -84,7 +85,7 @@ def _hash_bow_embed(text: str, dims: int = _FALLBACK_DIMS) -> list[float]:
         idx = int(hashlib.md5(tok.encode()).hexdigest(), 16) % dims
         vec[idx] += 1.0
     # bigrams (improve phrase matching)
-    for a, b in zip(tokens, tokens[1:]):
+    for a, b in itertools.pairwise(tokens):
         idx = int(hashlib.md5(f"{a}_{b}".encode()).hexdigest(), 16) % dims
         vec[idx] += 0.5
 
@@ -122,7 +123,7 @@ def embed_batch(texts: Sequence[str]) -> list[list[float]]:
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     mag_a = math.sqrt(sum(x * x for x in a))
     mag_b = math.sqrt(sum(y * y for y in b))
     return dot / (mag_a * mag_b) if mag_a and mag_b else 0.0
@@ -135,8 +136,8 @@ def embedding_backend() -> str:
 
 
 __all__ = [
+    "cosine_similarity",
     "embed",
     "embed_batch",
-    "cosine_similarity",
     "embedding_backend",
 ]

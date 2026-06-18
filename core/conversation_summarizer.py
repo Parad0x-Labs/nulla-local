@@ -163,7 +163,7 @@ def compress_if_needed(
         "content": f"<context_summary>\n{summary_text}\n</context_summary>",
     }
 
-    return system_prefix + [summary_turn] + recent_messages, True
+    return [*system_prefix, summary_turn, *recent_messages], True
 
 
 def token_estimate(messages: list[dict]) -> int:
@@ -173,9 +173,9 @@ def token_estimate(messages: list[dict]) -> int:
 
 
 __all__ = [
+    "KEEP_RECENT",
+    "SUMMARY_THRESHOLD",
     "compress_if_needed",
     "summarize_messages",
     "token_estimate",
-    "SUMMARY_THRESHOLD",
-    "KEEP_RECENT",
 ]

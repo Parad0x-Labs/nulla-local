@@ -7,19 +7,19 @@ from typing import Any
 
 from adapters.base_adapter import ModelAdapter, ModelRequest, ModelResponse
 from core import audit_logger, policy_engine
+from core.backend_acceleration_truth import backend_acceleration_proof
 from core.cache_freshness_policy import default_ttl_seconds, freshness_score, should_revalidate
 from core.candidate_knowledge_lane import build_task_hash, get_exact_candidate, record_candidate_output
 from core.compute_mode import get_active_compute_budget
-from core.model_health import circuit_is_open, record_provider_failure, record_provider_success
+from core.local_inference_autopilot import build_local_inference_autopilot_plan
+from core.local_inference_evidence import hydrate_capability_truth_with_benchmarks
 from core.local_model_bundles import model_parameter_billions
+from core.model_health import circuit_is_open, record_provider_failure, record_provider_success
 from core.model_registry import ModelRegistry
 from core.model_selection_policy import provider_cost_class
 from core.model_trust import output_trust_score
 from core.output_validator import validate_provider_output
 from core.prompt_normalizer import normalize_prompt
-from core.local_inference_evidence import hydrate_capability_truth_with_benchmarks
-from core.local_inference_autopilot import build_local_inference_autopilot_plan
-from core.backend_acceleration_truth import backend_acceleration_proof
 from core.provider_routing import ProviderRole, provider_capability_truth_for_manifest, rank_provider_candidates
 from core.runtime_task_events import emit_runtime_event
 from core.task_router import model_execution_profile
@@ -1004,7 +1004,7 @@ class MemoryFirstRouter:
                 if _planned_heavy_manifest_failed(autopilot_plan, manifest):
                     final_proof = dict(failed_proof)
                     final_proof["phase"] = "failed"
-                    final_proof["fallback_reason"] = f"explicit_heavy_lane_failed:{str(error or 'no_response')}"
+                    final_proof["fallback_reason"] = f"explicit_heavy_lane_failed:{error or 'no_response'!s}"
                     final_proof["verifier_status"] = "not_run_primary_failed"
                     _emit_model_routing_event(
                         source_context,

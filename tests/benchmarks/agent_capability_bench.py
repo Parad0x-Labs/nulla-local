@@ -447,7 +447,7 @@ def _parse_tool_call(text: str) -> dict | None:
 
     def _fix_escapes(s: str) -> str:
         """Fix invalid JSON escape sequences (e.g. \\d, \\w from Python regex)."""
-        valid = set('"\\\/bfnrtu')
+        valid = set('"\\\\/bfnrtu')
         out: list[str] = []
         i = 0
         in_str = False
@@ -559,10 +559,10 @@ def run_ollama_single_shot(task: dict, workspace: Path) -> dict:
 
     if multi:
         output_instructions = (
-            f"Output each fixed file as a separate code block with the filename as "
-            f"a Python comment on the first line:\n"
-            f"```python\n# order.py\n[corrected code]\n```\n\n"
-            f"```python\n# invoice.py\n[corrected code]\n```"
+            "Output each fixed file as a separate code block with the filename as "
+            "a Python comment on the first line:\n"
+            "```python\n# order.py\n[corrected code]\n```\n\n"
+            "```python\n# invoice.py\n[corrected code]\n```"
         )
     else:
         output_instructions = (
@@ -691,7 +691,7 @@ def print_report(nulla_label: str, nulla_results: dict, ollama_results: dict) ->
             nulla_total += 1
             n_str = f"✓  {nr['steps']}steps/{nr.get('test_runs', '?')}runs  {nr['elapsed']:.1f}s"
         elif nr.get("error"):
-            n_str = f"✗  error"
+            n_str = "✗  error"
         elif nr:
             n_str = f"✗  {nr.get('steps', '?')} steps"
         else:
@@ -701,9 +701,9 @@ def print_report(nulla_label: str, nulla_results: dict, ollama_results: dict) ->
             ollama_total += 1
             o_str = f"✓  {or_['elapsed']:.1f}s"
         elif or_.get("error"):
-            o_str = f"✗  error"
+            o_str = "✗  error"
         elif or_:
-            o_str = f"✗"
+            o_str = "✗"
         else:
             o_str = "(skipped)"
 
@@ -719,11 +719,11 @@ def print_report(nulla_label: str, nulla_results: dict, ollama_results: dict) ->
     if nulla_total > ollama_total:
         diff = nulla_total - ollama_total
         print(f"  NULLA wins {diff} task(s) that single-shot Ollama cannot complete.")
-        print(f"  Real file reads + test-driven iteration = tasks impossible without tool use.")
+        print("  Real file reads + test-driven iteration = tasks impossible without tool use.")
     elif nulla_total == ollama_total:
         print(f"  Tied: {nulla_total}/{n5}. Consider adding harder multi-iteration tasks.")
     else:
-        print(f"  Ollama 1-shot outperformed the agent. Tasks may be solvable from context alone.")
+        print("  Ollama 1-shot outperformed the agent. Tasks may be solvable from context alone.")
 
     print("=" * W)
 
@@ -781,7 +781,7 @@ def main() -> None:
 
         if run_nulla:
             ws = setup_workspace(task)
-            print(f"  NULLA agent ... ", end="", flush=True)
+            print("  NULLA agent ... ", end="", flush=True)
             r = run_nulla_agent(nulla_provider, task, ws)
             nulla_results[task["id"]] = r
             if r.get("error"):
@@ -800,7 +800,7 @@ def main() -> None:
 
         if run_ollama:
             ws = setup_workspace(task)
-            print(f"  Ollama 1-shot .. ", end="", flush=True)
+            print("  Ollama 1-shot .. ", end="", flush=True)
             r = run_ollama_single_shot(task, ws)
             ollama_results[task["id"]] = r
             if r.get("error"):

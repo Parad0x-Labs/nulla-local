@@ -110,7 +110,7 @@ def backend_acceleration_proof(
 
     is_eagle3 = spec_type == "draft-eagle3"
     draft_model_exists = bool(draft_model_path) and (
-        draft_model_path.startswith("/") and __import__("os").path.isfile(draft_model_path)
+        (draft_model_path.startswith("/") and __import__("os").path.isfile(draft_model_path))
         or not draft_model_path.startswith("/")
     )
 

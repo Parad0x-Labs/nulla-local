@@ -70,7 +70,7 @@ def record_local_inference_benchmark(
     created_at = _utcnow()
     prompt_hash = _prompt_hash(prompt)
     benchmark_id = hashlib.sha256(
-        f"{provider_id}:{model_id}:{backend}:{benchmark_kind}:{prompt_hash}:{created_at}".encode("utf-8")
+        f"{provider_id}:{model_id}:{backend}:{benchmark_kind}:{prompt_hash}:{created_at}".encode()
     ).hexdigest()[:24]
     fact = LocalInferenceBenchmarkFact(
         benchmark_id=benchmark_id,

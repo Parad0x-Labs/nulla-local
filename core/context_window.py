@@ -27,11 +27,12 @@ Usage:
 """
 from __future__ import annotations
 
+import contextlib
 import re
-from typing import Iterator
+from collections.abc import Iterator
 
 from core.conversation_summarizer import compress_if_needed, token_estimate
-from core.embedding_service import cosine_similarity, embed
+from core.embedding_service import embed
 from core.nulla_memory import NullaMemory
 
 # ── tunables ───────────────────────────────────────────────────────────────────
@@ -78,10 +79,8 @@ class ContextWindow:
         self._memory: NullaMemory | None = None
 
         if persist_memory:
-            try:
+            with contextlib.suppress(Exception):
                 self._memory = NullaMemory(agent_id=agent_id, db_path=db_path)
-            except Exception:
-                pass
 
     # ── public message API ─────────────────────────────────────────────────────
 
@@ -233,10 +232,8 @@ class ContextWindow:
 
     def close(self) -> None:
         if self._memory:
-            try:
+            with contextlib.suppress(Exception):
                 self._memory.close()
-            except Exception:
-                pass
 
     def __enter__(self) -> ContextWindow:
         return self
@@ -301,10 +298,7 @@ def _content_covered_substring(content: str, context_text: str, min_len: int = D
     if check_len < 8:
         return False
     step = max(1, check_len // 4)
-    for start in range(0, len(lower) - check_len + 1, step):
-        if lower[start:start + check_len] in context_text:
-            return True
-    return False
+    return any(lower[start:start + check_len] in context_text for start in range(0, len(lower) - check_len + 1, step))
 
 
 def _extract_keywords(text: str, max_kw: int = 8) -> list[str]:
@@ -319,9 +313,9 @@ def _extract_keywords(text: str, max_kw: int = 8) -> list[str]:
 
 
 __all__ = [
-    "ContextWindow",
-    "MAX_TOKENS",
-    "SUMMARY_THRESHOLD",
     "KEEP_RECENT",
     "MAX_INJECT_TOKENS",
+    "MAX_TOKENS",
+    "SUMMARY_THRESHOLD",
+    "ContextWindow",
 ]

@@ -201,7 +201,7 @@ class NullaMemory:
         if not text:
             raise ValueError("memory node content is required")
         ts = float(timestamp if timestamp is not None else time.time())
-        node_id = hashlib.sha256(f"{self._agent_id}:{ts:.9f}:{text}".encode("utf-8")).hexdigest()[:20]
+        node_id = hashlib.sha256(f"{self._agent_id}:{ts:.9f}:{text}".encode()).hexdigest()[:20]
         node = MemoryNode(
             node_id=node_id,
             content=text,
@@ -372,7 +372,7 @@ def _json_list(raw: Any) -> list[Any]:
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     mag_a = sum(x * x for x in a) ** 0.5
     mag_b = sum(y * y for y in b) ** 0.5
     return dot / (mag_a * mag_b) if mag_a and mag_b else 0.0

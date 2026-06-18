@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import time
 import urllib.request
@@ -255,7 +254,7 @@ def run_retrieve(turns: int = 30) -> dict:
     correct = 0
     for fact in FACTS:
         ctx.add("user", fact["question"])
-        injected = ctx.inject_relevant(fact["question"])
+        ctx.inject_relevant(fact["question"])
         msgs = ctx.messages_for_llm()
         peak_tokens = max(peak_tokens, token_estimate(msgs))
         try:
@@ -291,7 +290,7 @@ def print_report(results: dict, turns: int) -> None:
     print("=" * W)
 
     print(f"\n  Embedding backend: {embedding_backend()}")
-    print(f"  Summarizer model:  qwen3:0.6b / 8b (smallest available)")
+    print("  Summarizer model:  qwen3:0.6b / 8b (smallest available)")
     print()
 
     col_r = 12
@@ -376,7 +375,7 @@ def main() -> None:
         print("ERROR: Ollama not reachable. Start it first.")
         sys.exit(1)
 
-    print(f"\nNULLA Memory & Compression Benchmark")
+    print("\nNULLA Memory & Compression Benchmark")
     print(f"Embedding : {embedding_backend()}")
     print(f"Turns     : {turns}  ({turns - 10} filler  +  5 fact plants  +  5 recall Qs)")
     print()

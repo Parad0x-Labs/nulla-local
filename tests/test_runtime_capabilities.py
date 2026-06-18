@@ -4,10 +4,10 @@ import json
 from pathlib import Path
 from unittest import mock
 
+from core.backend_acceleration_truth import BackendAccelerationProof
 from core.hardware_tier import MachineProbe, QwenTier
 from core.provider_routing import ProviderCapabilityTruth
 from core.runtime_backbone import ProviderRegistrySnapshot
-from core.backend_acceleration_truth import BackendAccelerationProof
 from core.runtime_capabilities import runtime_capability_snapshot, runtime_capability_statuses
 from core.runtime_context import RuntimeContext, RuntimeFeatureFlags, RuntimePaths
 from core.runtime_install_profiles import InstallProfileTruth

@@ -109,6 +109,7 @@ def test_eagle3_acceleration_truth_detects_configured_status() -> None:
 
 def test_eagle3_autopilot_receives_eagle3_active_flag_in_router() -> None:
     import inspect
+
     from core.local_inference_autopilot import build_local_inference_autopilot_plan
     sig = inspect.signature(build_local_inference_autopilot_plan)
     assert "eagle3_active" in sig.parameters, (
@@ -179,7 +180,7 @@ def test_eagle3_autopilot_boosts_llamacpp_score_when_active() -> None:
         f"with eagle3_active, llamacpp must win deep lane, got {plan_with.selected_provider_id!r}"
     )
     assert plan_without.selected_provider_id == "llamacpp-local:qwen3:8b-gguf", (
-        f"llamacpp should win deep lane regardless due to specialist bonus"
+        "llamacpp should win deep lane regardless due to specialist bonus"
     )
     # Eagle3 flags should appear in runtime_flags when active
     flags_with = plan_with.runtime_flags
@@ -188,7 +189,7 @@ def test_eagle3_autopilot_boosts_llamacpp_score_when_active() -> None:
     )
     flags_without = plan_without.runtime_flags
     assert "speculative" not in flags_without, (
-        f"without eagle3_active, speculative flag must not be set"
+        "without eagle3_active, speculative flag must not be set"
     )
 
 

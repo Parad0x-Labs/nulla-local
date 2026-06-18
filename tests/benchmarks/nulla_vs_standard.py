@@ -21,13 +21,13 @@ Scoring weights TTFT at 35% — this is the latency users feel in OpenClaw/Curso
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import json
 import re
 import subprocess
 import time
 import urllib.request
 from dataclasses import dataclass
-
 
 # ── Provider config ─────────────────────────────────────────────────────────
 
@@ -490,10 +490,8 @@ def _completion(pid: str, messages: list, max_tokens: int) -> tuple[str, float]:
 
 
 def _warmup(pid: str) -> None:
-    try:
+    with contextlib.suppress(Exception):
         _completion(pid, [{"role": "user", "content": "hi"}], 5)
-    except Exception:
-        pass
 
 
 # ── Speed benchmark ───────────────────────────────────────────────────────────
@@ -542,7 +540,7 @@ def run_speed_benchmark(providers: list, runs: int = 2) -> list:
 
         ttft_ms = -1.0
         try:
-            ttft_ms, total_ms, _ = _stream_ttft(pid, TTFT_PROBE, 150)
+            ttft_ms, _total_ms, _ = _stream_ttft(pid, TTFT_PROBE, 150)
         except Exception as e:
             print(f"    TTFT probe failed: {e}")
 
@@ -550,7 +548,7 @@ def run_speed_benchmark(providers: list, runs: int = 2) -> list:
             tpss = []
             for _ in range(runs):
                 try:
-                    content, tps = _completion(pid, prompt["messages"], prompt["max_tokens"])
+                    _content, tps = _completion(pid, prompt["messages"], prompt["max_tokens"])
                     if tps > 0:
                         tpss.append(tps)
                 except Exception as e:
@@ -607,17 +605,15 @@ def run_cold_start_benchmark(ollama_url: str = "http://127.0.0.1:11434") -> list
     for model, label in [("qwen3:8b", "Ollama 8B (warm)"), ("qwen3:14b", "Ollama 14B (cold swap)")]:
         if model == "qwen3:14b":
             # Force 14B eviction: load 8B, then explicitly unload 14B
-            print(f"  Warming 8B, evicting 14B to simulate real model-switch...")
-            try:
+            print("  Warming 8B, evicting 14B to simulate real model-switch...")
+            with contextlib.suppress(Exception):
                 _ollama_completion(ollama_url, "qwen3:8b",
                                    [{"role": "user", "content": "hi"}], 5)
-            except Exception:
-                pass
             _ollama_unload(ollama_url, "qwen3:14b")  # force GPU eviction
-            print(f"  14B evicted. Measuring cold-load TTFT...")
+            print("  14B evicted. Measuring cold-load TTFT...")
 
         try:
-            t0 = time.perf_counter()
+            time.perf_counter()
             cold_ttft, _, _ = _ollama_stream_ttft(ollama_url, model, COLD_START_PROBE, 50)
             warm_ttft, _, _ = _ollama_stream_ttft(ollama_url, model, COLD_START_PROBE, 50)
             results.append(ColdStartResult(model=model, label=label,
@@ -1178,7 +1174,7 @@ def run_web_benchmark(providers: list) -> list:
 # ── Report ────────────────────────────────────────────────────────────────────
 
 def _bar(val: float, max_val: float, width: int = 20) -> str:
-    filled = int(round(val / max(max_val, 0.01) * width))
+    filled = round(val / max(max_val, 0.01) * width)
     filled = min(filled, width)
     return "█" * filled + "░" * (width - filled)
 
@@ -1212,7 +1208,7 @@ def print_report(speed, concurrency, code, debug, web, cold=None) -> None:
         print("\n  ★  COLD-START TTFT — Ollama 14B model-swap vs always-loaded native")
         print("  " + "─" * (W - 2))
         for r in cold:
-            swap_x = r.cold_ttft_ms / max(r.warm_ttft_ms, 1)
+            r.cold_ttft_ms / max(r.warm_ttft_ms, 1)
             if r.cold_ttft_ms >= 10000:
                 cold_str = f"{r.cold_ttft_ms/1000:.1f}s"
             else:
@@ -1230,7 +1226,7 @@ def print_report(speed, concurrency, code, debug, web, cold=None) -> None:
             print(f"  ★  NATIVE IS {ratio:.0f}x FASTER TO FIRST TOKEN ON 14B")
         elif ollama_14b:
             print(f"\n  ★  Ollama 14B cold-load: {ollama_14b.cold_ttft_ms/1000:.1f}s to first token")
-            print(f"     (native 14B always-loaded — measured separately as ~388ms)")
+            print("     (native 14B always-loaded — measured separately as ~388ms)")
 
     # Speed
     print("\n  SPEED — Decode t/s + Time-to-First-Token")
@@ -1375,7 +1371,7 @@ def main() -> None:
     providers = args.providers
     print(f"\nBenchmarking: {', '.join(providers)}")
     print("NOTE: Ollama and native servers share the Metal GPU — they run sequentially.")
-    print(f"Estimated time: ~25-40 min for all 4 providers.\n")
+    print("Estimated time: ~25-40 min for all 4 providers.\n")
 
     ollama_providers = [p for p in providers if PROVIDERS[p]["api_style"] in ("ollama", "ollama-thinking")]
     native_providers = [p for p in providers if PROVIDERS[p]["api_style"] == "openai" and not PROVIDERS[p].get("solo_gpu")]
@@ -1386,7 +1382,7 @@ def main() -> None:
     if ollama_providers and not args.skip_cold_start:
         killed = stop_native_servers()
         if killed:
-            print(f"[GPU] Stopped native servers for cold-start test.")
+            print("[GPU] Stopped native servers for cold-start test.")
         cold += run_cold_start_benchmark()
 
     # Phase 1 — Ollama (stop native servers to free Metal GPU)

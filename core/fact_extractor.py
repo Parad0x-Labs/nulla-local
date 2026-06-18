@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -122,10 +123,8 @@ class FactExtractor:
             return
         finally:
             if self._close_memory_on_finish:
-                try:
+                with contextlib.suppress(Exception):
                     self._memory.close()
-                except Exception:
-                    pass
 
     def _run(self, messages: list[dict]) -> list[ExtractedFact]:
         conversation_text = self._format_conversation(messages)

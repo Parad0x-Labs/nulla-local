@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from core.runtime_paths import configure_runtime_home
 from core.memory.entries import (
     add_memory_fact,
     combined_memory_entries,
@@ -23,6 +22,7 @@ from core.memory.files import (
     session_summaries_path,
     user_heuristics_path,
 )
+from core.runtime_paths import configure_runtime_home
 
 
 @pytest.fixture(autouse=True)

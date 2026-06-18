@@ -6,7 +6,7 @@ import platform
 import re
 import subprocess
 from dataclasses import dataclass, field
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 from core.hardware_tier import MachineProbe, probe_machine
 from core.local_model_bundles import (
@@ -19,7 +19,7 @@ from core.provider_routing import ProviderCapabilityTruth, ProviderRole
 AutopilotLane = Literal["tiny", "daily", "deep", "cloud", "human"]
 AutopilotPhaseStatus = Literal["planned", "blocked"]
 AutopilotFramework = Literal["ollama_mlx", "ollama_metal", "llama_cpp", "exllamav2", "unknown"]
-RuntimeFlagValue = Union[str, int, float, bool]
+RuntimeFlagValue = str | int | float | bool
 
 _SECRET_RE = re.compile(
     r"(?i)\b("
@@ -1006,7 +1006,7 @@ __all__ = [
     "LocalInferenceAutopilotPlan",
     "PrefixCachePlan",
     "ResidencyAction",
-    "build_prefix_cache_plan",
     "build_local_inference_autopilot_plan",
+    "build_prefix_cache_plan",
     "compile_context_capsule",
 ]
