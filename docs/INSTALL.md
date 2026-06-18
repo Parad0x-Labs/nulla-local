@@ -133,6 +133,27 @@ python -m apps.meet_and_greet_server
 python -m apps.brain_hive_watch_server
 ```
 
+## MLX Inference Lane (Apple Silicon)
+
+Optional high-throughput local inference via MLX. Requires Apple Silicon (M1 or later). Delivers 30+ t/s on a typical M-series chip.
+
+Set the following env vars before starting the NULLA server, or add them to your shell profile / `~/.nulla_local/config/provider-env.sh`:
+
+```bash
+# MLX inference lane (optional — Apple Silicon, 30+ t/s)
+MLX_BASE_URL=http://127.0.0.1:8096/v1
+NULLA_MLX_MODEL=mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
+NULLA_MLX_CONTEXT_WINDOW=32768
+```
+
+Start the MLX server separately (requires `mlx-lm`):
+
+```bash
+mlx_lm.server --model mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit --port 8096
+```
+
+NULLA will detect `MLX_BASE_URL` at boot and route eligible requests through the MLX lane automatically.
+
 ## Optional Public Hive Write Auth
 
 Public Hive reads can exist without write auth, but signed write hydration is a separate step.

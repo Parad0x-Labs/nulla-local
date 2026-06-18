@@ -35,6 +35,8 @@ _DEFAULT_VLLM_BASE_URL = "http://127.0.0.1:8000/v1"
 _DEFAULT_VLLM_CONTEXT_WINDOW = 131072
 _DEFAULT_LLAMACPP_BASE_URL = "http://127.0.0.1:8080/v1"
 _DEFAULT_LLAMACPP_CONTEXT_WINDOW = 32768
+_DEFAULT_MLX_BASE_URL = "http://127.0.0.1:8096/v1"
+_DEFAULT_MLX_CONTEXT_WINDOW = 32768
 _FAST_LOCAL_DEFAULT_MODEL = "nulla-qwen3-30b-a3b:nothink"
 
 
@@ -112,6 +114,9 @@ def ensure_default_runtime_providers(
         vllm_provider_id = _ensure_vllm_provider(registry, model_name=local_model, env=env_map)
         if vllm_provider_id:
             changed.append(vllm_provider_id)
+        mlx_provider_id = _ensure_mlx_provider(registry, model_name=local_model, env=env_map)
+        if mlx_provider_id:
+            changed.append(mlx_provider_id)
     if _profile_allows_kimi_provider(active_profile):
         kimi_provider_id = _ensure_kimi_provider(registry, env=env_map)
         if kimi_provider_id:
@@ -600,6 +605,79 @@ def _ensure_llamacpp_deep_provider(
         weight_location="external",
         runtime_dependency="llama.cpp",
         notes="Local llama.cpp deep/quality lane — auto-registered when NULLA_LLAMACPP_DEEP_BASE_URL is configured.",
+        capabilities=["summarize", "classify", "format", "extract", "code_basic", "code_complex", "structured_json", "long_context"],
+        runtime_config={
+            "base_url": base_url,
+            "api_path": "/chat/completions",
+            "health_path": "/models",
+            "timeout_seconds": 180,
+            "health_timeout_seconds": 10,
+            "temperature": 0.4,
+            "supports_json_mode": True,
+            "context_window": context_window,
+        },
+        metadata={
+            "runtime_family": "openai-compatible",
+            "confidence_baseline": 0.75,
+            "orchestration_role": "queen",
+            "deployment_class": "local",
+            "context_window": context_window,
+            "tool_support": ["structured_json", "code_complex"],
+            "max_safe_concurrency": max_safe_concurrency,
+        },
+        enabled=True,
+    )
+    registry.register_manifest(manifest)
+    return manifest.provider_id
+
+
+def _ensure_mlx_provider(
+    registry: ModelRegistry,
+    *,
+    model_name: str = "",
+    env: Mapping[str, str],
+) -> str:
+    base_url = _env_first(env, "MLX_BASE_URL", "NULLA_MLX_BASE_URL")
+    if not base_url:
+        return ""
+    resolved_model_name = (
+        _env_first(env, "NULLA_MLX_MODEL", "MLX_MODEL") or model_name or default_runtime_model_tag(env=env)
+    )
+    context_window = _env_int(
+        env,
+        "NULLA_MLX_CONTEXT_WINDOW",
+        "MLX_CONTEXT_WINDOW",
+        default=_DEFAULT_MLX_CONTEXT_WINDOW,
+    )
+    max_safe_concurrency = _env_int(
+        env,
+        "NULLA_MLX_MAX_SAFE_CONCURRENCY",
+        "MLX_MAX_SAFE_CONCURRENCY",
+        default=1,
+    )
+    existing = registry.get_manifest("mlx-local", resolved_model_name)
+    existing_runtime_config = dict(getattr(existing, "runtime_config", {}) or {}) if existing else {}
+    existing_metadata = dict(getattr(existing, "metadata", {}) or {}) if existing else {}
+    existing_base_url = str(existing_runtime_config.get("base_url") or "").strip()
+    if (
+        existing
+        and existing.enabled
+        and existing_base_url == base_url
+        and int(existing_runtime_config.get("context_window") or existing_metadata.get("context_window") or 0) == context_window
+        and int(existing_metadata.get("max_safe_concurrency") or 0) == max_safe_concurrency
+    ):
+        return existing.provider_id
+    manifest = ModelProviderManifest(
+        provider_name="mlx-local",
+        model_name=resolved_model_name,
+        source_type="http",
+        adapter_type="openai_compatible",
+        license_name="User-managed",
+        license_reference="user-managed",
+        license_url_or_reference="user-managed",
+        weight_location="external",
+        runtime_dependency="mlx-lm",
+        notes="Local MLX OpenAI-compatible lane — auto-registered when MLX_BASE_URL is configured.",
         capabilities=["summarize", "classify", "format", "extract", "code_basic", "code_complex", "structured_json", "long_context"],
         runtime_config={
             "base_url": base_url,

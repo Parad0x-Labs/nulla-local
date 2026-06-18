@@ -82,17 +82,76 @@ def secondary_local_provider_id(env: Mapping[str, str]) -> str:
     return f"llamacpp-local:{secondary_local_model(env)}"
 
 
+# ---------------------------------------------------------------------------
+# MLX tertiary lane (port 8096)
+# ---------------------------------------------------------------------------
+
+DEFAULT_MLX_MODEL = "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"
+DEFAULT_MLX_BACKEND = "mlx-lm"
+DEFAULT_MLX_BASE_URL = "http://127.0.0.1:8096/v1"
+DEFAULT_MLX_CONTEXT_WINDOW = 32768
+DEFAULT_MLX_PORT = 8096
+
+MLX_MODEL_ENV_KEYS = ("NULLA_MLX_MODEL", "MLX_MODEL")
+MLX_BASE_URL_ENV_KEYS = ("NULLA_MLX_BASE_URL", "MLX_BASE_URL")
+MLX_CONTEXT_WINDOW_ENV_KEYS = ("NULLA_MLX_CONTEXT_WINDOW", "MLX_CONTEXT_WINDOW")
+
+
+def mlx_model(env: Mapping[str, str]) -> str:
+    for key in MLX_MODEL_ENV_KEYS:
+        value = str(env.get(key) or "").strip()
+        if value:
+            return value
+    return DEFAULT_MLX_MODEL
+
+
+def mlx_base_url(env: Mapping[str, str]) -> str:
+    for key in MLX_BASE_URL_ENV_KEYS:
+        value = str(env.get(key) or "").strip()
+        if value:
+            return value
+    return DEFAULT_MLX_BASE_URL
+
+
+def mlx_context_window(env: Mapping[str, str]) -> int:
+    for key in MLX_CONTEXT_WINDOW_ENV_KEYS:
+        value = str(env.get(key) or "").strip()
+        if not value:
+            continue
+        try:
+            return max(1, int(value))
+        except Exception:
+            continue
+    return DEFAULT_MLX_CONTEXT_WINDOW
+
+
+def mlx_provider_id(env: Mapping[str, str]) -> str:
+    return f"mlx-local:{mlx_model(env)}"
+
+
 __all__ = [
+    "DEFAULT_MLX_BACKEND",
+    "DEFAULT_MLX_BASE_URL",
+    "DEFAULT_MLX_CONTEXT_WINDOW",
+    "DEFAULT_MLX_MODEL",
+    "DEFAULT_MLX_PORT",
     "DEFAULT_SECONDARY_LOCAL_BACKEND",
     "DEFAULT_SECONDARY_LOCAL_BASE_URL",
     "DEFAULT_SECONDARY_LOCAL_CONTEXT_WINDOW",
     "DEFAULT_SECONDARY_LOCAL_MODEL",
     "DEFAULT_SECONDARY_LOCAL_PORT",
     "DEFAULT_SECONDARY_LOCAL_PROFILE",
+    "MLX_BASE_URL_ENV_KEYS",
+    "MLX_CONTEXT_WINDOW_ENV_KEYS",
+    "MLX_MODEL_ENV_KEYS",
     "SECONDARY_LOCAL_BASE_URL_ENV_KEYS",
     "SECONDARY_LOCAL_CONTEXT_WINDOW_ENV_KEYS",
     "SECONDARY_LOCAL_MODEL_ENV_KEYS",
     "SECONDARY_LOCAL_MODEL_PATH_ENV_KEYS",
+    "mlx_base_url",
+    "mlx_context_window",
+    "mlx_model",
+    "mlx_provider_id",
     "secondary_local_base_url",
     "secondary_local_context_window",
     "secondary_local_model",
