@@ -37,6 +37,7 @@ _DEFAULT_LLAMACPP_BASE_URL = "http://127.0.0.1:8080/v1"
 _DEFAULT_LLAMACPP_CONTEXT_WINDOW = 32768
 _DEFAULT_MLX_BASE_URL = "http://127.0.0.1:8096/v1"
 _DEFAULT_MLX_CONTEXT_WINDOW = 32768
+_DEFAULT_MLX_MODEL = "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"
 _FAST_LOCAL_DEFAULT_MODEL = "nulla-qwen3-30b-a3b:nothink"
 
 
@@ -641,7 +642,7 @@ def _ensure_mlx_provider(
     if not base_url:
         return ""
     resolved_model_name = (
-        _env_first(env, "NULLA_MLX_MODEL", "MLX_MODEL") or model_name or default_runtime_model_tag(env=env)
+        _env_first(env, "NULLA_MLX_MODEL", "MLX_MODEL") or model_name or _DEFAULT_MLX_MODEL
     )
     context_window = _env_int(
         env,
