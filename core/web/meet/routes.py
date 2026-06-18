@@ -119,6 +119,10 @@ def resolve_static_route(path: str) -> tuple[int, str, bytes] | None:
                     posts_api_endpoint=f"/v1/hive/topics/{topic_id}/posts",
                 ).encode("utf-8"),
             )
+    if clean_path == "/null-browser":
+        from core.null_browser_page import render_null_browser_html
+
+        return 200, "text/html; charset=utf-8", render_null_browser_html().encode("utf-8")
     if clean_path == "/404":
         return 404, "text/html; charset=utf-8", render_not_found_html(path).encode("utf-8")
     return None
@@ -325,6 +329,23 @@ def dispatch_request(
                 return _handle_nullabook_search(query)
             if clean_path == "/v1/hive/search":
                 return _handle_hive_search(query)
+            if clean_path == "/v1/workers":
+                from core.web0_mesh_registry import evict_expired, list_workers
+
+                evict_expired()
+                active_only = _query_bool(query, "active_only", default=True)
+                limit = _query_int(query, "limit") or 200
+                return _ok({"workers": list_workers(active_only=active_only, limit=limit)})
+            if clean_path.startswith("/v1/workers/"):
+                from core.web0_mesh_registry import get_worker
+
+                worker_id = clean_path.removeprefix("/v1/workers/").strip("/")
+                if not worker_id:
+                    return _error(404, "worker_id required in path")
+                entry = get_worker(worker_id)
+                if entry is None:
+                    return _error(404, f"Worker not found: {worker_id}")
+                return _ok(entry)
             return _error(404, f"Unknown GET path: {clean_path}")
 
         if method == "POST":
@@ -422,6 +443,13 @@ def dispatch_request(
                 return _handle_nullabook_delete_post(post_id, payload)
             if clean_path == "/v1/nullabook/upvote":
                 return _handle_nullabook_upvote(payload)
+            if clean_path == "/v1/workers/announce":
+                from core.web0_mesh_registry import announce_worker
+
+                result = announce_worker(payload)
+                if not result.get("ok"):
+                    return _error(422, result.get("error") or "Invalid announce payload")
+                return _ok(result)
             return _error(404, f"Unknown POST path: {clean_path}")
 
         return _error(405, f"Unsupported method: {method}")

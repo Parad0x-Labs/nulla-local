@@ -59,6 +59,33 @@ PAYAI_FACILITATOR_DEVNET  = "https://devnet.facilitator.payai.network"
 SOLANA_RPC_MAINNET = "https://api.mainnet-beta.solana.com"
 SOLANA_RPC_DEVNET  = "https://api.devnet.solana.com"
 
+# ---------------------------------------------------------------------------
+# Parad0x / dna-x402 on-chain program IDs (mainnet-beta)
+# Multisig upgrade authority: 9M949AfyYCHp9hUk7crZZx3N6Y8sigyWBN6RM6tFq1q5
+# Source: configs/mainnet.commercial.json + docs/WEB0_MASTER_PLAN.md
+# ---------------------------------------------------------------------------
+
+# Core receipt / ZK programs (2026-05-29 batch, under Squads multisig)
+RECEIPT_ANCHOR_PROGRAM_MAINNET   = "6HSRGivdYR5D7yTDy1TFMCM8h3LzXxRtKU1RA3RnCMRN"
+DARK_PROOF_GATE_LITE_MAINNET     = "PmSCTuehX1MYxf8GNsGsUZySYTtqWAtuTt3N2xZLpw2"
+DARK_BN254_GATE_MAINNET          = "GCptvBYF8S6eVYoh15B7WAESc54FUHCpN1Ui6aHeQYZd"
+DARK_SEMAPHORE_MAINNET           = "Ev7HEFhhKTXk6kS2Y6ssbUcK9C7E6yZ589jJNjUrQV5p"
+DARK_SECP256R1_VAULT_MAINNET     = "3hbbtjeSrTVYXq6eRwjeofDe2DCPh3n8cfN6kZcQfewi"
+DARK_SECP256K1_AUTH_MAINNET      = "AqwBbV13AoczhoELwP8oxT3nDqB6MsLWXauNzHkssZ9B"
+NULL_TOKEN_HOOK_MAINNET          = "14ivonrNRmaMbJMQkGdHVVTcqZYhNvchULWxveazhW2g"
+NULL_LOTTERY_MAINNET             = "3t5c2Trk4SFK7hvKVjsmmC2xQtasFnK9pJQRdwPHqxbG"
+NULL_MINT_GATE_MAINNET           = "5jduvBZggszFeE7uxxNrvZAp8pJxzqtgzBGqg12fKhC1"
+
+# NULL ecosystem (under deployer / founder key)
+NULL_REGISTRAR_MAINNET           = "H4wbFJucY9shJt95N8Bra532Z4nnkKhGEfqWvLcYfuDm"
+DNA_X402_MAIN_MAINNET            = "9bPBmDNnKGxF8GTt4SqodNJZ1b9nSjoKia2ML4V5gGCF"
+
+# $NULL token mint (Token-2022)
+NULL_TOKEN_MINT_MAINNET          = "8EeDdvCRmFAzVD4takkBrNNwkeUTUQh4MscRK5Fzpump"
+
+# Squads multisig that controls the 2026-05-29 batch
+PARAD0X_UPGRADE_AUTHORITY        = "9M949AfyYCHp9hUk7crZZx3N6Y8sigyWBN6RM6tFq1q5"
+
 
 # ---------------------------------------------------------------------------
 # Configuration
