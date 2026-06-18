@@ -377,7 +377,7 @@ class BuilderFacadeMixin:
             return False
         if not self._looks_like_builder_request(lowered) and not explicit_file_request and not workflow_supported_request:
             return False
-        if any(marker in lowered for marker in ("don't write", "do not write", "advice only", "just plan", "no files")):
+        if any(marker in lowered for marker in ("don't write", "do not write", "do not edit files", "advice only", "just plan", "no files")):
             return False
         scaffold_request = (
             any(marker in lowered for marker in ("build", "create", "scaffold", "implement", "generate", "start working"))

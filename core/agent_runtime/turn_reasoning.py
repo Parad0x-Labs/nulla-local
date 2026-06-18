@@ -257,6 +257,7 @@ def execute_grounded_turn(
         interpretation=interpreted,
         persona=persona,
         session_id=session_id,
+        source_context=source_context,
     )
     ranked = context_result.local_candidates
     curiosity_result = None

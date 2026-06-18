@@ -15,6 +15,9 @@ class FastPathFacadeMixin:
             session_id=session_id,
         )
 
+    def _explicit_heavy_model_block_response(self, user_input: str) -> str | None:
+        return agent_fast_paths.explicit_heavy_model_block_response(user_input)
+
     def _evaluative_conversation_fast_path(self, normalized_input: str, *, source_surface: str) -> str | None:
         return agent_fast_paths.evaluative_conversation_fast_path(
             self,
@@ -140,6 +143,20 @@ class FastPathFacadeMixin:
         source_context: dict[str, object] | None,
     ) -> dict[str, Any] | None:
         return agent_fast_paths.maybe_handle_companion_memory_fast_path(
+            self,
+            user_input,
+            session_id=session_id,
+            source_context=source_context,
+        )
+
+    def _maybe_handle_web0_builder_fast_path(
+        self,
+        user_input: str,
+        *,
+        session_id: str,
+        source_context: dict[str, object] | None,
+    ) -> dict[str, Any] | None:
+        return agent_fast_paths.maybe_handle_web0_builder_fast_path(
             self,
             user_input,
             session_id=session_id,

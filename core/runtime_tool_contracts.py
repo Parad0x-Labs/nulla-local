@@ -32,6 +32,8 @@ def runtime_tool_contracts() -> list[RuntimeToolContract]:
     read_enabled = bool(policy_engine.get("filesystem.allow_read_workspace", True))
     write_enabled = bool(policy_engine.get("filesystem.allow_write_workspace", False))
     sandbox_enabled = bool(policy_engine.get("execution.allow_sandbox_execution", False))
+    web_enabled = bool(policy_engine.allow_web_fallback())
+    browser_enabled = bool(policy_engine.allow_browser_fallback())
     return [
         RuntimeToolContract(
             intent="workspace.list_tree",
@@ -160,6 +162,57 @@ def runtime_tool_contracts() -> list[RuntimeToolContract]:
             timeout_policy="local_only_default",
             retry_policy="none",
             artifact_emission="machine_file_observation",
+            error_contract="returns_structured_error_result",
+        ),
+        RuntimeToolContract(
+            intent="web0.open_builder_draft",
+            description="Create a local web0.null builder URL from a title and self-contained code draft.",
+            tool_surface="web0",
+            capability_id="web0.local_builder",
+            capability_claim="generate local Web0 builder draft URLs for self-contained pages without publishing",
+            supported=True,
+            unsupported_reason="Local Web0 builder draft generation is disabled on this runtime.",
+            input_schema={"title": "string", "code": "string", "domain": "string optional"},
+            output_schema={"builder_url": "string", "template": "string", "domain": "string optional"},
+            side_effect_class="read_only",
+            approval_requirement="none",
+            timeout_policy="local_only_default",
+            retry_policy="none",
+            artifact_emission="builder_url",
+            error_contract="returns_structured_error_result",
+        ),
+        RuntimeToolContract(
+            intent="web.fetch",
+            description="Fetch a public web page over HTTP(S) and return bounded text plus honest fetch status.",
+            tool_surface="web",
+            capability_id="web.fetch",
+            capability_claim="fetch public web pages when web access is enabled and report policy, network, or page barriers honestly",
+            supported=web_enabled,
+            unsupported_reason="Web fetch is disabled by runtime web policy.",
+            input_schema={"url": "string", "timeout_seconds": "number optional"},
+            output_schema={"status": "ok|disabled_by_policy|missing_dependency|captcha|login_wall|error", "url": "string", "text": "string optional"},
+            side_effect_class="read_only",
+            approval_requirement="none",
+            timeout_policy="web_fetch_timeout",
+            retry_policy="caller_managed",
+            artifact_emission="web_observation",
+            error_contract="returns_structured_error_result",
+        ),
+        RuntimeToolContract(
+            intent="web.browser_render",
+            description="Render a public page with the configured browser engine when browser tools are enabled.",
+            tool_surface="web",
+            capability_id="web.browser",
+            capability_claim="render browser-dependent pages when Playwright is enabled and report disabled, dependency, captcha, login, or ok status",
+            supported=browser_enabled,
+            unsupported_reason="Browser rendering is disabled by runtime browser policy.",
+            input_schema={"url": "string", "timeout_ms": "integer optional", "max_scroll": "integer optional"},
+            output_schema={"status": "ok|disabled_by_policy|missing_dependency|captcha|login_wall|error", "final_url": "string", "text": "string optional"},
+            side_effect_class="read_only",
+            approval_requirement="none",
+            timeout_policy="browser_render_timeout",
+            retry_policy="none",
+            artifact_emission="web_observation",
             error_contract="returns_structured_error_result",
         ),
         RuntimeToolContract(

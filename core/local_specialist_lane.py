@@ -9,13 +9,20 @@ DEFAULT_SECONDARY_LOCAL_BASE_URL = "http://127.0.0.1:8090/v1"
 DEFAULT_SECONDARY_LOCAL_CONTEXT_WINDOW = 32768
 DEFAULT_SECONDARY_LOCAL_PORT = 8090
 
+# Deep lane vars take precedence: when a separate deep/quality llamacpp server is
+# configured (NULLA_LLAMACPP_DEEP_*), it should be used as the verifier/secondary,
+# not the fast lane primary.
 SECONDARY_LOCAL_MODEL_ENV_KEYS = (
+    "NULLA_LLAMACPP_DEEP_MODEL",
+    "LLAMACPP_DEEP_MODEL",
     "NULLA_LLAMACPP_MODEL",
     "LLAMACPP_MODEL",
     "NULLA_LLAMA_CPP_MODEL",
     "LLAMA_CPP_MODEL",
 )
 SECONDARY_LOCAL_BASE_URL_ENV_KEYS = (
+    "NULLA_LLAMACPP_DEEP_BASE_URL",
+    "LLAMACPP_DEEP_BASE_URL",
     "LLAMACPP_BASE_URL",
     "NULLA_LLAMACPP_BASE_URL",
     "LLAMA_CPP_BASE_URL",

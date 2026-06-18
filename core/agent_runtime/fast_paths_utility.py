@@ -40,6 +40,11 @@ _TIME_FOLLOWUP_EXCLUSION_MARKERS = (
     "queue",
     "work",
 )
+_WORKSPACE_READ_FILE_RE = re.compile(r"(?P<path>[A-Za-z0-9_./-]+\.(?:toml|json|ya?ml|md|txt|py|ts|tsx|js|jsx))")
+_SPACED_WORKSPACE_EXTENSION_RE = re.compile(
+    r"(?P<stem>[A-Za-z0-9_./-]+)\.\s+(?P<ext>toml|json|ya?ml|md|txt|py|ts|tsx|js|jsx)\b",
+    re.IGNORECASE,
+)
 _STATUS_CHECK_RE = re.compile(r"\b(?:how\s+are\s+(?:you(?:\s+doing)?|ya|u)(?:\s+rn)?|how\s+r\s+u(?:\s+rn)?|you\s+alive(?:\s+or\s+what)?)\b")
 _EMBEDDED_ACTION_VERBS = (
     " create ",
@@ -96,6 +101,11 @@ _SHORT_EVALUATIVE_TOKENS = {
     "weak",
     "weird",
 }
+_EXPLICIT_HEAVY_MODEL_MARKERS = (
+    "qwen3.5:35b-a3b",
+    "qwen3.5 35b-a3b",
+    "35b-a3b",
+)
 
 
 def smalltalk_fast_path(agent: Any, normalized_input: str, *, source_surface: str, session_id: str) -> str | None:
@@ -172,11 +182,41 @@ def smalltalk_fast_path(agent: Any, normalized_input: str, *, source_surface: st
         return "You're right. That reply was slow and useless. Give me the task again and I will go straight for the action lane."
     if phrase in {"thanks", "thank you", "thx"}:
         return "Anytime. Send the next task."
-    if phrase in {"what can you do", "help"}:
+    if phrase in {
+        "what can we do today",
+        "what should we do today",
+        "what are we doing today",
+    }:
+        return "\n".join(
+            [
+                "Today we can:",
+                "- answer from local NULLA memory first, including Web0 context",
+                "- inspect project files and run bounded validation when asked",
+                "- use live lookup for fresh public facts without exposing private paths",
+                "- keep actions explicit: I report what I did, what failed, and what needs approval",
+            ]
+        )
+    if phrase in {
+        "what can you do",
+        "what can we do",
+        "help",
+    }:
         return agent._help_capabilities_text()
     if phrase in {"kill me lol", "omfg just kill me", "omfg just kill me lol", "kms lol"}:
         return "You're frustrated. Let's fix the thing instead. If you want me to go by a different name, I'll use it."
     return None
+
+
+def explicit_heavy_model_block_response(user_input: str) -> str | None:
+    text = " ".join(str(user_input or "").strip().lower().split())
+    if not text:
+        return None
+    if not any(marker in text for marker in _EXPLICIT_HEAVY_MODEL_MARKERS):
+        return None
+    return (
+        "`qwen3.5:35b-a3b` is explicit-only and is not healthy enough to run on this local machine right now. "
+        "I did not start it. Use the llama.cpp 14B specialist or qwen3:8b/qwen3:14b lanes for local testing."
+    )
 
 
 def heartbeat_poll_fast_path(user_input: str, *, source_context: dict[str, object] | None) -> str | None:
@@ -303,11 +343,31 @@ def maybe_handle_direct_workspace_runtime_request(
     source_surface: str,
     source_context: dict[str, object] | None,
 ) -> dict[str, Any] | None:
-    if source_surface not in {"channel", "openclaw", "api"}:
-        return None
     workspace_root = str((source_context or {}).get("workspace") or (source_context or {}).get("workspace_root") or "").strip()
     if not workspace_root:
         return None
+    if source_surface not in {"channel", "openclaw", "api"}:
+        context_surface = str((source_context or {}).get("surface") or "").strip()
+        if context_surface not in {"channel", "openclaw", "api"}:
+            return None
+    direct_read = _direct_workspace_read_request(user_input)
+    if direct_read:
+        execution = execute_runtime_tool(
+            "workspace.read_file",
+            direct_read,
+            source_context=dict(source_context or {}),
+        )
+        if execution is None:
+            return None
+        response = _render_direct_workspace_read_response(user_input, execution.response_text, execution.details)
+        return agent._fast_path_result(
+            session_id=session_id,
+            user_input=user_input,
+            response=response,
+            confidence=0.99 if execution.ok else 0.9,
+            source_context=source_context,
+            reason="workspace_runtime_fast_path",
+        )
     decision = agent._plan_tool_workflow(
         user_text=user_input,
         task_class="file_inspection",
@@ -335,6 +395,54 @@ def maybe_handle_direct_workspace_runtime_request(
     )
 
 
+def _direct_workspace_read_request(user_input: str) -> dict[str, object] | None:
+    text = " ".join(str(user_input or "").split()).strip()
+    text = _SPACED_WORKSPACE_EXTENSION_RE.sub(r"\g<stem>.\g<ext>", text)
+    lowered = f" {text.lower()} "
+    if not any(marker in lowered for marker in (" read ", " open ", " inspect ", " show ", " tell me ")):
+        return None
+    match = _WORKSPACE_READ_FILE_RE.search(text)
+    if not match:
+        return None
+    return {
+        "path": match.group("path").strip().lstrip("/"),
+        "start_line": 1,
+        "max_lines": 160,
+    }
+
+
+def _render_direct_workspace_read_response(user_input: str, response_text: str, details: dict[str, Any]) -> str:
+    path = str((details or {}).get("path") or "").strip()
+    lowered = str(user_input or "").lower()
+    asks_for_project_name = "project name" in lowered or "protect name" in lowered or (
+        " name " in f" {lowered} " and "python" in lowered
+    )
+    if path == "pyproject.toml" and asks_for_project_name and "python" in lowered:
+        lines = [str(item.get("text") or "") for item in list((details or {}).get("lines") or []) if isinstance(item, dict)]
+        if not lines:
+            lines = str(response_text or "").splitlines()
+        name = _first_toml_scalar(lines, "name")
+        requires_python = _first_toml_scalar(lines, "requires-python")
+        parts = []
+        if name:
+            parts.append(f"Project name: `{name}`.")
+        if requires_python:
+            parts.append(f"Python requirement: `{requires_python}`.")
+        if parts:
+            return " ".join(parts) + " Read via `workspace.read_file`."
+    return str(response_text or "").strip()
+
+
+def _first_toml_scalar(lines: list[str], key: str) -> str:
+    pattern = re.compile(rf"^\s*{re.escape(key)}\s*=\s*['\"](?P<value>[^'\"]+)['\"]")
+    for line in lines:
+        clean_line = re.sub(r"^\s*\d+\s*:\s*", "", str(line or ""))
+        match = pattern.match(clean_line)
+        if match:
+            return match.group("value").strip()
+    return ""
+
+
 def date_time_fast_path(
     agent: Any,
     normalized_input: str,
@@ -360,6 +468,7 @@ def date_time_fast_path(
     )
     effective_timezone = requested_timezone or contextual_timezone
     effective_label = requested_label or contextual_label
+    has_time_word = bool(re.search(r"\btime\b", cleaned))
     asks_date = any(
         marker in cleaned
         for marker in (
@@ -390,8 +499,8 @@ def date_time_fast_path(
                 "what time now",
             )
         )
-        or ("time" in cleaned and any(marker in cleaned for marker in ("what", "now", "current", "right now")))
-        or (effective_timezone and "time" in cleaned)
+        or (has_time_word and any(marker in cleaned for marker in ("what", "now", "current", "right now")))
+        or (effective_timezone and has_time_word)
         or looks_like_malformed_time_followup(
             cleaned,
             effective_timezone=effective_timezone,

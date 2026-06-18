@@ -197,10 +197,15 @@ def build_bootstrap_context(
     interpretation: Any,
     session_id: str,
     max_lexicon_items: int = 4,
+    include_private_context: bool = True,
 ) -> list[ContextItem]:
-    session_state = get_dialogue_session(session_id)
-    recent_turns = recent_dialogue_turns(session_id, limit=2, speaker_roles=("user", "assistant"))
-    lexicon = session_lexicon(session_id)
+    session_state = get_dialogue_session(session_id) if include_private_context else {}
+    recent_turns = (
+        recent_dialogue_turns(session_id, limit=2, speaker_roles=("user", "assistant"))
+        if include_private_context
+        else []
+    )
+    lexicon = session_lexicon(session_id) if include_private_context else {}
     quality_flags = list(getattr(interpretation, "quality_flags", []) or [])
     topic_hints = list(getattr(interpretation, "topic_hints", []) or [])
     references = list(getattr(interpretation, "reference_targets", []) or [])
@@ -209,8 +214,9 @@ def build_bootstrap_context(
 
     character_mode = ""
     try:
-        _prefs = load_preferences()
-        character_mode = str(getattr(_prefs, "character_mode", "") or "").strip()
+        if include_private_context:
+            _prefs = load_preferences()
+            character_mode = str(getattr(_prefs, "character_mode", "") or "").strip()
     except Exception:
         pass
     persona_content = (
@@ -439,75 +445,76 @@ def build_bootstrap_context(
     except Exception:
         pass
 
-    # Runtime memory: persists under NULLA_HOME/data/MEMORY.md.
-    try:
-        memory_excerpt = load_memory_excerpt(max_chars=2000).strip()
-        if memory_excerpt:
+    if include_private_context:
+        # Runtime memory: persists under NULLA_HOME/data/MEMORY.md.
+        try:
+            memory_excerpt = load_memory_excerpt(max_chars=2000).strip()
+            if memory_excerpt:
+                items.append(
+                    ContextItem(
+                        item_id="bootstrap-runtime-memory",
+                        layer="bootstrap",
+                        source_type="runtime_memory",
+                        title="Persistent memory",
+                        content=memory_excerpt,
+                        priority=0.94,
+                        confidence=0.9,
+                        include_reason="persistent_runtime_memory",
+                    )
+                )
+        except Exception:
+            pass
+
+        try:
+            policy_text = describe_session_memory_policy(session_id)
+            if policy_text:
+                items.append(
+                    ContextItem(
+                        item_id="bootstrap-session-memory-policy",
+                        layer="bootstrap",
+                        source_type="session_policy",
+                        title="Session memory policy",
+                        content=policy_text,
+                        priority=0.985,
+                        confidence=1.0,
+                        must_keep=True,
+                        include_reason="memory_sharing_scope",
+                        metadata={"exclude_from_chat_minimal_system_prompt": True},
+                    )
+                )
+        except Exception:
+            pass
+
+        conversation_pref_text = _conversation_preference_text()
+        if conversation_pref_text:
             items.append(
                 ContextItem(
-                    item_id="bootstrap-runtime-memory",
+                    item_id="bootstrap-conversation-preferences",
                     layer="bootstrap",
-                    source_type="runtime_memory",
-                    title="Persistent memory",
-                    content=memory_excerpt,
-                    priority=0.94,
-                    confidence=0.9,
-                    include_reason="persistent_runtime_memory",
+                    source_type="user_preferences",
+                    title="Conversation preferences",
+                    content=conversation_pref_text,
+                    priority=0.91,
+                    confidence=1.0,
+                    include_reason="persistent_user_preferences",
                 )
             )
-    except Exception:
-        pass
 
-    try:
-        policy_text = describe_session_memory_policy(session_id)
-        if policy_text:
+        execution_pref_text = _execution_preference_text()
+        if execution_pref_text:
             items.append(
                 ContextItem(
-                    item_id="bootstrap-session-memory-policy",
+                    item_id="bootstrap-execution-preferences",
                     layer="bootstrap",
-                    source_type="session_policy",
-                    title="Session memory policy",
-                    content=policy_text,
-                    priority=0.985,
+                    source_type="execution_preferences",
+                    title="Execution preferences",
+                    content=execution_pref_text,
+                    priority=0.9,
                     confidence=1.0,
-                    must_keep=True,
-                    include_reason="memory_sharing_scope",
+                    include_reason="execution_policy_preferences",
                     metadata={"exclude_from_chat_minimal_system_prompt": True},
                 )
             )
-    except Exception:
-        pass
-
-    conversation_pref_text = _conversation_preference_text()
-    if conversation_pref_text:
-        items.append(
-            ContextItem(
-                item_id="bootstrap-conversation-preferences",
-                layer="bootstrap",
-                source_type="user_preferences",
-                title="Conversation preferences",
-                content=conversation_pref_text,
-                priority=0.91,
-                confidence=1.0,
-                include_reason="persistent_user_preferences",
-            )
-        )
-
-    execution_pref_text = _execution_preference_text()
-    if execution_pref_text:
-        items.append(
-            ContextItem(
-                item_id="bootstrap-execution-preferences",
-                layer="bootstrap",
-                source_type="execution_preferences",
-                title="Execution preferences",
-                content=execution_pref_text,
-                priority=0.9,
-                confidence=1.0,
-                include_reason="execution_policy_preferences",
-                metadata={"exclude_from_chat_minimal_system_prompt": True},
-            )
-        )
 
     if quality_flags:
         items.append(

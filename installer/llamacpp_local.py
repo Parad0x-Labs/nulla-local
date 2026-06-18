@@ -24,6 +24,10 @@ DEFAULT_LLAMACPP_REPO_ID = "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF"
 DEFAULT_LLAMACPP_FILENAME = "qwen2.5-coder-14b-instruct-q4_k_m.gguf"
 DEFAULT_LLAMACPP_CHAT_FORMAT = "chatml"
 DEFAULT_LLAMACPP_N_GPU_LAYERS = -1
+DEFAULT_LLAMACPP_CACHE = True
+DEFAULT_LLAMACPP_CACHE_TYPE = "ram"
+DEFAULT_LLAMACPP_DRAFT_MODEL = "prompt-lookup-decoding"
+DEFAULT_LLAMACPP_DRAFT_MODEL_NUM_PRED_TOKENS = 10
 _CONFIG_RELATIVE_PATH = Path("config") / "llamacpp-local.json"
 _MODEL_DIR_RELATIVE_PATH = Path("models") / "llamacpp"
 
@@ -43,6 +47,10 @@ class LlamacppLocalConfig:
     context_window: int
     chat_format: str
     n_gpu_layers: int
+    cache: bool
+    cache_type: str
+    draft_model: str
+    draft_model_num_pred_tokens: int
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -57,6 +65,10 @@ class LlamacppLocalConfig:
             "NULLA_LLAMACPP_PORT": str(self.port),
             "NULLA_LLAMACPP_CHAT_FORMAT": self.chat_format,
             "NULLA_LLAMACPP_N_GPU_LAYERS": str(self.n_gpu_layers),
+            "NULLA_LLAMACPP_CACHE": "1" if self.cache else "0",
+            "NULLA_LLAMACPP_CACHE_TYPE": self.cache_type,
+            "NULLA_LLAMACPP_DRAFT_MODEL": self.draft_model,
+            "NULLA_LLAMACPP_DRAFT_MODEL_NUM_PRED_TOKENS": str(self.draft_model_num_pred_tokens),
             "NULLA_LLAMACPP_REPO_ID": self.repo_id,
             "NULLA_LLAMACPP_FILENAME": self.filename,
         }
@@ -93,6 +105,14 @@ def build_llamacpp_local_config(
         context_window=secondary_local_context_window(env_map) or DEFAULT_SECONDARY_LOCAL_CONTEXT_WINDOW,
         chat_format=str(env_map.get("NULLA_LLAMACPP_CHAT_FORMAT") or DEFAULT_LLAMACPP_CHAT_FORMAT).strip(),
         n_gpu_layers=_env_int(env_map, "NULLA_LLAMACPP_N_GPU_LAYERS", default=DEFAULT_LLAMACPP_N_GPU_LAYERS),
+        cache=_env_bool(env_map, "NULLA_LLAMACPP_CACHE", default=DEFAULT_LLAMACPP_CACHE),
+        cache_type=str(env_map.get("NULLA_LLAMACPP_CACHE_TYPE") or DEFAULT_LLAMACPP_CACHE_TYPE).strip(),
+        draft_model=str(env_map.get("NULLA_LLAMACPP_DRAFT_MODEL") or DEFAULT_LLAMACPP_DRAFT_MODEL).strip(),
+        draft_model_num_pred_tokens=_env_int(
+            env_map,
+            "NULLA_LLAMACPP_DRAFT_MODEL_NUM_PRED_TOKENS",
+            default=DEFAULT_LLAMACPP_DRAFT_MODEL_NUM_PRED_TOKENS,
+        ),
     )
 
 
@@ -185,6 +205,17 @@ def _env_int(env: dict[str, str], key: str, *, default: int) -> int:
     value = str(env.get(key) or "").strip()
     if not value:
         return default
+
+
+def _env_bool(env: dict[str, str], key: str, *, default: bool) -> bool:
+    value = str(env.get(key) or "").strip().lower()
+    if not value:
+        return default
+    if value in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if value in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
     try:
         return int(value)
     except Exception:
@@ -193,6 +224,10 @@ def _env_int(env: dict[str, str], key: str, *, default: int) -> int:
 
 __all__ = [
     "DEFAULT_LLAMACPP_CHAT_FORMAT",
+    "DEFAULT_LLAMACPP_CACHE",
+    "DEFAULT_LLAMACPP_CACHE_TYPE",
+    "DEFAULT_LLAMACPP_DRAFT_MODEL",
+    "DEFAULT_LLAMACPP_DRAFT_MODEL_NUM_PRED_TOKENS",
     "DEFAULT_LLAMACPP_FILENAME",
     "DEFAULT_LLAMACPP_N_GPU_LAYERS",
     "DEFAULT_LLAMACPP_REPO_ID",

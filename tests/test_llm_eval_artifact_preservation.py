@@ -222,9 +222,9 @@ def test_regression_payload_sanitizes_baseline_command_paths(monkeypatch, tmp_pa
 
     baseline_text = (baseline_root / "recent_48h_regression.json").read_text(encoding="utf-8")
     assert "/Users/sauliuskruopis" not in baseline_text
-    assert "/Users/<redacted>" in baseline_text
+    assert "<repo>/.venv/bin/python" in baseline_text
     assert "/Users/sauliuskruopis" not in json.dumps(payload)
-    assert "/Users/<redacted>" in json.dumps(payload)
+    assert "<repo>/.venv/bin/python" in json.dumps(payload)
 
 
 def test_run_live_acceptance_uses_explicit_runtime_and_workspace_roots(monkeypatch, tmp_path: Path) -> None:

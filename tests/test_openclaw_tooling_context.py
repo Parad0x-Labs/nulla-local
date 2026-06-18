@@ -251,6 +251,22 @@ class OpenClawToolingContextTests(unittest.TestCase):
         assert response is not None
         self.assertIn("what are we working on", response.lower())
 
+    def test_smalltalk_today_prompt_uses_showcase_safe_intro(self) -> None:
+        agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
+        response = agent._smalltalk_fast_path(
+            "what can we do today?",
+            source_surface="openclaw",
+            session_id="openclaw:smalltalk-today",
+        )
+        self.assertIsNotNone(response)
+        assert response is not None
+        lowered = response.lower()
+        self.assertIn("today we can", lowered)
+        self.assertIn("web0 context", lowered)
+        self.assertIn("without exposing private paths", lowered)
+        self.assertNotIn("hello.py", lowered)
+        self.assertNotIn("hello world", lowered)
+
     def test_smalltalk_repeated_greetings_stop_using_identical_canned_reply(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="channel-test", persona_id="default")
         first = agent._smalltalk_fast_path("hey", source_surface="openclaw", session_id="openclaw:smalltalk-repeat")

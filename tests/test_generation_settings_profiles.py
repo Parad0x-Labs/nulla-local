@@ -241,6 +241,7 @@ def test_openai_adapter_prewarm_uses_native_ollama_chat_endpoint() -> None:
             metadata={"runtime_family": "ollama"},
             runtime_config={
                 "base_url": "http://127.0.0.1:11434/v1",
+                "think": False,
                 "prewarm": {
                     "strategy": "ollama_chat",
                     "keep_alive": "15m",
@@ -267,6 +268,7 @@ def test_openai_adapter_prewarm_uses_native_ollama_chat_endpoint() -> None:
         "stream": False,
         "keep_alive": "15m",
         "options": {"num_predict": 1},
+        "think": False,
     }
 
 
@@ -369,6 +371,8 @@ def test_openai_adapter_uses_native_ollama_chat_and_applies_compute_threads() ->
                 "base_url": "http://127.0.0.1:11434/v1",
                 "timeout_seconds": 5.0,
                 "temperature": 0.4,
+                "context_window": 2048,
+                "think": False,
             },
         )
     )
@@ -399,6 +403,8 @@ def test_openai_adapter_uses_native_ollama_chat_and_applies_compute_threads() ->
     assert result.output_text == "native ollama answer"
     assert post_mock.call_args.args[0] == "http://127.0.0.1:11434/api/chat"
     assert post_mock.call_args.kwargs["json"]["options"]["num_thread"] == 3
+    assert post_mock.call_args.kwargs["json"]["options"]["num_ctx"] == 2048
+    assert post_mock.call_args.kwargs["json"]["think"] is False
 
 
 def test_openai_adapter_prefers_manifest_openai_path_for_ollama_and_keeps_thread_budget() -> None:
@@ -412,6 +418,7 @@ def test_openai_adapter_prefers_manifest_openai_path_for_ollama_and_keeps_thread
                 "api_path": "/v1/chat/completions",
                 "timeout_seconds": 5.0,
                 "temperature": 0.4,
+                "context_window": 4096,
             },
         )
     )
@@ -443,6 +450,7 @@ def test_openai_adapter_prefers_manifest_openai_path_for_ollama_and_keeps_thread
     assert result.output_text == "OPENAI-COMPAT-OK"
     assert post_mock.call_args.args[0] == "http://127.0.0.1:11434/v1/chat/completions"
     assert payload["options"]["num_thread"] == 3
+    assert payload["options"]["num_ctx"] == 4096
     assert payload["max_tokens"] == request.max_output_tokens
     assert payload["temperature"] == pytest.approx(0.05)
     assert payload["top_p"] == pytest.approx(0.15)

@@ -28,6 +28,7 @@ from .runtime import (
     openai_chat_response,
     openai_sse_stream_from_ollama_chunks,
     parameter_count_for_model,
+    parameter_size_for_model,
     run_agent,
     runtime_headers,
     stable_openclaw_session_id,
@@ -99,6 +100,21 @@ def capability_snapshot_with_runtime(
 ) -> dict[str, Any]:
     payload = dict(capability_snapshot_provider() or {})
     public_hive_auth = dict(runtime.public_hive_auth or {})
+    runtime_provider_truth = tuple(
+        dict(item)
+        for item in tuple(runtime.provider_capability_truth or ())
+        if isinstance(item, dict)
+    )
+    if runtime_provider_truth:
+        payload["provider_capability_truth"] = list(runtime_provider_truth)
+        model_lane_defaults = dict(payload.get("model_lane_defaults") or {})
+        fast_model = "nulla-qwen3-30b-a3b:nothink"
+        if any(str(item.get("model_id") or "").strip() == fast_model for item in runtime_provider_truth):
+            model_lane_defaults["default_model"] = fast_model
+            model_lane_defaults["fast_local_preferred_model"] = fast_model
+            model_lane_defaults["fast_local_installed"] = True
+            model_lane_defaults["no_think_default"] = True
+            payload["model_lane_defaults"] = model_lane_defaults
     capabilities = [dict(item) for item in list(payload.get("capabilities") or []) if isinstance(item, dict)]
     feature_flags = dict(payload.get("feature_flags") or {})
 
@@ -177,9 +193,18 @@ def _runtime_model_catalog(
     return catalog
 
 
+def _ollama_tag_parameter_size(model_id: str, *, model_name: str, runtime: RuntimeServices) -> str:
+    normalized_model_id = str(model_id or "").strip()
+    normalized_default = str(model_name or "").strip()
+    if normalized_model_id in {normalized_default, f"{normalized_default}:latest"}:
+        return str(runtime.runtime_parameter_size or "").strip() or parameter_size_for_model(runtime.runtime_model_tag)
+    return parameter_size_for_model(normalized_model_id)
+
+
 def _ollama_tag_payload(*, capability_snapshot: dict[str, Any], model_name: str, runtime: RuntimeServices) -> dict[str, Any]:
     models = []
     for entry in _runtime_model_catalog(capability_snapshot=capability_snapshot, default_model_name=model_name):
+        parameter_size = _ollama_tag_parameter_size(entry["id"], model_name=model_name, runtime=runtime)
         models.append(
             {
                 "name": entry["id"],
@@ -191,7 +216,7 @@ def _ollama_tag_payload(*, capability_snapshot: dict[str, Any], model_name: str,
                     "parent_model": "",
                     "format": "nulla",
                     "family": "qwen",
-                    "parameter_size": runtime.runtime_parameter_size,
+                    "parameter_size": parameter_size,
                     "quantization_level": "runtime",
                 },
             }
@@ -359,6 +384,16 @@ def dispatch_post(
     stream_agent_with_events_provider: Callable[..., Iterable[bytes]] = stream_agent_with_events,
 ) -> ApiResponse:
     normalized_path = path.rstrip("/") or "/"
+
+    if normalized_path == "/gate/unlock":
+        from core.web0_gated_html import NullaGateHandler, gate_cors_headers
+        from core.web0_tools import web0_gate_key_store
+
+        result = NullaGateHandler(web0_gate_key_store()).handle(body)
+        status = 200 if "aes_key" in result else 403
+        if result.get("error") in {"missing_fields", "invalid_wallet_pubkey", "invalid_nonce"}:
+            status = 400
+        return apply_runtime_headers(json_response(status, result, headers=gate_cors_headers()), runtime)
 
     if normalized_path in {"/api/chat", "/v1/chat/completions"}:
         messages = list(body.get("messages", []) or [])

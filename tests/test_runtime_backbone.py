@@ -673,6 +673,72 @@ def test_build_provider_registry_snapshot_reads_persisted_provider_env_from_runt
     assert any(item.provider_id == "llamacpp-local:qwen2.5:14b-gguf" for item in snapshot.capability_truth)
 
 
+def test_build_provider_registry_snapshot_refreshes_stale_llamacpp_manifest(tmp_path) -> None:
+    stale_manifest = ModelProviderManifest(
+        provider_name="llamacpp-local",
+        model_name="qwen2.5:14b-gguf",
+        source_type="http",
+        adapter_type="openai_compatible",
+        license_name="User-managed",
+        license_reference="user-managed",
+        license_url_or_reference="user-managed",
+        weight_location="external",
+        runtime_dependency="llama.cpp",
+        notes="stale test manifest",
+        capabilities=["structured_json"],
+        runtime_config={
+            "base_url": "http://127.0.0.1:8090/v1",
+            "context_window": 32768,
+        },
+        metadata={
+            "runtime_family": "openai-compatible",
+            "orchestration_role": "drone",
+            "deployment_class": "local",
+            "context_window": 32768,
+            "max_safe_concurrency": 1,
+        },
+        enabled=True,
+    )
+    manifests = {("llamacpp-local", "qwen2.5:14b-gguf"): stale_manifest}
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        return list(manifests.values())[:limit]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.return_value = []
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+    provider_env = tmp_path / "config" / "provider-env.sh"
+    provider_env.parent.mkdir(parents=True)
+    provider_env.write_text(
+        "export LLAMACPP_BASE_URL=http://127.0.0.1:8090/v1\n"
+        "export NULLA_LLAMACPP_MODEL=qwen2.5:14b-gguf\n"
+        "export LLAMACPP_CONTEXT_WINDOW=4096\n",
+        encoding="utf-8",
+    )
+
+    build_provider_registry_snapshot(
+        registry,
+        runtime_home=str(tmp_path),
+        honor_install_profile=True,
+        requested_profile="local-max",
+        env={},
+    )
+
+    refreshed = manifests[("llamacpp-local", "qwen2.5:14b-gguf")]
+    assert refreshed.runtime_config["context_window"] == 4096
+    assert refreshed.metadata["context_window"] == 4096
+
+
 def test_build_runtime_backbone_reuses_bootstrap_probe_and_provider_facades() -> None:
     probe = MachineProbe(
         cpu_cores=12,

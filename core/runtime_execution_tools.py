@@ -6,9 +6,12 @@ import json
 import platform
 import re
 import subprocess
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from core import policy_engine
 from core.execution.artifacts import (
@@ -40,8 +43,10 @@ from core.install_recommendations import install_recommendation_machine_summary
 from core.learning import promote_verified_procedure
 from core.runtime_paths import resolve_workspace_root
 from core.runtime_tool_contracts import runtime_tool_contract_map, runtime_tool_contracts
+from core.web0_tools import web0_open_builder_draft
 from sandbox.network_guard import parse_command
 from sandbox.sandbox_runner import SandboxRunner
+from tools.browser.browser_render import browser_render
 
 _EXECUTION_REQUEST_MARKERS = (
     "run ",
@@ -294,6 +299,14 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
             "line_count": int(payload.get("line_count") or 0),
             "action": str(payload.get("action") or "").strip(),
         }
+    if intent == "web0.open_builder_draft":
+        return {
+            "intent": intent,
+            "builder_url": str(payload.get("builder_url") or "").strip(),
+            "template": str(payload.get("template") or "").strip(),
+            "domain": str(payload.get("domain") or "").strip(),
+            "title": str(payload.get("title") or "").strip(),
+        }
     if intent == "workspace.search_text":
         matches = [dict(item) for item in list(payload.get("matches") or []) if isinstance(item, dict)]
         primary = dict((matches[:1] or [{}])[0] or {})
@@ -439,25 +452,85 @@ def extract_observation_followup_hints(observation: dict[str, Any] | None) -> di
                 if str(item.get("origin_domain") or item.get("domain") or "").strip()
             ],
         }
-    if intent in {"web.fetch", "web.research"}:
+    if intent in {"web.fetch", "web.browser_render", "web.research"}:
         return {
             "intent": intent,
             "url": str(payload.get("url") or payload.get("final_url") or "").strip(),
+            "final_url": str(payload.get("final_url") or payload.get("url") or "").strip(),
             "query": str(payload.get("query") or "").strip(),
             "status": str(payload.get("status") or "").strip(),
             "hit_count": int(payload.get("hit_count") or 0),
             "evidence_strength": str(payload.get("evidence_strength") or "").strip(),
+            "title": str(payload.get("title") or "").strip(),
         }
     return {"intent": intent}
 
 
 def looks_like_execution_request(user_text: str, *, task_class: str) -> bool:
-    if task_class in {"debugging", "dependency_resolution", "config", "file_inspection", "shell_guidance"}:
-        return True
     lowered = str(user_text or "").strip().lower()
     if not lowered:
         return False
+    if looks_like_advice_only_execution_prompt(lowered):
+        return False
+    if task_class in {"debugging", "dependency_resolution", "config", "file_inspection", "shell_guidance"}:
+        return True
     return any(marker in lowered for marker in _EXECUTION_REQUEST_MARKERS)
+
+
+def looks_like_advice_only_execution_prompt(user_text: str) -> bool:
+    lowered = f" {' '.join(str(user_text or '').strip().lower().split())} "
+    if not lowered.strip():
+        return False
+    hard_stop_markers = (
+        " do not edit ",
+        " don't edit ",
+        " do not write ",
+        " don't write ",
+        " do not modify ",
+        " don't modify ",
+        " no file changes ",
+        " no files ",
+        " advice only ",
+        " plan only ",
+        " just plan ",
+        " explain only ",
+    )
+    if any(marker in lowered for marker in hard_stop_markers):
+        return True
+    advisory_markers = (
+        " plan ",
+        " explain ",
+        " review ",
+        " advise ",
+        " recommend ",
+        " design ",
+        " think through ",
+        " reason through ",
+        " what should ",
+        " should i ",
+        " should we ",
+    )
+    execution_markers = (
+        " run ",
+        " execute ",
+        " apply ",
+        " edit ",
+        " write ",
+        " modify ",
+        " create ",
+        " delete ",
+        " remove ",
+        " commit ",
+        " push ",
+        " install ",
+        " start working ",
+        " carry on ",
+        " go ahead ",
+        " do it ",
+    )
+    return any(marker in lowered for marker in advisory_markers) and not any(
+        marker in lowered for marker in execution_markers
+    )
 
 
 def execute_runtime_tool(
@@ -499,6 +572,12 @@ def execute_runtime_tool(
             return _ensure_machine_directory(arguments)
         if intent == "machine.write_file":
             return _write_machine_file(arguments)
+        if intent == "web0.open_builder_draft":
+            return _web0_open_builder_draft(arguments)
+        if intent == "web.fetch":
+            return _web_fetch(arguments, source_context=source_context)
+        if intent == "web.browser_render":
+            return _web_browser_render(arguments, source_context=source_context)
         if intent == "workspace.list_tree":
             return _list_tree(arguments, workspace_root=workspace_root)
         if intent == "workspace.search_text":
@@ -584,6 +663,185 @@ def execute_runtime_tool(
                 tool_surface="runtime_execution",
                 ok=False,
                 status="unsupported",
+            ),
+        },
+    )
+
+
+def _web0_open_builder_draft(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    result = web0_open_builder_draft(
+        str(arguments.get("title") or "NULLA-built Web0 draft"),
+        str(arguments.get("code") or ""),
+        domain=str(arguments.get("domain") or ""),
+    )
+    builder_url = str(result.get("builder_url") or "")
+    response = (
+        "Web0 local builder draft ready:\n"
+        f"{builder_url}\n\n"
+        "This is local preview/edit only. Publishing to Arweave/mainnet still requires an explicit publish command and wallet confirmation."
+    )
+    return RuntimeExecutionResult(
+        handled=True,
+        ok=True,
+        status="executed",
+        response_text=response,
+        details={
+            **result,
+            "observation": _tool_observation(
+                intent="web0.open_builder_draft",
+                tool_surface="web0",
+                ok=True,
+                status="executed",
+                builder_url=builder_url,
+                template=str(result.get("template") or ""),
+                domain=str(result.get("domain") or ""),
+                title=str(result.get("title") or ""),
+            ),
+        },
+    )
+
+
+def _remote_fetch_allowed(source_context: dict[str, Any] | None) -> bool:
+    if "allow_remote_fetch" in (source_context or {}):
+        return bool((source_context or {}).get("allow_remote_fetch"))
+    return bool(policy_engine.allow_web_fallback())
+
+
+def _web_url(raw_url: object) -> str:
+    url = str(raw_url or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("web tools require an absolute http(s) URL")
+    return url
+
+
+def _web_fetch(arguments: dict[str, Any], *, source_context: dict[str, Any] | None) -> RuntimeExecutionResult:
+    url = _web_url(arguments.get("url"))
+    if not _remote_fetch_allowed(source_context):
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="disabled_by_policy",
+            response_text=f"Web fetch is disabled by policy for `{url}`.",
+            details={
+                "observation": _tool_observation(
+                    intent="web.fetch",
+                    tool_surface="web",
+                    ok=False,
+                    status="disabled_by_policy",
+                    url=url,
+                ),
+            },
+        )
+    timeout_seconds = max(1.0, min(float(arguments.get("timeout_seconds") or 12.0), 30.0))
+    max_bytes = max(16_384, min(int(policy_engine.max_fetch_bytes()), 2_000_000))
+    request = urllib.request.Request(url, headers={"User-Agent": "NULLA-runtime/1.0", "Accept": "text/html,text/plain,*/*"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            final_url = str(response.geturl() or url)
+            content_type = str(response.headers.get("content-type") or "").strip()
+            body = response.read(max_bytes + 1)
+    except urllib.error.HTTPError as exc:
+        status = "login_wall" if int(exc.code or 0) in {401, 403} else "error"
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status=status,
+            response_text=f"Web fetch for `{url}` failed with HTTP {int(exc.code or 0)}.",
+            details={
+                "observation": _tool_observation(
+                    intent="web.fetch",
+                    tool_surface="web",
+                    ok=False,
+                    status=status,
+                    url=url,
+                    http_status=int(exc.code or 0),
+                ),
+            },
+        )
+    except Exception as exc:
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="error",
+            response_text=f"Web fetch for `{url}` failed: {exc}",
+            details={
+                "observation": _tool_observation(
+                    intent="web.fetch",
+                    tool_surface="web",
+                    ok=False,
+                    status="error",
+                    url=url,
+                    error=str(exc),
+                ),
+            },
+        )
+    truncated = len(body) > max_bytes
+    text = body[:max_bytes].decode("utf-8", errors="replace")
+    return RuntimeExecutionResult(
+        handled=True,
+        ok=True,
+        status="ok",
+        response_text=f"Fetched `{final_url}` ({len(text)} chars{', truncated' if truncated else ''}).",
+        details={
+            "url": url,
+            "final_url": final_url,
+            "content_type": content_type,
+            "text": text,
+            "truncated": truncated,
+            "observation": _tool_observation(
+                intent="web.fetch",
+                tool_surface="web",
+                ok=True,
+                status="ok",
+                url=url,
+                final_url=final_url,
+                content_type=content_type,
+                text=text,
+                truncated=truncated,
+            ),
+        },
+    )
+
+
+def _web_browser_render(arguments: dict[str, Any], *, source_context: dict[str, Any] | None) -> RuntimeExecutionResult:
+    url = _web_url(arguments.get("url"))
+    if not _remote_fetch_allowed(source_context):
+        status = "disabled_by_policy"
+        rendered = {"status": status, "final_url": url}
+    else:
+        rendered = browser_render(
+            url,
+            timeout_ms=max(1000, min(int(arguments.get("timeout_ms") or 20_000), 60_000)),
+            max_scroll=max(0, min(int(arguments.get("max_scroll") or 2), 8)),
+        )
+        status = str(rendered.get("status") or "error").strip() or "error"
+    ok = status == "ok"
+    final_url = str(rendered.get("final_url") or url)
+    if ok:
+        response_text = f"Rendered `{final_url}` in browser."
+    elif status in {"disabled_by_policy", "missing_dependency", "captcha", "login_wall"}:
+        response_text = f"Browser render for `{url}` is `{status}`."
+    else:
+        response_text = f"Browser render for `{url}` failed."
+    return RuntimeExecutionResult(
+        handled=True,
+        ok=ok,
+        status=status,
+        response_text=response_text,
+        details={
+            **dict(rendered),
+            "url": url,
+            "observation": _tool_observation(
+                intent="web.browser_render",
+                tool_surface="web",
+                ok=ok,
+                status=status,
+                url=url,
+                final_url=final_url,
+                title=str(rendered.get("title") or ""),
+                text=str(rendered.get("text") or ""),
+                links=list(rendered.get("links") or []),
             ),
         },
     )
@@ -893,7 +1151,8 @@ def _read_machine_file(arguments: dict[str, Any]) -> RuntimeExecutionResult:
             status="not_allowed",
             response_text=(
                 "I cannot read that path in this lane. "
-                f"I can only read files inside: {', '.join(allowed_roots)}."
+                f"I can only read files inside: {', '.join(allowed_roots)}. "
+                "For repo or project paths, use workspace.read_file against the active workspace root."
             ),
             details={
                 "observation": _tool_observation(

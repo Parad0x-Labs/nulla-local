@@ -30,6 +30,19 @@ def handle_turn_frontdoor(
             )
         }
 
+    heavy_model_block = agent._explicit_heavy_model_block_response(effective_input)
+    if heavy_model_block:
+        return {
+            "result": agent._fast_path_result(
+                session_id=session_id,
+                user_input=effective_input,
+                response=heavy_model_block,
+                confidence=0.99,
+                source_context=source_context,
+                reason="explicit_heavy_model_blocked",
+            )
+        }
+
     heartbeat_reply = agent._heartbeat_poll_fast_path(
         raw_user_input,
         source_context=source_context,
@@ -87,6 +100,14 @@ def handle_turn_frontdoor(
     )
     if memory_result is not None:
         return {"result": memory_result}
+
+    web0_builder_result = agent._maybe_handle_web0_builder_fast_path(
+        effective_input,
+        session_id=session_id,
+        source_context=source_context,
+    )
+    if web0_builder_result is not None:
+        return {"result": web0_builder_result}
 
     ui_command = agent._ui_command_fast_path(normalized_input, source_surface=source_surface)
     if ui_command:

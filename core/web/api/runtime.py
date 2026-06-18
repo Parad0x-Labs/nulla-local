@@ -20,6 +20,7 @@ from core import policy_engine
 from core.compute_mode import ComputeModeDaemon
 from core.hardware_tier import probe_machine
 from core.identity_manager import load_active_persona
+from core.local_inference_evidence import hydrate_capability_truth_with_benchmarks
 from core.local_worker_pool import resolve_local_worker_capacity
 from core.model_registry import ModelRegistry
 from core.onboarding import (
@@ -28,11 +29,12 @@ from core.onboarding import (
     get_agent_display_name,
     is_first_boot,
 )
+from core.provider_env import merge_provider_env
 from core.public_hive_bridge import ensure_public_hive_auth
 from core.release_channel import release_manifest_snapshot
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_bootstrap import bootstrap_runtime_mode
-from core.runtime_install_profiles import active_install_profile_id
+from core.runtime_install_profiles import active_install_profile_id, required_ollama_models_for_profile
 from core.runtime_paths import active_config_home_dir, resolve_workspace_root
 from core.runtime_provider_defaults import default_runtime_model_tag, ensure_default_runtime_providers
 from core.runtime_task_events import (
@@ -62,8 +64,10 @@ class RuntimeServices:
         default_factory=lambda: parameter_size_for_model(default_runtime_model_tag())
     )
     runtime_started_at: str = ""
+    runtime_home: str = ""
     runtime_version_stamp: dict[str, Any] = field(default_factory=dict)
     public_hive_auth: dict[str, Any] = field(default_factory=dict)
+    provider_capability_truth: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
     def shutdown(self) -> None:
         if self.daemon:
@@ -160,7 +164,7 @@ def parameter_size_for_model(model_tag: str) -> str:
     model_name = str(model_tag or "").strip().split("/", 1)[-1]
     if ":" not in model_name:
         return "7B"
-    _, size = model_name.split(":", 1)
+    _, size = model_name.rsplit(":", 1)
     return size.upper()
 
 
@@ -241,8 +245,21 @@ def ensure_ollama_model(model_tag: str | None = None) -> None:
         )
 
 
-def ensure_default_provider(registry: ModelRegistry, model_tag: str) -> None:
-    for provider_id in ensure_default_runtime_providers(registry, model_tag=model_tag):
+def ensure_default_provider(
+    registry: ModelRegistry,
+    model_tag: str,
+    *,
+    env: dict[str, str] | None = None,
+    install_profile: str | None = None,
+    runtime_home: str | None = None,
+) -> None:
+    for provider_id in ensure_default_runtime_providers(
+        registry,
+        model_tag=model_tag,
+        env=env,
+        install_profile=install_profile,
+        runtime_home=runtime_home,
+    ):
         logger.info("Auto-registered default provider: %s", provider_id)
 
 
@@ -252,6 +269,9 @@ def log_prewarm_results(
     runtime_home: str | None = None,
     requested_profile: str | None = None,
 ) -> None:
+    if str(os.environ.get("NULLA_SKIP_PROVIDER_PREWARM") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        logger.info("Provider prewarm skipped by NULLA_SKIP_PROVIDER_PREWARM.")
+        return
     try:
         snapshot = build_provider_registry_snapshot(
             registry,
@@ -301,6 +321,27 @@ def log_prewarm_results(
             status,
             result.get("error") or "unknown_error",
         )
+
+
+def startup_provider_capability_truth(
+    registry: ModelRegistry,
+    *,
+    runtime_home: str | None = None,
+    requested_profile: str | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[dict[str, Any], ...]:
+    try:
+        snapshot = build_provider_registry_snapshot(
+            registry,
+            runtime_home=runtime_home,
+            requested_profile=requested_profile,
+            honor_install_profile=bool(requested_profile or runtime_home),
+            env=env,
+        )
+    except Exception as exc:
+        logger.warning("Startup provider capability snapshot failed: %s", exc)
+        return tuple()
+    return tuple(item.to_dict() for item in hydrate_capability_truth_with_benchmarks(snapshot.capability_truth))
 
 
 def public_hive_auth_snapshot(auth_result: dict[str, Any] | None) -> dict[str, Any]:
@@ -370,7 +411,22 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
             logger.warning("Public Hive auth is not wired for writes: %s", auth_status)
 
     probe = probe_machine()
-    runtime_model_tag = env_text("NULLA_OLLAMA_MODEL", default_runtime_model_tag())
+    runtime_home = (
+        str(boot.context.paths.runtime_home)
+        if getattr(getattr(boot, "context", None), "paths", None) is not None
+        else None
+    )
+    provider_env = merge_provider_env(runtime_home)
+    requested_profile = active_install_profile_id(runtime_home=runtime_home, env=provider_env) if runtime_home else None
+    profile_default_model = _profile_fast_default_model(
+        requested_profile=requested_profile,
+        runtime_home=runtime_home,
+        env=provider_env,
+    )
+    runtime_model_tag = env_text(
+        "NULLA_OLLAMA_MODEL",
+        profile_default_model or default_runtime_model_tag(env=provider_env),
+    )
     runtime_parameter_size = parameter_size_for_model(runtime_model_tag)
     ensure_ollama_model(runtime_model_tag)
     logger.info(
@@ -397,18 +453,19 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
     compute_daemon.start()
 
     model_registry = ModelRegistry()
-    ensure_default_provider(model_registry, runtime_model_tag)
+    ensure_default_provider(
+        model_registry,
+        runtime_model_tag,
+        env=provider_env,
+        install_profile=requested_profile,
+        runtime_home=runtime_home,
+    )
     for warning in model_registry.startup_warnings():
         logger.warning("Model warning: %s", warning)
-    runtime_home = (
-        str(boot.context.paths.runtime_home)
-        if getattr(getattr(boot, "context", None), "paths", None) is not None
-        else None
-    )
     log_prewarm_results(
         model_registry,
         runtime_home=runtime_home,
-        requested_profile=active_install_profile_id(runtime_home=runtime_home) if runtime_home else None,
+        requested_profile=requested_profile,
     )
 
     selection = boot.backend_selection
@@ -453,9 +510,33 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
         runtime_model_tag=runtime_model_tag,
         runtime_parameter_size=runtime_parameter_size,
         runtime_started_at=runtime_started_at,
+        runtime_home=str(runtime_home or ""),
         runtime_version_stamp=runtime_version_stamp,
         public_hive_auth=auth_snapshot,
+        provider_capability_truth=startup_provider_capability_truth(
+            model_registry,
+            runtime_home=runtime_home,
+            requested_profile=requested_profile,
+            env=provider_env,
+        ),
     )
+
+
+def _profile_fast_default_model(
+    *,
+    requested_profile: str | None,
+    runtime_home: str | None,
+    env: dict[str, str],
+) -> str:
+    default_model = default_runtime_model_tag(env=env)
+    required_models = required_ollama_models_for_profile(
+        profile_id=requested_profile or "local-only",
+        model_tag=default_model,
+        runtime_home=runtime_home,
+        env=env,
+    )
+    fast_model = "nulla-qwen3-30b-a3b:nothink"
+    return fast_model if fast_model in required_models else ""
 
 
 def message_text(content: Any) -> str:
@@ -578,11 +659,204 @@ def run_agent(
     base_context.setdefault("workspace_root", default_workspace)
     if session_id:
         base_context["runtime_session_id"] = session_id
-    return runtime.agent.run_once(
+    if runtime.runtime_home:
+        base_context.setdefault("runtime_home", runtime.runtime_home)
+    memory_recall = _memory_recall_response(runtime, user_text=user_text, source_context=base_context)
+    if memory_recall is not None:
+        return memory_recall
+    result = runtime.agent.run_once(
         user_text,
         session_id_override=session_id,
         source_context=base_context,
     )
+    schedule_memory_extraction(
+        runtime,
+        user_text=user_text,
+        assistant_output=str(dict(result or {}).get("response") or ""),
+        session_id=session_id,
+        source_context=base_context,
+    )
+    return result
+
+
+def schedule_memory_extraction(
+    runtime: RuntimeServices,
+    *,
+    user_text: str,
+    assistant_output: str,
+    session_id: str | None,
+    source_context: dict[str, Any] | None,
+) -> None:
+    if not _memory_capture_allowed(source_context):
+        return
+    messages = _messages_for_memory_extraction(
+        user_text=user_text,
+        assistant_output=assistant_output,
+        source_context=source_context,
+    )
+    if not messages:
+        return
+    try:
+        from core.fact_extractor import FactExtractor
+        from core.nulla_memory import NullaMemory
+
+        runtime_home = str(runtime.runtime_home or (source_context or {}).get("runtime_home") or "").strip() or None
+        memory = NullaMemory(runtime_home=runtime_home, agent_id=str((source_context or {}).get("agent_id") or "nulla"))
+        extractor = FactExtractor(memory=memory, close_memory_on_finish=True)
+        extractor.trigger_async(messages)
+    except Exception:
+        return
+
+
+def _memory_capture_allowed(source_context: dict[str, Any] | None) -> bool:
+    context = dict(source_context or {})
+    platform = str(context.get("platform") or "").strip().lower()
+    surface = str(context.get("surface") or "").strip().lower()
+    group_like = (
+        platform in {"discord", "telegram", "slack", "whatsapp", "group"}
+        or surface in {"discord", "telegram", "slack", "whatsapp", "group"}
+        or bool(context.get("is_group"))
+        or bool(context.get("group_id"))
+        or bool(context.get("channel_is_group"))
+    )
+    if group_like:
+        return False
+    explicit = context.get("memory_capture_enabled")
+    if isinstance(explicit, bool):
+        return explicit
+    return platform in {"api", "openclaw", "web_companion", "cli", ""} or surface in {"api", "openclaw", "channel", "cli", ""}
+
+
+def _memory_recall_response(
+    runtime: RuntimeServices,
+    *,
+    user_text: str,
+    source_context: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not _memory_capture_allowed(source_context):
+        return None
+    if not _looks_like_private_memory_recall(user_text):
+        return None
+    try:
+        from core.nulla_memory import NullaMemory
+
+        context = dict(source_context or {})
+        runtime_home = str(runtime.runtime_home or context.get("runtime_home") or "").strip() or None
+        agent_id = str(context.get("agent_id") or "nulla").strip() or "nulla"
+        with NullaMemory(runtime_home=runtime_home, agent_id=agent_id) as memory:
+            values = _private_memory_values(memory)
+    except Exception:
+        return None
+    if not any(values.values()):
+        return None
+    response = _format_private_memory_recall(values)
+    if not response:
+        return None
+    return {
+        "response": response,
+        "confidence": 0.95,
+        "source": "local_private_memory",
+    }
+
+
+def _looks_like_private_memory_recall(user_text: str) -> bool:
+    text = " ".join(str(user_text or "").lower().split())
+    if not text:
+        return False
+    direct_markers = (
+        "profile recall",
+        "personal profile",
+        "persistent memory",
+        "stored about me",
+        "remember about me",
+        "what do you remember",
+        "what is my name",
+        "what's my name",
+        "who am i",
+        "who is the user",
+        "answer style",
+        "response style",
+        "preferred style",
+        "preference",
+        "project codename",
+        "active codename",
+        "codename",
+    )
+    return any(marker in text for marker in direct_markers)
+
+
+def _private_memory_values(memory: Any) -> dict[str, str]:
+    blocks = {
+        "user_profile": str(memory.block_read("user_profile") or ""),
+        "preferences": str(memory.block_read("preferences") or ""),
+        "project_context": str(memory.block_read("project_context") or ""),
+        "constraints": str(memory.block_read("constraints") or ""),
+    }
+    return {
+        "name": _first_block_value(blocks["user_profile"], ("Name",)),
+        "answer_style": _first_block_value(blocks["preferences"], ("Answer style", "Response style", "Preferred answer style")),
+        "project_codename": _first_block_value(blocks["project_context"], ("Active project codename", "Project codename")),
+        "constraints": _compact_block_lines(blocks["constraints"]),
+    }
+
+
+def _first_block_value(block_text: str, labels: tuple[str, ...]) -> str:
+    for raw_line in str(block_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        for label in labels:
+            prefix = f"{label}:"
+            if line.lower().startswith(prefix.lower()):
+                return line[len(prefix) :].strip()
+    return ""
+
+
+def _compact_block_lines(block_text: str, *, max_lines: int = 3) -> str:
+    lines = [line.strip() for line in str(block_text or "").splitlines() if line.strip()]
+    return "; ".join(lines[:max_lines])
+
+
+def _format_private_memory_recall(values: dict[str, str]) -> str:
+    parts: list[str] = []
+    if values.get("name"):
+        parts.append(f"user: {values['name']}")
+    if values.get("answer_style"):
+        parts.append(f"preferred answer style: {values['answer_style']}")
+    if values.get("project_codename"):
+        parts.append(f"active project codename: {values['project_codename']}")
+    if values.get("constraints"):
+        parts.append(f"constraints: {values['constraints']}")
+    if not parts:
+        return ""
+    return "Stored local profile: " + "; ".join(parts) + "."
+
+
+def _messages_for_memory_extraction(
+    *,
+    user_text: str,
+    assistant_output: str,
+    source_context: dict[str, Any] | None,
+) -> list[dict[str, str]]:
+    context = dict(source_context or {})
+    history = list(context.get("conversation_history") or context.get("client_conversation_history") or [])
+    messages: list[dict[str, str]] = []
+    for item in history[-18:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        content = message_text(item.get("content") or "")
+        if content:
+            messages.append({"role": role, "content": content})
+    clean_user = str(user_text or "").strip()
+    if clean_user and (not messages or messages[-1] != {"role": "user", "content": clean_user}):
+        messages.append({"role": "user", "content": clean_user})
+    clean_assistant = str(assistant_output or "").strip()
+    if clean_assistant:
+        messages.append({"role": "assistant", "content": clean_assistant})
+    return messages[-20:]
 
 
 def openai_chat_response(result: dict[str, Any], model: str) -> dict[str, Any]:
@@ -698,6 +972,60 @@ def openai_sse_stream_from_ollama_chunks(stream: Iterable[bytes], model: str) ->
 def format_runtime_event_text(event: dict[str, Any]) -> str:
     if str(event.get("event_type") or "").strip() == "model_output_chunk":
         return str(event.get("message") or "")
+    event_type = str(event.get("event_type") or "").strip()
+    if event_type.startswith("model_"):
+        visible = {
+            key: value
+            for key, value in dict(event or {}).items()
+            if key
+            in {
+                "event_type",
+                "message",
+                "schema",
+                "turn_id",
+                "session_id",
+                "task_class",
+                "task_kind",
+                "output_mode",
+                "complexity",
+                "lane",
+                "lane_type",
+                "provider_id",
+                "model_id",
+                "model_name",
+                "planned_provider_id",
+                "planned_model_id",
+                "actual_adapter_provider_id",
+                "actual_adapter_model_id",
+                "backend",
+                "role",
+                "provider_role",
+                "queue_depth",
+                "tokens_per_second",
+                "measurement_source",
+                "phase",
+                "fallback_reason",
+                "rejection_reason",
+                "failure_reason",
+                "selected_provider_id",
+                "selected_model",
+                "ranked_candidates",
+                "attempted",
+                "error",
+                "failover_used",
+                "verifier_status",
+                "verifier_provider_id",
+                "verifier_model_id",
+                "kv_cache_status",
+                "backend_cache_proof",
+                "speculative_status",
+                "speculative_proof",
+                "eagle_status",
+                "eagle_proof",
+                "mismatch",
+            }
+        }
+        return "NULLA_RUNTIME_EVENT " + json.dumps(visible, separators=(",", ":"), sort_keys=True) + "\n"
     message = str(event.get("message") or "").strip()
     return message + "\n" if message else ""
 

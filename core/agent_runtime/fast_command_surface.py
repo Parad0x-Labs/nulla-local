@@ -146,6 +146,12 @@ def fast_path_result(
         target_type="task",
         details={"reason": reason, "source_surface": (source_context or {}).get("surface")},
     )
+    is_explicit_heavy_block = reason == "explicit_heavy_model_blocked"
+    lane = _fast_path_lane(reason)
+    phase = "blocked" if is_explicit_heavy_block else "completed"
+    planned_model_id = "qwen3.5:35b-a3b" if is_explicit_heavy_block else ""
+    fallback_reason = "explicit_heavy_lane_unavailable" if is_explicit_heavy_block else "model_not_used"
+    verifier_status = "blocked_no_primary" if is_explicit_heavy_block else "not_required"
     agent._emit_chat_truth_metrics(
         task_id=pseudo_task_id,
         reason=reason,
@@ -158,6 +164,40 @@ def fast_path_result(
         model_final_answer_hit=False,
         model_execution_source="fast_path",
         tool_backing_sources=agent._chat_truth_fast_path_backing_sources(reason),
+    )
+    agent._emit_runtime_event(
+        source_context,
+        event_type="model_lane_proof",
+        message="Fast-path response completed without model inference.",
+        schema="nulla.model_lane_proof.v1",
+        turn_id=pseudo_task_id,
+        session_id=session_id,
+        task_class=reason,
+        task_kind="fast_path",
+        output_mode="plain_text",
+        complexity=_fast_path_complexity(reason),
+        lane=lane,
+        lane_type=lane,
+        phase=phase,
+        provider_role="drone",
+        role="drone",
+        planned_provider_id="runtime-fast-path",
+        planned_model_id=planned_model_id,
+        provider_id="runtime-fast-path",
+        model_id="",
+        actual_adapter_provider_id="",
+        actual_adapter_model_id="",
+        backend="fast_path",
+        tokens_per_second=0.0,
+        measurement_source="deterministic_fast_path",
+        queue_depth=0,
+        fallback_reason=fallback_reason,
+        verifier_status=verifier_status,
+        kv_cache_status="fast_path=not_applicable",
+        speculative_status="inactive",
+        attempted=[],
+        failover_used=False,
+        mismatch=False,
     )
     agent._emit_runtime_event(
         source_context,
@@ -284,6 +324,41 @@ def action_fast_path_result(
         if checkpoint_status == "pending_approval"
         else "task_failed"
     )
+    if _should_emit_action_lane_proof(reason=reason, details=details):
+        agent._emit_runtime_event(
+            source_context,
+            event_type="model_lane_proof",
+            message="Runtime action path completed without model inference.",
+            schema="nulla.model_lane_proof.v1",
+            turn_id=task_id,
+            session_id=session_id,
+            task_class=reason,
+            task_kind="tool_workflow",
+            output_mode="action_result",
+            complexity="medium",
+            lane="daily",
+            lane_type="daily",
+            phase=checkpoint_status,
+            provider_role="drone",
+            role="drone",
+            planned_provider_id="runtime-action",
+            planned_model_id="",
+            provider_id="runtime-action",
+            model_id="",
+            actual_adapter_provider_id="",
+            actual_adapter_model_id="",
+            backend="tool_workflow",
+            tokens_per_second=0.0,
+            measurement_source="runtime_action_path",
+            queue_depth=0,
+            fallback_reason="model_not_used",
+            verifier_status="not_required",
+            kv_cache_status="tool_workflow=not_applicable",
+            speculative_status="inactive",
+            attempted=[],
+            failover_used=False,
+            mismatch=False,
+        )
     agent._emit_runtime_event(
         source_context,
         event_type=event_type,
@@ -326,6 +401,35 @@ def action_fast_path_result(
         "workflow_summary": workflow_summary,
         "response_class": turn_result.response_class.value,
     }
+
+
+def _fast_path_lane(reason: str) -> str:
+    normalized = str(reason or "").strip().lower()
+    if normalized in {"smalltalk_fast_path", "heartbeat_poll_fast_path", "date_time_fast_path", "direct_math_fast_path", "ui_command_fast_path"}:
+        return "tiny"
+    if normalized == "explicit_heavy_model_blocked":
+        return "deep"
+    return "daily"
+
+
+def _fast_path_complexity(reason: str) -> str:
+    lane = _fast_path_lane(reason)
+    if lane == "tiny":
+        return "trivial"
+    if lane == "deep":
+        return "hard"
+    return "medium"
+
+
+def _should_emit_action_lane_proof(*, reason: str, details: dict[str, object] | None) -> bool:
+    if not str(reason or "").startswith("model_tool_intent_"):
+        return True
+    tool_steps = [
+        str(item).strip()
+        for item in list((details or {}).get("tool_steps") or [])
+        if str(item).strip()
+    ]
+    return bool(tool_steps)
 
 
 def _builder_runtime_event_details(payload: dict[str, Any] | None) -> dict[str, Any]:

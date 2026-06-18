@@ -24,6 +24,8 @@ def prepare_live_info_request(
         live_mode = "fresh_lookup"
     if not live_mode:
         return "", "", None
+    if _explicit_remote_fetch_disabled(source_context):
+        return "", "", None
     if not policy_engine.allow_web_fallback():
         return live_mode, "", disabled_live_info_result(
             agent,
@@ -44,3 +46,11 @@ def prepare_live_info_request(
             reason="live_info_insufficient_evidence",
         )
     return live_mode, query, None
+
+
+def _explicit_remote_fetch_disabled(source_context: dict[str, object] | None) -> bool:
+    if not isinstance(source_context, dict) or "allow_remote_fetch" not in source_context:
+        return False
+    # Explicit false means the caller is forcing a local-only turn. Do not let
+    # the live-info fast path reinterpret a trusted surface as permission to browse.
+    return not bool(source_context.get("allow_remote_fetch"))

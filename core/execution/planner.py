@@ -6,7 +6,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-from core.runtime_execution_tools import extract_observation_followup_hints, looks_like_execution_request
+from core.runtime_execution_tools import (
+    extract_observation_followup_hints,
+    looks_like_advice_only_execution_prompt,
+    looks_like_execution_request,
+)
 from core.task_router import (
     build_task_envelope_for_request,
     looks_like_bounded_repo_repair_request,
@@ -67,6 +71,8 @@ def should_attempt_tool_intent(
     text = str(user_text or "").strip()
     lowered = text.lower()
     if not lowered:
+        return False
+    if looks_like_advice_only_execution_prompt(lowered):
         return False
     if (
         task_class in {"integration_orchestration", "system_design", "research"}

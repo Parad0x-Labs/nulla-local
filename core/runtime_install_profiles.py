@@ -13,9 +13,13 @@ from typing import Any
 
 from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwen_tier
 from core.local_model_bundles import (
+    bundle_spec,
+    installed_ollama_role_for_model,
     model_storage_gb,
     resolve_local_bundle_recommendation,
+    safe_disk_floor_gb,
 )
+from core.local_ollama_inventory import env_flag_enabled
 from core.local_specialist_lane import (
     DEFAULT_SECONDARY_LOCAL_BACKEND,
     secondary_local_model,
@@ -31,6 +35,7 @@ INSTALL_PROFILE_CHOICES = (
     "auto-recommended",
     "local-only",
     "local-max",
+    "goblin-stack",
     "hybrid-kimi",
     "hybrid-tether",
     "hybrid-fallback",
@@ -52,6 +57,9 @@ _PROFILE_ALIASES = {
     "ollama-max": "local-max",
     "ollama_max": "local-max",
     "local_max": "local-max",
+    "goblin": "goblin-stack",
+    "goblin_stack": "goblin-stack",
+    "goblin-stack": "goblin-stack",
     "ollama+kimi": "hybrid-kimi",
     "ollama-kimi": "hybrid-kimi",
     "ollama_kimi": "hybrid-kimi",
@@ -66,10 +74,11 @@ _PROFILE_ALIASES = {
 _PROFILE_DISPLAY_IDS = {
     "local-only": "ollama-only",
     "local-max": "ollama-max",
+    "goblin-stack": "goblin_stack",
     "hybrid-kimi": "ollama+kimi",
     "hybrid-tether": "ollama+tether",
 }
-_LOCAL_ONLY_PROFILE_IDS = frozenset({"local-only", "local-max"})
+_LOCAL_ONLY_PROFILE_IDS = frozenset({"local-only", "local-max", "goblin-stack"})
 
 _MODEL_SIZE_GB = {
     "qwen2.5:0.5b": 1.0,
@@ -154,6 +163,7 @@ class InstallProfileTruth:
     reasons: tuple[str, ...]
     volume_checks: tuple[InstallProfileVolumeCheck, ...]
     selected_models: tuple[str, ...] = ()
+    optional_models: tuple[str, ...] = ()
     selected_model_roles: tuple[tuple[str, str], ...] = ()
     capacity_bucket: str = ""
     bundle_id: str = ""
@@ -169,6 +179,7 @@ class InstallProfileTruth:
             "selection_source": self.selection_source,
             "selected_model": self.selected_model,
             "selected_models": list(self.selected_models),
+            "optional_models": list(self.optional_models),
             "selected_model_roles": [
                 {"role": role, "model": model} for role, model in self.selected_model_roles
             ],
@@ -455,6 +466,7 @@ def _compose_install_profile_truth(
     env: Mapping[str, str],
     installed_ollama_models: set[str],
 ) -> InstallProfileTruth:
+    bundle_recommendation = _with_profile_bundle(profile_id, bundle_recommendation)
     recommended_bundle = bundle_recommendation.recommended_bundle
     model_tag = recommended_bundle.primary_model
     selected_role_models = _selected_role_models_for_profile(
@@ -521,6 +533,7 @@ def _compose_install_profile_truth(
         selection_source=selection_source,
         selected_model=model_tag,
         selected_models=recommended_bundle.models,
+        optional_models=_optional_models_for_profile(profile_id),
         selected_model_roles=tuple((item.role, item.model) for item in selected_role_models),
         capacity_bucket=str(bundle_recommendation.capacity_bucket),
         bundle_id=recommended_bundle.bundle_id,
@@ -652,7 +665,8 @@ def _required_ollama_models(
     profile_id: str,
     bundle_recommendation: Any,
 ) -> tuple[str, ...]:
-    del profile_id
+    if profile_id == "goblin-stack":
+        return bundle_spec("goblin_stack").models
     return tuple(
         str(model_name).strip()
         for model_name in bundle_recommendation.recommended_bundle.models
@@ -737,6 +751,13 @@ def _provider_mix(
                 notes=f"Required local Ollama `{provider_role}` lane.",
             )
         )
+    if _expose_installed_ollama_lanes(env):
+        _append_installed_ollama_lanes(
+            providers,
+            provider_capability_truth=provider_capability_truth,
+            primary_local_model=primary_local_model,
+            env=env,
+        )
     if profile_id in {"local-max", "full-orchestrated"}:
         distinct_secondary = bool(secondary_local_provider_id) and secondary_local_provider_id != local_provider_id
         verifier_provider_id = secondary_local_provider_id or preferred_secondary_local_provider_id(env)
@@ -759,6 +780,28 @@ def _provider_mix(
             reasons.append(
                 f"{profile_id} needs a distinct {DEFAULT_SECONDARY_LOCAL_BACKEND} local verifier lane before it can be treated as ready."
             )
+        # When a dual llamacpp setup is active (fast 8B + deep 14B), the fast lane
+        # is the verifier's peer — expose it too so routing can use both.
+        fast_llamacpp_model = str(
+            env.get("NULLA_LLAMACPP_MODEL") or env.get("LLAMACPP_MODEL") or ""
+        ).strip()
+        if fast_llamacpp_model:
+            fast_llamacpp_provider_id = f"llamacpp-local:{fast_llamacpp_model}"
+            already_listed = {p.provider_id for p in providers}
+            if fast_llamacpp_provider_id not in already_listed:
+                fast_availability = _provider_availability_state(fast_llamacpp_provider_id, truth_index)
+                if _availability_rank(fast_availability) >= _availability_rank("degraded"):
+                    providers.append(
+                        InstallProfileProvider(
+                            provider_id=fast_llamacpp_provider_id,
+                            role="fast",
+                            locality="local",
+                            required=False,
+                            configured=True,
+                            availability_state=fast_availability,
+                            notes="Fast local llamacpp lane (primary model), sibling to the deep verifier lane.",
+                        )
+                    )
     if profile_id == "hybrid-kimi":
         configured = _has_any_env(env, *_KIMI_API_KEY_ENV_KEYS) or kimi_availability != "unregistered"
         providers.append(
@@ -844,6 +887,64 @@ def _provider_mix(
     return tuple(providers), reasons
 
 
+def _expose_installed_ollama_lanes(env: Mapping[str, str]) -> bool:
+    return env_flag_enabled(env, "NULLA_REGISTER_INSTALLED_OLLAMA_MODELS", default=False)
+
+
+def _explicit_installed_ollama_override_tags(env: Mapping[str, str]) -> set[str] | None:
+    if _INSTALLED_OLLAMA_MODELS_ENV_KEY not in env:
+        return None
+    raw_override = str(env.get(_INSTALLED_OLLAMA_MODELS_ENV_KEY) or "").strip()
+    if raw_override.startswith("["):
+        try:
+            payload = json.loads(raw_override)
+        except Exception:
+            payload = []
+        if isinstance(payload, list):
+            return {str(item).strip().lower() for item in payload if str(item).strip()}
+        return set()
+    return {part.strip().lower() for part in raw_override.split(",") if part.strip()}
+
+
+def _append_installed_ollama_lanes(
+    providers: list[InstallProfileProvider],
+    *,
+    provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
+    primary_local_model: str,
+    env: Mapping[str, str],
+) -> None:
+    explicit_tags = _explicit_installed_ollama_override_tags(env)
+    seen = {str(item.provider_id or "").strip().lower() for item in providers if str(item.provider_id or "").strip()}
+    for item in provider_capability_truth:
+        provider_id = str(item.provider_id or "").strip()
+        if not provider_id or provider_id.lower() in seen:
+            continue
+        if item.locality != "local" or not provider_id.lower().startswith("ollama-local:"):
+            continue
+        model_tag = str(item.model_id or provider_id.split(":", 1)[1]).strip().lower()
+        if explicit_tags is not None and model_tag not in explicit_tags:
+            continue
+        role = installed_ollama_role_for_model(
+            model_name=str(item.model_id or ""),
+            primary_model=primary_local_model,
+        )
+        providers.append(
+            InstallProfileProvider(
+                provider_id=provider_id,
+                role=role,
+                locality="local",
+                required=False,
+                configured=True,
+                availability_state=_provider_availability_state(
+                    provider_id,
+                    {entry.provider_id: entry for entry in provider_capability_truth if entry.provider_id},
+                ),
+                notes="Optional installed Ollama lane exposed for local model orchestration.",
+            )
+        )
+        seen.add(provider_id.lower())
+
+
 def _find_primary_local_provider_id(
     provider_capability_truth: tuple[ProviderCapabilityTruth, ...],
     *,
@@ -887,6 +988,23 @@ def _selected_role_models_for_profile(
     if legacy_mode and profile_id in {"local-max", "full-orchestrated"}:
         return (type(role_models[0])(role="coding", model=recommended_bundle.primary_model),)
     return role_models
+
+
+def _with_profile_bundle(profile_id: str, bundle_recommendation: Any) -> Any:
+    if profile_id != "goblin-stack":
+        return bundle_recommendation
+    goblin = bundle_spec("goblin_stack")
+    return replace(
+        bundle_recommendation,
+        recommended_bundle=goblin,
+        safe_disk_floor_gb=safe_disk_floor_gb(goblin.models),
+    )
+
+
+def _optional_models_for_profile(profile_id: str) -> tuple[str, ...]:
+    if profile_id == "goblin-stack":
+        return ("qwen3:30b-a3b", "qwen3:14b")
+    return tuple()
 
 
 def _provider_mix_role_for_bundle_role(
@@ -1111,6 +1229,7 @@ def _profile_label(profile_id: str) -> str:
         "auto-recommended": "Auto recommended",
         "local-only": "Local only",
         "local-max": "Local max",
+        "goblin-stack": "Goblin stack",
         "hybrid-kimi": "Hybrid Kimi",
         "hybrid-tether": "Hybrid Tether",
         "hybrid-fallback": "Hybrid fallback",
@@ -1123,6 +1242,7 @@ def _profile_summary(profile_id: str) -> str:
         "auto-recommended": "Choose the strongest honest profile from current hardware and configured providers.",
         "local-only": "Pure local Ollama bundle with no remote provider dependency; may be single, dual, or triple depending on hardware.",
         "local-max": "Local Ollama bundle plus an explicit llama.cpp verifier/coding lane.",
+        "goblin-stack": "Qwen3-family local stack with tiny routing, daily workhorse, and hybrid-MoE deep lane.",
         "hybrid-kimi": "Local coding lane plus a remote Kimi synthesis lane.",
         "hybrid-tether": "Local coding lane plus a remote Tether synthesis lane.",
         "hybrid-fallback": "Local coding lane plus a generic remote fallback lane.",
@@ -1166,8 +1286,6 @@ def _installed_ollama_model_tags(
             model_id = str(item.model_id or "").strip()
             if model_id:
                 tags.add(model_id.lower())
-    if override_present:
-        return tags
     manifest_root = (default_ollama_models_path(env) / "manifests").resolve()
     if manifest_root.exists():
         for manifest_path in manifest_root.glob("**/*"):

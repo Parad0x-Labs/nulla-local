@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -55,15 +56,20 @@ class LocalBundleRecommendation:
 
 
 MODEL_STORAGE_GB: dict[str, float] = {
+    "qwen3:0.6b": 0.7,
     "qwen3:4b": 2.5,
     "qwen3:8b": 5.2,
     "qwen3:14b": 9.3,
     "qwen3:30b": 19.0,
+    "qwen3:30b-a3b": 19.0,
+    "nulla-qwen3-30b-a3b:nothink": 19.0,
+    "qwen3.5:35b-a3b": 23.0,
     "deepseek-r1:8b": 5.2,
     "deepseek-r1:14b": 9.0,
     "deepseek-r1:32b": 20.0,
     "gemma3:4b": 3.3,
     "gemma3:12b": 8.1,
+    "gemma3:12b-qat": 8.1,
     "mistral-small:24b": 14.0,
     "qwen2.5:0.5b": 1.0,
     "qwen2.5:3b": 3.5,
@@ -75,6 +81,14 @@ MODEL_STORAGE_GB: dict[str, float] = {
 }
 
 MODEL_METADATA: dict[str, dict[str, Any]] = {
+    "qwen3:0.6b": {
+        "family": "qwen3",
+        "license_name": "Apache-2.0",
+        "license_reference": "https://ollama.com/library/qwen3",
+        "parameter_count": "0.6B",
+        "bundle_role": "lightweight_utility",
+        "eagle3_draft_eligible": False,
+    },
     "qwen3:4b": {
         "family": "qwen3",
         "license_name": "Apache-2.0",
@@ -86,18 +100,58 @@ MODEL_METADATA: dict[str, dict[str, Any]] = {
         "license_name": "Apache-2.0",
         "license_reference": "https://ollama.com/library/qwen3",
         "parameter_count": "8B",
+        "bundle_role": "general",
+        "eagle3_draft_eligible": True,
     },
     "qwen3:14b": {
         "family": "qwen3",
         "license_name": "Apache-2.0",
         "license_reference": "https://ollama.com/library/qwen3",
         "parameter_count": "14B",
+        "bundle_role": "coding",
+        "eagle3_draft_eligible": True,
     },
     "qwen3:30b": {
         "family": "qwen3",
         "license_name": "Apache-2.0",
         "license_reference": "https://ollama.com/library/qwen3",
         "parameter_count": "30B",
+    },
+    "qwen3:30b-a3b": {
+        "family": "qwen3",
+        "license_name": "Apache-2.0",
+        "license_reference": "https://ollama.com/library/qwen3",
+        "parameter_count": "30B",
+        "active_parameter_count": "3B",
+        "architecture": "moe",
+        "bundle_role": "general",
+        "eagle3_draft_eligible": False,
+    },
+    "nulla-qwen3-30b-a3b:nothink": {
+        "family": "qwen3",
+        "license_name": "Apache-2.0",
+        "license_reference": "user-managed local Ollama model",
+        "parameter_count": "30B",
+        "active_parameter_count": "3B",
+        "architecture": "moe",
+        "bundle_role": "general",
+        "eagle3_draft_eligible": False,
+        "thinking_disabled": True,
+        "tokens_per_second": 37.2,
+        "quantization": "local-measured",
+        "notes": "Measured fast local no-think default when installed.",
+    },
+    "qwen3.5:35b-a3b": {
+        "family": "qwen3.5",
+        "license_name": "Apache-2.0",
+        "license_reference": "https://ollama.com/library/qwen3.5",
+        "parameter_count": "35B",
+        "active_parameter_count": "3.3B",
+        "architecture": "hybrid_moe",
+        "bundle_role": "heavy_reasoning",
+        "eagle3_draft_eligible": False,
+        "constant_vram": True,
+        "max_context": 262144,
     },
     "deepseek-r1:8b": {
         "family": "deepseek-r1",
@@ -129,11 +183,50 @@ MODEL_METADATA: dict[str, dict[str, Any]] = {
         "license_reference": "https://ollama.com/library/gemma3",
         "parameter_count": "12B",
     },
+    "gemma3:12b-qat": {
+        "family": "gemma3",
+        "license_name": "Gemma Terms",
+        "license_reference": "https://ollama.com/library/gemma3",
+        "parameter_count": "12B",
+        "bundle_role": "general",
+        "qat": True,
+        "eagle3_draft_eligible": False,
+    },
     "mistral-small:24b": {
         "family": "mistral-small",
         "license_name": "Apache-2.0",
         "license_reference": "https://ollama.com/library/mistral-small",
         "parameter_count": "24B",
+    },
+    "qwen2.5:0.5b": {
+        "family": "qwen2.5",
+        "license_name": "Apache-2.0",
+        "license_reference": "https://ollama.com/library/qwen2.5",
+        "parameter_count": "0.5B",
+    },
+    "qwen2.5:3b": {
+        "family": "qwen2.5",
+        "license_name": "Apache-2.0",
+        "license_reference": "https://ollama.com/library/qwen2.5",
+        "parameter_count": "3B",
+    },
+    "qwen2.5:7b": {
+        "family": "qwen2.5",
+        "license_name": "Apache-2.0",
+        "license_reference": "https://ollama.com/library/qwen2.5",
+        "parameter_count": "7B",
+    },
+    "qwen2.5:14b": {
+        "family": "qwen2.5",
+        "license_name": "Apache-2.0",
+        "license_reference": "https://ollama.com/library/qwen2.5",
+        "parameter_count": "14B",
+    },
+    "qwen2.5:32b": {
+        "family": "qwen2.5",
+        "license_name": "Apache-2.0",
+        "license_reference": "https://ollama.com/library/qwen2.5",
+        "parameter_count": "32B",
     },
 }
 
@@ -212,6 +305,17 @@ LOCAL_BUNDLE_SPECS: dict[str, LocalBundleSpec] = {
         ),
         summary="High-end triple for strong hosts with clear role separation.",
     ),
+    "goblin_stack": LocalBundleSpec(
+        bundle_id="goblin_stack",
+        kind="triple",
+        display_name="Goblin local stack",
+        role_models=(
+            BundleRoleModel("lightweight_utility", "qwen3:0.6b"),
+            BundleRoleModel("general", "qwen3:8b"),
+            BundleRoleModel("heavy_reasoning", "qwen3.5:35b-a3b"),
+        ),
+        summary="Qwen3-family local stack with tiny routing, daily workhorse, and hybrid-MoE deep lane.",
+    ),
 }
 
 
@@ -219,7 +323,6 @@ def model_storage_gb(model_name: str) -> float:
     clean = str(model_name or "").strip().lower()
     if clean in MODEL_STORAGE_GB:
         return float(MODEL_STORAGE_GB[clean])
-    import re
 
     match = re.search(r"(\d+(?:\.\d+)?)b", clean)
     if match:
@@ -227,9 +330,60 @@ def model_storage_gb(model_name: str) -> float:
     return 8.0
 
 
+def model_parameter_billions(model_name: str) -> float:
+    clean = str(model_name or "").strip().lower()
+    metadata = model_metadata(clean)
+    raw_count = str(metadata.get("parameter_count") or "").strip().lower().rstrip("b")
+    if raw_count:
+        try:
+            return float(raw_count)
+        except ValueError:
+            pass
+
+    match = re.search(r"(\d+(?:\.\d+)?)b", clean)
+    if match:
+        return float(match.group(1))
+    return 8.0
+
+
+def model_active_parameter_billions(model_name: str) -> float:
+    clean = str(model_name or "").strip().lower()
+    metadata = model_metadata(clean)
+    raw_count = str(metadata.get("active_parameter_count") or "").strip().lower().rstrip("b")
+    if raw_count:
+        try:
+            return float(raw_count)
+        except ValueError:
+            pass
+
+    match = re.search(r"-a(\d+(?:\.\d+)?)b", clean)
+    if match:
+        return float(match.group(1))
+    return model_parameter_billions(clean)
+
+
 def model_metadata(model_name: str) -> dict[str, Any]:
     clean = str(model_name or "").strip().lower()
     return dict(MODEL_METADATA.get(clean) or {})
+
+
+def installed_ollama_role_for_model(*, model_name: str, primary_model: str = "") -> str:
+    clean = str(model_name or "").strip().lower()
+    primary = str(primary_model or "").strip().lower()
+    if primary and clean == primary:
+        return "general"
+    if "mistral-small" in clean or "coder" in clean or "code" in clean:
+        return "coding"
+    if "deepseek-r1" in clean or "reason" in clean:
+        return "reasoning"
+    parameter_b = model_parameter_billions(clean)
+    if parameter_b <= 3.0:
+        return "lightweight_utility"
+    if parameter_b >= 24.0:
+        return "heavy_reasoning"
+    if parameter_b >= 13.0:
+        return "reasoning"
+    return "general"
 
 
 def safe_disk_floor_gb(models: tuple[str, ...] | list[str]) -> float:
@@ -298,17 +452,17 @@ def resolve_local_bundle_recommendation(
     bucket = capacity_bucket_for_machine(probe=probe, free_disk_gb=free_disk_gb)
     advanced_allowed = fit != "single_model_only" and free_disk_gb >= model_storage_gb(secondary_local_model_name) + 8.0
 
-    if explicit_model and explicit_model.lower() not in MODEL_METADATA:
+    if explicit_model:
         legacy_bundle = LocalBundleSpec(
             bundle_id="legacy_single_explicit_model",
             kind="single",
-            display_name="Legacy explicit single model",
+            display_name="Explicit single model",
             role_models=(BundleRoleModel("general", explicit_model),),
-            summary="Preserve an explicitly selected legacy local model without silently replacing it.",
+            summary="Preserve an explicitly selected local model without silently replacing it.",
         )
         fallback_bundle = bundle_spec("dual_qwen3_8b_gemma3_4b")
         reasons = (
-            f"Explicit legacy primary model `{explicit_model}` is preserved instead of silently switching the runtime to a new bundle.",
+            f"Explicit primary model `{explicit_model}` is preserved instead of silently switching the runtime to a new bundle.",
             "Bundle auto-selection remains available for fresh installs that do not pin a legacy model.",
         )
         return LocalBundleRecommendation(
@@ -388,7 +542,7 @@ def resolve_local_bundle_recommendation(
 
 def provider_role_for_bundle_role(bundle_role: str) -> str:
     clean = str(bundle_role or "").strip().lower()
-    if clean == "reasoning":
+    if clean in {"reasoning", "heavy_reasoning"}:
         return "queen"
     return "drone"
 
@@ -416,10 +570,17 @@ def manifest_profile_for_model(*, model_name: str, bundle_role: str) -> dict[str
         tool_support.extend(["web_search", "code_complex"])
         confidence = 0.79
         notes = "Reasoning and review local Ollama lane."
+    elif clean_role == "heavy_reasoning":
+        capabilities.extend(["code_basic", "code_complex", "long_context"])
+        tool_support.extend(["web_search", "code_complex"])
+        confidence = 0.73
+        notes = "Oversized local Ollama lane for explicit deep work."
     elif clean_role == "lightweight_utility":
+        capabilities.extend(["tool_intent"])
+        tool_support.append("tool_calls")
         confidence = 0.63
-        notes = "Lightweight local Ollama utility lane."
-    return {
+        notes = "Lightweight local Ollama utility lane for cheap classification and tool intent."
+    profile = {
         "family": family,
         "license_name": str(metadata.get("license_name") or "user-managed"),
         "license_reference": str(metadata.get("license_reference") or "user-managed"),
@@ -431,6 +592,10 @@ def manifest_profile_for_model(*, model_name: str, bundle_role: str) -> dict[str
         "orchestration_role": provider_role_for_bundle_role(clean_role),
         "bundle_role": clean_role,
     }
+    for key in ("tokens_per_second", "quantization"):
+        if metadata.get(key) not in (None, ""):
+            profile[key] = metadata[key]
+    return profile
 
 
 def _probe_ram_gb(probe: MachineProbe | Mapping[str, Any]) -> float:
@@ -448,9 +613,12 @@ __all__ = [
     "LocalBundleSpec",
     "bundle_spec",
     "capacity_bucket_for_machine",
+    "installed_ollama_role_for_model",
     "local_multi_llm_fit_from_probe",
     "manifest_profile_for_model",
+    "model_active_parameter_billions",
     "model_metadata",
+    "model_parameter_billions",
     "model_storage_gb",
     "provider_role_for_bundle_role",
     "resolve_local_bundle_recommendation",

@@ -66,6 +66,18 @@ async def _dispatch(request: Request) -> Response:
                     model_name=model_name,
                     workspace_root_provider=workspace_root_provider,
                 )
+    elif request.method == "OPTIONS":
+        if request.url.path.rstrip("/") == "/gate/unlock":
+            from core.web0_gated_html import gate_cors_headers
+
+            response = ApiResponse(
+                204,
+                content_type="text/plain; charset=utf-8",
+                body=b"",
+                headers=gate_cors_headers(),
+            )
+        else:
+            response = json_response(404, {"error": "not found"})
     else:
         response = json_response(404, {"error": "not found"})
     response.headers = response_headers_with_request_id(response.headers, request_id=request_id)
@@ -93,8 +105,8 @@ def create_api_app(
     app = Starlette(
         debug=False,
         routes=[
-            Route("/", _dispatch, methods=["GET", "POST"]),
-            Route("/{path:path}", _dispatch, methods=["GET", "POST"]),
+            Route("/", _dispatch, methods=["GET", "POST", "OPTIONS"]),
+            Route("/{path:path}", _dispatch, methods=["GET", "POST", "OPTIONS"]),
         ],
     )
     app.state.runtime = runtime

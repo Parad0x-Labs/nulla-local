@@ -82,6 +82,51 @@ def test_maybe_handle_memory_fast_path_uses_app_level_companion_override() -> No
     )
 
 
+def test_companion_memory_fast_path_answers_web0_from_local_memory() -> None:
+    agent = _build_agent()
+
+    with mock.patch(
+        "core.agent_runtime.fast_paths_companion.search_relevant_memory",
+        return_value=[
+            {
+                "text": (
+                    "Web0 is the Parad0x stack for a local-first/private web with .null names, "
+                    "durable publishing, x402 payments, NULLA agents, and OpenClaw operations."
+                )
+            }
+        ],
+    ):
+        result = agent._maybe_handle_companion_memory_fast_path(
+            "tell me about web0",
+            session_id="memory-session",
+            source_context={"surface": "api", "allow_remote_fetch": False},
+    )
+
+    assert result is not None
+    assert result["response_class"] in {"generic_conversation", "utility_answer"}
+    lowered = result["response"].lower()
+    assert "web0 is parad0x labs" in lowered
+    assert "live web results" not in lowered
+    assert "private paths" in lowered
+
+
+def test_web0_builder_fast_path_returns_local_builder_url() -> None:
+    agent = _build_agent()
+
+    result = agent._maybe_handle_web0_builder_fast_path(
+        "build a website on web0",
+        session_id="web0-builder-session",
+        source_context={"surface": "openclaw"},
+    )
+
+    assert result is not None
+    assert "/templates/editor/?" in result["response"]
+    assert "payload=" in result["response"]
+    assert "save this as" not in result["response"].lower()
+    assert "arweave/mainnet" in result["response"].lower()
+    assert result["model_execution"] == {"source": "fast_path", "used_model": False}
+
+
 def test_model_final_response_text_facade_matches_extracted_module() -> None:
     agent = _build_agent()
     model_execution = SimpleNamespace(output_text="", structured_output={"summary": "summary from structure"})

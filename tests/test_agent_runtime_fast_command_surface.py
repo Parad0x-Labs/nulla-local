@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest import mock
 
 from apps.nulla_agent import NullaAgent
@@ -106,6 +107,162 @@ def test_fast_command_surface_action_fast_path_result_facade_delegates_to_extrac
         audit_logger_module=mock.ANY,
         explicit_planner_style_requested_fn=mock.ANY,
     )
+
+
+def test_direct_workspace_pyproject_read_uses_workspace_tool_without_planner() -> None:
+    agent = _build_agent()
+    execution = SimpleNamespace(
+        ok=True,
+        response_text="File `pyproject.toml`:\n1: [project]\n2: name = \"nulla-hive-mind\"\n3: requires-python = \">=3.11\"",
+        details={
+            "path": "pyproject.toml",
+            "lines": [
+                {"line_number": 1, "text": "[project]"},
+                {"line_number": 2, "text": 'name = "nulla-hive-mind"'},
+                {"line_number": 3, "text": 'requires-python = ">=3.11"'},
+            ],
+        },
+    )
+
+    with mock.patch.object(agent, "_plan_tool_workflow") as planner, mock.patch(
+        "core.agent_runtime.fast_paths_utility.execute_runtime_tool",
+        return_value=execution,
+    ) as execute_runtime_tool, mock.patch.object(agent, "_fast_path_result", return_value={"response": "ok"}) as fast_path_result:
+        result = agent._maybe_handle_direct_workspace_runtime_request(
+            "Using workspace tools only, read pyproject. toml and tell me the project name plus the Python version requirement.",
+            session_id="session-123",
+            source_surface="runtime",
+            source_context={"surface": "openclaw", "workspace_root": "/tmp/workspace"},
+        )
+
+    assert result == {"response": "ok"}
+    planner.assert_not_called()
+    execute_runtime_tool.assert_called_once_with(
+        "workspace.read_file",
+        {"path": "pyproject.toml", "start_line": 1, "max_lines": 160},
+        source_context={"surface": "openclaw", "workspace_root": "/tmp/workspace"},
+    )
+    assert fast_path_result.call_args.kwargs["reason"] == "workspace_runtime_fast_path"
+    assert fast_path_result.call_args.kwargs["response"] == (
+        "Project name: `nulla-hive-mind`. Python requirement: `>=3.11`. Read via `workspace.read_file`."
+    )
+
+
+def test_fast_path_result_emits_lane_proof_without_model_inference() -> None:
+    agent = _build_agent()
+    events: list[dict] = []
+
+    with mock.patch.object(
+        agent,
+        "_emit_runtime_event",
+        side_effect=lambda source_context, **payload: events.append({"source_context": source_context, **payload}),
+    ):
+        result = agent._fast_path_result(
+            session_id="session-123",
+            user_input="hi",
+            response="Hi.",
+            confidence=0.97,
+            source_context={"surface": "openclaw"},
+            reason="smalltalk_fast_path",
+        )
+
+    proof = next(event for event in events if event["event_type"] == "model_lane_proof")
+    assert result["model_execution"] == {"source": "fast_path", "used_model": False}
+    assert proof["schema"] == "nulla.model_lane_proof.v1"
+    assert proof["lane"] == "tiny"
+    assert proof["phase"] == "completed"
+    assert proof["provider_id"] == "runtime-fast-path"
+    assert proof["actual_adapter_provider_id"] == ""
+    assert proof["measurement_source"] == "deterministic_fast_path"
+    assert proof["fallback_reason"] == "model_not_used"
+    assert proof["speculative_status"] == "inactive"
+
+
+def test_fast_path_result_marks_explicit_heavy_model_blocked_as_deep_blocked() -> None:
+    agent = _build_agent()
+    events: list[dict] = []
+
+    with mock.patch.object(
+        agent,
+        "_emit_runtime_event",
+        side_effect=lambda source_context, **payload: events.append({"source_context": source_context, **payload}),
+    ):
+        agent._fast_path_result(
+            session_id="session-123",
+            user_input="Explicitly use qwen3.5:35b-a3b.",
+            response="blocked",
+            confidence=0.99,
+            source_context={"surface": "openclaw"},
+            reason="explicit_heavy_model_blocked",
+        )
+
+    proof = next(event for event in events if event["event_type"] == "model_lane_proof")
+    assert proof["lane"] == "deep"
+    assert proof["complexity"] == "hard"
+    assert proof["phase"] == "blocked"
+    assert proof["planned_model_id"] == "qwen3.5:35b-a3b"
+    assert proof["fallback_reason"] == "explicit_heavy_lane_unavailable"
+    assert proof["verifier_status"] == "blocked_no_primary"
+
+
+def test_action_fast_path_result_emits_lane_proof_without_model_inference() -> None:
+    agent = _build_agent()
+    events: list[dict] = []
+
+    with mock.patch.object(
+        agent,
+        "_emit_runtime_event",
+        side_effect=lambda source_context, **payload: events.append({"source_context": source_context, **payload}),
+    ):
+        result = agent._action_fast_path_result(
+            task_id="task-123",
+            session_id="session-123",
+            user_input="run the workflow",
+            response="That request did not resolve cleanly.",
+            confidence=0.61,
+            source_context={"surface": "openclaw"},
+            reason="tool_workflow_failed",
+            success=False,
+            task_outcome="failed",
+        )
+
+    proof = next(event for event in events if event["event_type"] == "model_lane_proof")
+    assert result["model_execution"] == {"source": "channel_action", "used_model": False}
+    assert proof["schema"] == "nulla.model_lane_proof.v1"
+    assert proof["lane"] == "daily"
+    assert proof["phase"] == "failed"
+    assert proof["provider_id"] == "runtime-action"
+    assert proof["backend"] == "tool_workflow"
+    assert proof["measurement_source"] == "runtime_action_path"
+    assert proof["fallback_reason"] == "model_not_used"
+    assert proof["speculative_status"] == "inactive"
+
+
+def test_model_tool_intent_advice_result_does_not_overwrite_model_lane_proof() -> None:
+    agent = _build_agent()
+    events: list[dict] = []
+
+    with mock.patch.object(
+        agent,
+        "_emit_runtime_event",
+        side_effect=lambda source_context, **payload: events.append({"source_context": source_context, **payload}),
+    ):
+        result = agent._action_fast_path_result(
+            task_id="task-123",
+            session_id="session-123",
+            user_input="explain the patch plan without editing files",
+            response="Use the model lane and report proof.",
+            confidence=0.72,
+            source_context={"surface": "openclaw"},
+            reason="model_tool_intent_direct_response",
+            success=True,
+            details={"tool_steps": []},
+            mode_override="advice_only",
+            task_outcome="success",
+        )
+
+    assert result["model_execution"] == {"source": "channel_action", "used_model": False}
+    assert not [event for event in events if event["event_type"] == "model_lane_proof"]
 
 
 def test_fast_command_surface_help_and_capability_truth_facades_delegate_to_extracted_module() -> None:

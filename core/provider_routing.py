@@ -36,6 +36,8 @@ class ProviderCapabilityTruth:
     availability_state: str = "ready"
     circuit_open: bool = False
     last_error: str | None = None
+    measurement_source: str = "manifest"
+    measured_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +59,8 @@ class ProviderCapabilityTruth:
             "availability_state": self.availability_state,
             "circuit_open": self.circuit_open,
             "last_error": self.last_error,
+            "measurement_source": self.measurement_source,
+            "measured_at": self.measured_at,
         }
 
 

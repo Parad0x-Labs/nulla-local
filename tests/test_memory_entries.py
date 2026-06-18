@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from core.runtime_paths import configure_runtime_home
 from core.memory.entries import (
     add_memory_fact,
     combined_memory_entries,
@@ -22,9 +25,11 @@ from core.memory.files import (
 )
 
 
-def setup_function() -> None:
+@pytest.fixture(autouse=True)
+def isolated_memory_home(tmp_path):
+    configure_runtime_home(tmp_path / "runtime-home")
+    memory_path().parent.mkdir(parents=True, exist_ok=True)
     for path in (
-        memory_path(),
         conversation_log_path(),
         memory_entries_path(),
         session_summaries_path(),
@@ -33,6 +38,19 @@ def setup_function() -> None:
     ):
         if path.exists():
             path.unlink()
+    memory_path().write_text(
+        "# NULLA Persistent Memory\n\n"
+        "## Identity\n\n"
+        "- **My name**: NULLA\n"
+        "- **Owner's name**: unknown\n\n"
+        "## Privacy Pact\n\n"
+        "- Not set yet.\n\n"
+        "## Learned Knowledge\n\n"
+        "<!-- New memories append below -->\n",
+        encoding="utf-8",
+    )
+    yield
+    configure_runtime_home(None)
 
 
 def test_memory_entries_roundtrip_and_forget() -> None:

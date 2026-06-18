@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import os
 from dataclasses import dataclass
@@ -202,6 +204,36 @@ def _derive_encryption_key(*, passphrase: str, salt: bytes) -> bytes:
         iterations=_PBKDF2_ITERATIONS,
     )
     return kdf.derive(passphrase.encode("utf-8"))
+
+
+def _hkdf_sha256(ikm: bytes, *, salt: bytes, info: bytes, length: int) -> bytes:
+    if length < 1:
+        raise ValueError("length must be positive")
+    prk = hmac.new(salt, ikm, hashlib.sha256).digest()
+    block = b""
+    output = b""
+    for counter in range(1, -(-length // 32) + 1):
+        block = hmac.new(prk, block + info + bytes([counter]), hashlib.sha256).digest()
+        output += block
+    return output[:length]
+
+
+def derive_local_secret(label: str | bytes, *, length: int = 32) -> bytes:
+    """Derive scoped local secret material from the node signing key.
+
+    Callers get a label-scoped secret, not the raw node signing seed. That keeps
+    wallet/tool encryption coupled to NULLA identity without spreading key bytes.
+    """
+    normalized_label = label.encode("utf-8") if isinstance(label, str) else bytes(label)
+    if not normalized_label:
+        raise ValueError("label must not be empty")
+    seed = _signing_key_bytes(load_or_create_local_keypair().signing_key)
+    return _hkdf_sha256(
+        seed,
+        salt=b"nulla-local-secret-v1",
+        info=normalized_label,
+        length=length,
+    )
 
 
 def _encrypted_record_payload(seed: bytes, *, passphrase: str) -> dict[str, object]:

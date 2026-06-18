@@ -6,6 +6,7 @@ from typing import Any
 
 from core.backend_manager import BackendManager
 from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwen_tier, tier_summary
+from core.local_ollama_inventory import env_flag_enabled, installed_ollama_model_names
 from core.model_registry import ModelRegistry, ProviderAuditRow
 from core.provider_env import merge_provider_env
 from core.provider_routing import ProviderCapabilityTruth, provider_capability_truth_for_manifest
@@ -68,6 +69,12 @@ def build_provider_registry_snapshot(
     warnings = tuple(active_registry.startup_warnings())
     audit_rows = tuple(active_registry.provider_audit_rows())
     capability_truth = tuple(provider_capability_truth_for_manifest(manifest) for manifest in manifests)
+    manifests, audit_rows, capability_truth = _filter_snapshot_to_installed_ollama_inventory(
+        manifests=manifests,
+        audit_rows=audit_rows,
+        capability_truth=capability_truth,
+        env=env_map,
+    )
     visible_provider_ids: tuple[str, ...] = tuple()
     if honor_install_profile:
         visible_provider_ids = _visible_provider_ids_for_install_profile(
@@ -96,6 +103,31 @@ def build_provider_registry_snapshot(
     )
 
 
+def _filter_snapshot_to_installed_ollama_inventory(
+    *,
+    manifests: tuple[Any, ...],
+    audit_rows: tuple[ProviderAuditRow, ...],
+    capability_truth: tuple[ProviderCapabilityTruth, ...],
+    env: dict[str, str],
+) -> tuple[tuple[Any, ...], tuple[ProviderAuditRow, ...], tuple[ProviderCapabilityTruth, ...]]:
+    if not env_flag_enabled(env, "NULLA_REGISTER_INSTALLED_OLLAMA_MODELS", default=False):
+        return manifests, audit_rows, capability_truth
+    installed_tags = {tag.lower() for tag in installed_ollama_model_names(env=env)}
+    if not installed_tags:
+        return manifests, audit_rows, capability_truth
+    visible_provider_ids = {
+        item.provider_id
+        for item in capability_truth
+        if not _is_local_ollama_capability(item) or str(item.model_id or "").strip().lower() in installed_tags
+    }
+    return _filter_snapshot_to_provider_ids(
+        manifests=manifests,
+        audit_rows=audit_rows,
+        capability_truth=capability_truth,
+        provider_ids=tuple(visible_provider_ids),
+    )
+
+
 def _visible_provider_ids_for_install_profile(
     *,
     capability_truth: tuple[ProviderCapabilityTruth, ...],
@@ -116,6 +148,10 @@ def _visible_provider_ids_for_install_profile(
         for item in install_profile.provider_mix
         if str(item.provider_id or "").strip()
     )
+
+
+def _is_local_ollama_capability(item: ProviderCapabilityTruth) -> bool:
+    return item.locality == "local" and str(item.provider_id or "").strip().lower().startswith("ollama-local:")
 
 
 def _filter_snapshot_to_provider_ids(

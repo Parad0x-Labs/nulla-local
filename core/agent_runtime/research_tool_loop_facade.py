@@ -24,12 +24,16 @@ class ResearchToolLoopFacadeMixin:
         source_context = dict(source_context or {})
         surface = str(source_context.get("surface", "") or "").lower()
         platform = str(source_context.get("platform", "") or "").lower()
+        explicit_remote_policy = "allow_remote_fetch" in source_context
         allow_remote_fetch = bool(source_context.get("allow_remote_fetch", False))
         trusted_live_surface = (
             surface in {"channel", "openclaw", "api"}
             or platform in {"openclaw", "web_companion", "telegram", "discord"}
         )
-        if not (allow_remote_fetch or trusted_live_surface):
+        # Explicit false is an operator/privacy boundary; trusted surfaces only default
+        # to live research when the caller omits the remote-fetch policy entirely.
+        remote_fetch_allowed = allow_remote_fetch if explicit_remote_policy else trusted_live_surface
+        if not remote_fetch_allowed:
             return []
 
         task_class = str(classification.get("task_class", "unknown"))

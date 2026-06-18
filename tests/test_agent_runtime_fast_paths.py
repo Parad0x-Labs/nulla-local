@@ -73,6 +73,34 @@ def test_builder_root_extraction_facade_matches_extracted_module() -> None:
     assert agent._extract_requested_builder_root(query) == fast_paths.extract_requested_builder_root(query)
 
 
+def test_date_time_fast_path_does_not_treat_runtime_as_time_request() -> None:
+    agent = _build_agent()
+
+    result = agent._date_time_fast_path(
+        "plan a safe patch for a runtime bug and explain what should be verified",
+        source_surface="openclaw",
+        session_id="openclaw:test-runtime-not-time",
+        source_context={"surface": "openclaw"},
+    )
+
+    assert result is None
+
+
+def test_builder_controller_does_not_capture_patch_plan_advice_only_prompt() -> None:
+    agent = _build_agent()
+
+    should_handle = agent._should_run_builder_controller(
+        effective_input=(
+            "Plan a safe patch for a hard local runtime bug: adaptive lane proof is missing from streamed events. "
+            "Do not edit files; explain what should be verified."
+        ),
+        classification={"task_class": "system_design"},
+        source_context={"workspace_root": "/tmp/workspace"},
+    )
+
+    assert should_handle is False
+
+
 def test_live_info_rendering_facade_matches_extracted_module() -> None:
     agent = _build_agent()
     notes = [

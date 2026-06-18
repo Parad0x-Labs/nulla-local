@@ -1,6 +1,7 @@
 # OS / editor noise
 Thumbs.db
 .DS_Store
+screenlog.*
 .vscode/
 .idea/
 *.swp

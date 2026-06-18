@@ -42,6 +42,15 @@ class ToolIntentExecutorTests(unittest.TestCase):
 
         self.assertFalse(should_run)
 
+    def test_advice_only_patch_plan_skips_tool_intent_gate(self) -> None:
+        should_run = should_attempt_tool_intent(
+            "Plan a safe patch for this repo runtime bug. Do not edit files; explain what should be verified.",
+            task_class="system_design",
+            source_context={"surface": "openclaw", "platform": "openclaw"},
+        )
+
+        self.assertFalse(should_run)
+
     def test_runtime_tool_specs_hide_mutating_hive_tools_without_write_auth(self) -> None:
         with mock.patch(
             "core.tool_intent_executor.load_public_hive_bridge_config",

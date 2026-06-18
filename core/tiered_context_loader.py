@@ -618,6 +618,31 @@ def _report_exclusions(report: PromptAssemblyReport, layer: BudgetedLayer) -> No
             report.items_excluded.append(item.to_record(included=False, reason=reason))
 
 
+def _source_allows_private_context(source_context: dict[str, Any] | None) -> bool:
+    context = dict(source_context or {})
+    platform = str(context.get("platform") or "").strip().lower()
+    surface = str(context.get("surface") or "").strip().lower()
+    group_like = (
+        platform in {"discord", "telegram", "slack", "whatsapp", "group"}
+        or surface in {"discord", "telegram", "slack", "whatsapp", "group"}
+        or bool(context.get("is_group"))
+        or bool(context.get("group_id"))
+        or bool(context.get("channel_is_group"))
+    )
+    if group_like:
+        return False
+    explicit = context.get("private_context_enabled")
+    if isinstance(explicit, bool):
+        return explicit
+    return platform in {"", "api", "cli", "openclaw", "web_companion", "local"} or surface in {
+        "",
+        "api",
+        "cli",
+        "openclaw",
+        "web_companion",
+    }
+
+
 class TieredContextLoader:
     def load(
         self,
@@ -628,6 +653,7 @@ class TieredContextLoader:
         persona: Any,
         session_id: str,
         total_context_budget: int | None = None,
+        source_context: dict[str, Any] | None = None,
     ) -> TieredContextResult:
         strategy = context_strategy(
             classification.get("task_class", "unknown"),
@@ -646,12 +672,14 @@ class TieredContextLoader:
             )
         )
 
+        include_private_context = _source_allows_private_context(source_context)
         bootstrap_candidates = build_bootstrap_context(
             persona=persona,
             task=task,
             classification=classification,
             interpretation=interpretation,
             session_id=session_id,
+            include_private_context=include_private_context,
         )
         bootstrap_layer = budget_layer(
             bootstrap_candidates,
@@ -662,21 +690,22 @@ class TieredContextLoader:
         local_items, local_candidates = _local_candidate_items(task, classification)
         query_text = getattr(interpretation, "reconstructed_text", "") or getattr(task, "task_summary", "")
         topic_hints = list(getattr(interpretation, "topic_hints", []) or [])
-        relevant_candidates = list(local_items)
-        relevant_candidates.extend(_runtime_tool_observation_items(session_id))
-        relevant_candidates.extend(_dialogue_items(session_id))
-        relevant_candidates.extend(_user_heuristic_items(query_text, topic_hints))
-        relevant_candidates.extend(_persistent_memory_items(query_text, topic_hints))
-        relevant_candidates.extend(_session_summary_items(query_text, topic_hints, session_id=session_id))
-        relevant_candidates.extend(_shared_swarm_context_items(query_text))
-        relevant_candidates.extend(_final_response_items(getattr(task, "task_summary", "")))
-        relevant_candidates.extend(
-            _shorthand_items(
-                session_id,
-                getattr(interpretation, "reconstructed_text", "") or getattr(interpretation, "normalized_text", ""),
+        relevant_candidates = list(local_items) if include_private_context else []
+        if include_private_context:
+            relevant_candidates.extend(_runtime_tool_observation_items(session_id))
+            relevant_candidates.extend(_dialogue_items(session_id))
+            relevant_candidates.extend(_user_heuristic_items(query_text, topic_hints))
+            relevant_candidates.extend(_persistent_memory_items(query_text, topic_hints))
+            relevant_candidates.extend(_session_summary_items(query_text, topic_hints, session_id=session_id))
+            relevant_candidates.extend(_shared_swarm_context_items(query_text))
+            relevant_candidates.extend(_final_response_items(getattr(task, "task_summary", "")))
+            relevant_candidates.extend(
+                _shorthand_items(
+                    session_id,
+                    getattr(interpretation, "reconstructed_text", "") or getattr(interpretation, "normalized_text", ""),
+                )
             )
-        )
-        relevant_candidates.extend(_payment_items(getattr(task, "task_summary", "")))
+            relevant_candidates.extend(_payment_items(getattr(task, "task_summary", "")))
         swarm_items, swarm_metadata, swarm_consulted = _swarm_metadata_items(
             task,
             classification,

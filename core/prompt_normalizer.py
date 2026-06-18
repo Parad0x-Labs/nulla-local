@@ -246,6 +246,14 @@ def _build_conversational_request(
         history_messages=len(history_messages),
         context_attached=context_message is not None,
     )
+    memory_prompt = _memory_prompt_metadata(
+        source_context=source_context,
+        source_platform=source_platform,
+        source_surface=source_surface,
+        prompt_profile=prompt_profile,
+        output_mode=output_mode,
+        runtime_session_id=runtime_session_id,
+    )
     messages = [system, *history_messages]
     if context_message is not None:
         messages.append(context_message)
@@ -265,6 +273,7 @@ def _build_conversational_request(
         metadata={
             "persona_id": getattr(persona, "persona_id", "default"),
             "generation_profile": generation_profile,
+            "memory_prompt": memory_prompt,
             "system_prompt_profile": prompt_profile,
             "chat_truth_prompt": {
                 "surface": source_surface or "cli",
@@ -280,6 +289,7 @@ def _build_conversational_request(
                 "tooling_guidance_enabled": bool(tooling_guidance.strip()),
                 "execution_safety_guidance_enabled": bool(tooling_guidance.strip()),
                 "runtime_session_id_present": bool(runtime_session_id),
+                "memory_prompt_enabled": bool(memory_prompt.get("enabled")),
                 "client_history_message_count": len(
                     list(
                         source_context.get("client_conversation_history")
@@ -542,6 +552,45 @@ def _chat_system_prompt_profile(*, output_mode: str, task_kind: str, exact_outpu
     return "chat_operational"
 
 
+def _memory_prompt_metadata(
+    *,
+    source_context: dict[str, Any],
+    source_platform: str,
+    source_surface: str,
+    prompt_profile: str,
+    output_mode: str,
+    runtime_session_id: str,
+) -> dict[str, Any]:
+    denied_platforms = {"discord", "telegram", "slack", "whatsapp", "group"}
+    direct_platforms = {"api", "cli", "openclaw", "web_companion", "local"}
+    direct_surfaces = {"api", "channel", "cli", "openclaw", "web_companion"}
+    group_like = (
+        source_platform in denied_platforms
+        or source_surface in denied_platforms
+        or bool(source_context.get("is_group"))
+        or bool(source_context.get("group_id"))
+        or bool(source_context.get("channel_is_group"))
+    )
+    explicit = source_context.get("memory_prompt_enabled")
+    if group_like:
+        enabled = False
+    elif isinstance(explicit, bool):
+        enabled = explicit
+    else:
+        platform_allowed = source_platform in direct_platforms or not source_platform
+        surface_allowed = source_surface in direct_surfaces or not source_surface
+        enabled = platform_allowed and surface_allowed
+    if prompt_profile == "chat_exact" or output_mode in _STRUCTURED_OUTPUT_MODES:
+        enabled = False
+    return {
+        "enabled": bool(enabled),
+        "runtime_home": str(source_context.get("runtime_home") or "").strip(),
+        "agent_id": str(source_context.get("agent_id") or "nulla").strip() or "nulla",
+        "session_id": runtime_session_id,
+        "max_chars": 2000,
+    }
+
+
 def _extract_exact_output_target(user_text: str) -> str | None:
     text = " ".join(str(user_text or "").split()).strip()
     if not text:
@@ -580,6 +629,13 @@ def _tooling_guidance(*, has_openclaw_tools: bool) -> str:
         if tool.get("available")
     ]
     available_tools = [label for label in available_tools if label]
+    runtime_specs = runtime_tool_specs()
+    web0_builder_wired = any(
+        str(spec.get("intent") or "").strip() == "web0.open_builder_draft"
+        for spec in runtime_specs
+    )
+    if web0_builder_wired:
+        available_tools.insert(0, "local Web0 builder draft generation")
     if policy_engine.get("filesystem.allow_read_workspace", True):
         available_tools.insert(0, "workspace file listing, search, and read")
     if policy_engine.get("filesystem.allow_write_workspace", False):
@@ -613,12 +669,19 @@ def _tooling_guidance(*, has_openclaw_tools: bool) -> str:
         "When relaying Hive research results, include the grounding status (grounded/partial/insufficient) from the tool output. "
         "Never present partial or insufficient evidence as conclusive."
     )
+    web0_guidance = (
+        "For Web0 site-building requests, do not refuse or say you can only guide setup when the local builder draft tool is wired; create or offer the local builder draft URL. "
+        "Publishing, mainnet registration, Arweave uploads, wallet signatures, payments, and outward-facing network changes require explicit user confirmation."
+        if web0_builder_wired
+        else ""
+    )
     return (
         "These action rules apply only when using tools or proposing real-world side effects; they do not restrict ordinary conversation. "
         f"{capability_line} "
         "Email and inbox tooling are not guaranteed; if a tool is not explicitly wired, say so instead of implying it exists. "
         "Never claim you searched the web, checked Hive, fetched live data, or used an external tool unless concrete evidence from that action is present in this run. "
         f"{research_guidance} "
+        f"{web0_guidance} "
         f"{approval_line}"
     )
 

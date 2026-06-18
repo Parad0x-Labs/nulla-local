@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from core import policy_engine
+from core.local_model_bundles import model_parameter_billions
 from core.model_capabilities import capability_score, required_capabilities
 from core.model_health import circuit_is_open
 from core.model_trust import provider_base_trust
@@ -78,6 +79,7 @@ def rank_providers(
             score -= 0.05
         elif cost_class == "paid_cloud":
             score -= 0.12
+        score += _lane_fit_score(manifest, request)
         if circuit_is_open(manifest.provider_id):
             score -= 10.0
 
@@ -93,3 +95,54 @@ def select_provider(
 ) -> ModelProviderManifest | None:
     ranked = rank_providers(manifests, request)
     return ranked[0] if ranked else None
+
+
+def _lane_fit_score(manifest: ModelProviderManifest, request: ModelSelectionRequest) -> float:
+    metadata = dict(manifest.metadata or {})
+    bundle_role = str(metadata.get("bundle_role") or "").strip().lower()
+    orchestration_role = str(metadata.get("orchestration_role") or "").strip().lower()
+    task_kind = str(request.task_kind or "").strip().lower()
+    output_mode = str(request.output_mode or "").strip().lower()
+    parameter_b = model_parameter_billions(manifest.model_name)
+
+    if task_kind in {"classification", "tool_intent"} or output_mode == "tool_intent":
+        if bundle_role == "lightweight_utility":
+            return 0.75
+        if bundle_role in {"reasoning", "heavy_reasoning"} or orchestration_role == "queen":
+            return -0.45
+        if parameter_b >= 13.0:
+            return -0.25
+        return 0.12
+
+    if task_kind == "normalization_assist" and output_mode == "plain_text":
+        if bundle_role == "general":
+            return 0.35
+        if bundle_role == "lightweight_utility":
+            return -0.4
+        if bundle_role == "heavy_reasoning":
+            return -0.55
+        if bundle_role == "reasoning":
+            return -0.2
+        return 0.0
+
+    if task_kind in {"action_plan", "coding_help_complex"} or output_mode == "action_plan":
+        if bundle_role == "coding":
+            return 0.5
+        if bundle_role == "reasoning":
+            return 0.45
+        if bundle_role == "heavy_reasoning":
+            return 0.25
+        if bundle_role == "lightweight_utility":
+            return -1.25
+        if parameter_b >= 13.0:
+            return 0.15
+        return 0.0
+
+    if task_kind in {"summarization", "candidate_shard_generation"}:
+        if bundle_role in {"reasoning", "coding"}:
+            return 0.25
+        if bundle_role == "heavy_reasoning":
+            return 0.1
+        if bundle_role == "lightweight_utility":
+            return -0.65
+    return 0.0

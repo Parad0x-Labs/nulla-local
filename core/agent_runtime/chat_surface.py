@@ -695,6 +695,7 @@ def chat_surface_model_wording_result(
         interpretation=model_interpretation,
         persona=persona,
         session_id=session_id,
+        source_context=source_context,
     )
     model_execution = agent.memory_router.resolve(
         task=task,

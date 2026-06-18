@@ -808,8 +808,13 @@ def _adaptive_research_decision(
     topic_hints = [str(item).strip().lower() for item in list(getattr(interpretation, "topic_hints", []) or []) if str(item).strip()]
     surface = str((source_context or {}).get("surface", "") or "").strip().lower()
     platform = str((source_context or {}).get("platform", "") or "").strip().lower()
-    allow_remote_fetch = bool((source_context or {}).get("allow_remote_fetch", False))
+    source_context = dict(source_context or {})
+    explicit_remote_policy = "allow_remote_fetch" in source_context
+    allow_remote_fetch = bool(source_context.get("allow_remote_fetch", False))
     trusted_surface = surface in {"channel", "openclaw", "api"} or platform in {"openclaw", "web_companion", "telegram", "discord"}
+    # Explicit false is an operator/privacy boundary; trusted surfaces only default
+    # to live research when the caller omits the remote-fetch policy entirely.
+    remote_fetch_allowed = allow_remote_fetch if explicit_remote_policy else trusted_surface
     if not text:
         return {"enabled": False, "reason": "empty_query", "strategy": "not_needed", "escalated_from_chat": False}
     if not policy_engine.allow_web_fallback():
@@ -820,7 +825,7 @@ def _adaptive_research_decision(
             "escalated_from_chat": False,
             "tool_gap_note": "Live research is not available on this runtime.",
         }
-    if not (allow_remote_fetch or trusted_surface):
+    if not remote_fetch_allowed:
         return {
             "enabled": False,
             "reason": "surface_disallows_remote_fetch",

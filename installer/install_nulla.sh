@@ -448,6 +448,7 @@ persist_provider_env_file() {
     LLAMACPP_MODEL NULLA_LLAMACPP_MODEL LLAMACPP_CONTEXT_WINDOW NULLA_LLAMACPP_CONTEXT_WINDOW \
     LLAMACPP_MODEL_PATH NULLA_LLAMACPP_MODEL_PATH LLAMA_CPP_MODEL_PATH NULLA_LLAMA_CPP_MODEL_PATH \
     NULLA_LLAMACPP_HOST NULLA_LLAMACPP_PORT NULLA_LLAMACPP_CHAT_FORMAT NULLA_LLAMACPP_N_GPU_LAYERS \
+    NULLA_LLAMACPP_CACHE NULLA_LLAMACPP_CACHE_TYPE NULLA_LLAMACPP_DRAFT_MODEL NULLA_LLAMACPP_DRAFT_MODEL_NUM_PRED_TOKENS \
     NULLA_LLAMACPP_REPO_ID NULLA_LLAMACPP_FILENAME; do
     local value="${!name:-}"
     if [[ -n "${value}" ]]; then
@@ -922,6 +923,10 @@ ensure_llamacpp_server() {
   local context_window="\${LLAMACPP_CONTEXT_WINDOW:-\${NULLA_LLAMACPP_CONTEXT_WINDOW:-32768}}"
   local chat_format="\${NULLA_LLAMACPP_CHAT_FORMAT:-chatml}"
   local n_gpu_layers="\${NULLA_LLAMACPP_N_GPU_LAYERS:--1}"
+  local cache_enabled="\${NULLA_LLAMACPP_CACHE:-1}"
+  local cache_type="\${NULLA_LLAMACPP_CACHE_TYPE:-ram}"
+  local draft_model="\${NULLA_LLAMACPP_DRAFT_MODEL:-prompt-lookup-decoding}"
+  local draft_tokens="\${NULLA_LLAMACPP_DRAFT_MODEL_NUM_PRED_TOKENS:-10}"
   [[ -n "\${base_url}" && -n "\${model_path}" ]] || return 0
 
   local health_url="\${base_url%/}/models"
@@ -944,7 +949,14 @@ ensure_llamacpp_server() {
   fi
   local server_log="\${NULLA_HOME}/logs/llamacpp-local.log"
   local server_pid
-  server_pid="\$(spawn_detached "\${server_log}" "\${VENV_PY}" -m llama_cpp.server --host "\${host}" --port "\${port}" --model "\${model_path}" --model_alias "\${model_alias}" --n_ctx "\${context_window}" --chat_format "\${chat_format}" --n_gpu_layers "\${n_gpu_layers}")"
+  local server_args=("\${VENV_PY}" -m llama_cpp.server --host "\${host}" --port "\${port}" --model "\${model_path}" --model_alias "\${model_alias}" --n_ctx "\${context_window}" --chat_format "\${chat_format}" --n_gpu_layers "\${n_gpu_layers}")
+  if [[ "\${cache_enabled}" =~ ^(1|true|TRUE|yes|YES|on|ON)$ ]]; then
+    server_args+=(--cache true --cache_type "\${cache_type}")
+  fi
+  if [[ -n "\${draft_model}" ]]; then
+    server_args+=(--draft_model "\${draft_model}" --draft_model_num_pred_tokens "\${draft_tokens}")
+  fi
+  server_pid="\$(spawn_detached "\${server_log}" "\${server_args[@]}")"
   if ! wait_for_http_ready "\${health_url}" 120 "\${server_pid}" 2; then
     terminate_pid "\${server_pid}"
     echo "ERROR: llama.cpp specialist lane failed to reach \${health_url}" >&2

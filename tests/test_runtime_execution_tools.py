@@ -19,6 +19,66 @@ _UNSHARE_AVAILABLE = os.system("unshare -r true >/dev/null 2>&1") == 0
 
 
 class RuntimeExecutionToolsTests(unittest.TestCase):
+    def test_web0_builder_draft_tool_returns_local_builder_url(self) -> None:
+        result = execute_runtime_tool(
+            "web0.open_builder_draft",
+            {
+                "title": "Nully Web0",
+                "code": "<main>Nully owns this page.</main>",
+                "domain": "nully",
+            },
+            source_context={},
+        )
+
+        assert result is not None
+        self.assertTrue(result.handled)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.status, "executed")
+        self.assertIn("/templates/editor/?", result.response_text)
+        self.assertIn("payload=", result.response_text)
+        self.assertEqual(result.details["observation"]["intent"], "web0.open_builder_draft")
+
+        hints = extract_observation_followup_hints(result.details["observation"])
+        self.assertEqual(hints["intent"], "web0.open_builder_draft")
+        self.assertIn("/templates/editor/?", hints["builder_url"])
+        self.assertEqual(hints["domain"], "nully")
+
+    def test_web_fetch_reports_policy_disabled_without_weakening_machine_reads(self) -> None:
+        result = execute_runtime_tool(
+            "web.fetch",
+            {"url": "https://example.com/"},
+            source_context={"allow_remote_fetch": False},
+        )
+
+        assert result is not None
+        self.assertFalse(result.ok)
+        self.assertEqual(result.status, "disabled_by_policy")
+        self.assertEqual(result.details["observation"]["intent"], "web.fetch")
+        self.assertEqual(result.details["observation"]["status"], "disabled_by_policy")
+
+    def test_browser_render_surfaces_runtime_status(self) -> None:
+        with mock.patch(
+            "core.runtime_execution_tools.browser_render",
+            return_value={
+                "status": "ok",
+                "final_url": "https://example.com/",
+                "title": "Example Domain",
+                "text": "Example Domain",
+                "links": [],
+            },
+        ):
+            result = execute_runtime_tool(
+                "web.browser_render",
+                {"url": "https://example.com/"},
+                source_context={},
+            )
+
+        assert result is not None
+        self.assertTrue(result.ok)
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.details["observation"]["intent"], "web.browser_render")
+        self.assertEqual(result.details["observation"]["final_url"], "https://example.com/")
+
     def test_workspace_list_files_and_read_file_are_grounded(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir)

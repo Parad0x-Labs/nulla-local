@@ -33,12 +33,14 @@ from apps.nulla_api_server import (
     main,
 )
 from core.nulla_workstation_ui import NULLA_WORKSTATION_DEPLOYMENT_VERSION
+from core.provider_routing import ProviderCapabilityTruth
 from core.runtime_task_events import emit_runtime_event
 from core.web.api.runtime import (
     RuntimeServices,
     bootstrap_runtime_services,
     build_runtime_version_stamp,
     log_prewarm_results,
+    startup_provider_capability_truth,
 )
 from core.web.api.service import json_response
 from tests.asgi_harness import asgi_request
@@ -102,6 +104,118 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertIn("gpt-mock", ids)
         self.assertIn("kimi-mock", ids)
         self.assertIn("openai-compatible-remote:gpt-mock", ids)
+
+    def test_create_app_api_tags_reports_each_provider_model_size(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA", runtime_parameter_size="8B")
+        app = create_app(runtime)
+
+        with mock.patch(
+            "apps.nulla_api_server.runtime_capability_snapshot",
+            return_value={
+                "provider_capability_truth": [
+                    {"provider_id": "ollama-local:qwen2.5:0.5b", "model_id": "qwen2.5:0.5b"},
+                    {"provider_id": "ollama-local:qwen2.5:32b", "model_id": "qwen2.5:32b"},
+                ]
+            },
+        ):
+            status, _, body = asgi_request(app, method="GET", path="/api/tags")
+
+        payload = json.loads(body.decode("utf-8"))
+        sizes = {item["model"]: item["details"]["parameter_size"] for item in payload["models"]}
+        self.assertEqual(status, 200)
+        self.assertEqual(sizes["nulla"], "8B")
+        self.assertEqual(sizes["qwen2.5:0.5b"], "0.5B")
+        self.assertEqual(sizes["ollama-local:qwen2.5:0.5b"], "0.5B")
+        self.assertEqual(sizes["qwen2.5:32b"], "32B")
+        self.assertEqual(sizes["ollama-local:qwen2.5:32b"], "32B")
+
+    def test_runtime_capabilities_prefers_attached_runtime_provider_truth(self) -> None:
+        runtime = RuntimeServices(
+            display_name="NULLA",
+            provider_capability_truth=(
+                {
+                    "schema": "nulla.provider_capability.v1",
+                    "provider_id": "ollama-local:qwen3:14b",
+                    "model_id": "qwen3:14b",
+                    "role_fit": "queen",
+                    "locality": "local",
+                    "availability_state": "ready",
+                },
+            ),
+        )
+        app = create_app(runtime)
+
+        with mock.patch(
+            "apps.nulla_api_server.runtime_capability_snapshot",
+            return_value={
+                "provider_capability_truth": [
+                    {
+                        "provider_id": "ollama-local:qwen3:8b",
+                        "model_id": "qwen3:8b",
+                    }
+                ]
+            },
+        ):
+            status, _, body = asgi_request(app, method="GET", path="/api/runtime/capabilities")
+
+        payload = json.loads(body.decode("utf-8"))
+        provider_ids = [item["provider_id"] for item in payload["provider_capability_truth"]]
+        self.assertEqual(status, 200)
+        self.assertEqual(provider_ids, ["ollama-local:qwen3:14b"])
+
+    def test_startup_provider_capability_truth_uses_measured_benchmark_hydration(self) -> None:
+        manifest_truth = ProviderCapabilityTruth(
+            provider_id="ollama-local:qwen3:8b",
+            model_id="qwen3:8b",
+            role_fit="drone",
+            context_window=8192,
+            tool_support=("structured_json",),
+            structured_output_support=True,
+            tokens_per_second=0.0,
+            ram_budget_gb=12.0,
+            vram_budget_gb=0.0,
+            quantization="",
+            locality="local",
+            privacy_class="local_private",
+            queue_depth=0,
+            max_safe_concurrency=1,
+        )
+        measured_truth = ProviderCapabilityTruth(
+            provider_id="ollama-local:qwen3:8b",
+            model_id="qwen3:8b",
+            role_fit="drone",
+            context_window=4096,
+            tool_support=("structured_json",),
+            structured_output_support=True,
+            tokens_per_second=19.5,
+            ram_budget_gb=12.0,
+            vram_budget_gb=0.0,
+            quantization="q4_K_M",
+            locality="local",
+            privacy_class="local_private",
+            queue_depth=0,
+            max_safe_concurrency=1,
+            measurement_source="local_inference_benchmark",
+            measured_at="2026-06-16T10:00:00+00:00",
+        )
+
+        with mock.patch(
+            "core.web.api.runtime.build_provider_registry_snapshot",
+            return_value=SimpleNamespace(capability_truth=(manifest_truth,)),
+        ), mock.patch(
+            "core.web.api.runtime.hydrate_capability_truth_with_benchmarks",
+            return_value=(measured_truth,),
+        ):
+            truth = startup_provider_capability_truth(
+                mock.Mock(),
+                runtime_home="/tmp/runtime",
+                requested_profile="balanced",
+                env={},
+            )
+
+        self.assertEqual(truth[0]["provider_id"], "ollama-local:qwen3:8b")
+        self.assertEqual(truth[0]["tokens_per_second"], 19.5)
+        self.assertEqual(truth[0]["measurement_source"], "local_inference_benchmark")
 
     def test_create_app_runtime_operator_snapshot_endpoint_returns_snapshot_payload(self) -> None:
         runtime = RuntimeServices(display_name="NULLA", runtime_version_stamp={"release_version": "0.4.0"})
@@ -435,6 +549,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
     def test_parameter_size_for_model_uses_runtime_tag(self) -> None:
         self.assertEqual(_parameter_size_for_model("qwen2.5:14b"), "14B")
         self.assertEqual(_parameter_size_for_model("ollama/qwen2.5:0.5b"), "0.5B")
+        self.assertEqual(_parameter_size_for_model("ollama-local:qwen2.5:0.5b"), "0.5B")
 
     def test_parameter_count_for_model_handles_fractional_billion_sizes(self) -> None:
         self.assertEqual(_parameter_count_for_model("qwen2.5:32b"), 32_000_000_000)
@@ -668,6 +783,11 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         manifest = manifests[("ollama-local", "qwen2.5:14b")]
         self.assertEqual(manifest.runtime_config["prewarm"]["strategy"], "ollama_chat")
         self.assertEqual(manifest.runtime_config["prewarm"]["keep_alive"], "15m")
+        self.assertNotIn("api_path", manifest.runtime_config)
+        self.assertIs(manifest.runtime_config["think"], False)
+        self.assertEqual(manifest.runtime_config["context_window"], 4096)
+        self.assertEqual(manifest.runtime_config["prewarm"]["options"]["num_ctx"], 4096)
+        self.assertEqual(manifest.metadata["context_window"], 4096)
 
     def test_bootstrap_runtime_services_runs_provider_prewarm_logging(self) -> None:
         persona = mock.Mock(persona_id="default")
@@ -811,7 +931,11 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
 
         self.assertEqual(runtime.runtime_model_tag, "qwen3:8b")
         ensure_model.assert_called_once_with("qwen3:8b")
-        ensure_provider.assert_called_once_with(model_registry, "qwen3:8b")
+        ensure_provider.assert_called_once()
+        provider_args, provider_kwargs = ensure_provider.call_args
+        self.assertEqual(provider_args[:2], (model_registry, "qwen3:8b"))
+        self.assertIn("env", provider_kwargs)
+        self.assertIn("runtime_home", provider_kwargs)
 
     def test_log_prewarm_results_treats_timeout_without_background_as_info(self) -> None:
         registry = mock.Mock()
@@ -910,6 +1034,56 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
             _format_runtime_event_text({"event_type": "model_output_chunk", "message": "hello"}),
             "hello",
         )
+        lane_text = _format_runtime_event_text(
+            {
+                "event_type": "model_lane_started",
+                "message": "Using ollama-local:qwen3:8b.",
+                "lane": "daily",
+                "provider_id": "ollama-local:qwen3:8b",
+                "model_id": "qwen3:8b",
+                "tokens_per_second": 19.5,
+                "queue_depth": 0,
+                "private_path": "/tmp/secret",
+            }
+        )
+        self.assertTrue(lane_text.startswith("NULLA_RUNTIME_EVENT "))
+        self.assertIn('"lane":"daily"', lane_text)
+        self.assertIn('"tokens_per_second":19.5', lane_text)
+        self.assertNotIn("private_path", lane_text)
+        proof_text = _format_runtime_event_text(
+            {
+                "event_type": "model_lane_proof",
+                "schema": "nulla.model_lane_proof.v1",
+                "turn_id": "turn-1",
+                "session_id": "session-1",
+                "task_class": "debugging",
+                "complexity": "hard",
+                "lane": "deep",
+                "phase": "failed",
+                "planned_provider_id": "ollama-local:qwen3:14b",
+                "planned_model_id": "qwen3:14b",
+                "provider_id": "ollama-local:qwen3:8b",
+                "model_id": "qwen3:8b",
+                "actual_adapter_provider_id": "ollama-local:qwen3:8b",
+                "actual_adapter_model_id": "qwen3:8b",
+                "backend": "ollama",
+                "measurement_source": "local_inference_benchmark",
+                "verifier_status": "blocked",
+                "verifier_provider_id": "",
+                "verifier_model_id": "",
+                "kv_cache_status": "ollama=not_supported_keep_alive_only",
+                "speculative_status": "inactive",
+                "eagle_status": "unsupported_by_backend",
+                "mismatch": True,
+                "failure_reason": "planned_adapter_mismatch",
+                "private_path": "/tmp/secret",
+            }
+        )
+        self.assertTrue(proof_text.startswith("NULLA_RUNTIME_EVENT "))
+        self.assertIn('"schema":"nulla.model_lane_proof.v1"', proof_text)
+        self.assertIn('"actual_adapter_provider_id":"ollama-local:qwen3:8b"', proof_text)
+        self.assertIn('"failure_reason":"planned_adapter_mismatch"', proof_text)
+        self.assertNotIn("private_path", proof_text)
 
     def test_stream_agent_with_events_emits_progress_before_final_response(self) -> None:
         def fake_run_agent(

@@ -96,8 +96,10 @@ def _compat_runtime_services() -> RuntimeServices:
         runtime_model_tag=runtime_model_tag,
         runtime_parameter_size=str(runtime.runtime_parameter_size or _parameter_size_for_model(runtime_model_tag)),
         runtime_started_at=str(runtime.runtime_started_at or ""),
+        runtime_home=str(runtime.runtime_home or ""),
         runtime_version_stamp=dict(runtime.runtime_version_stamp or {}),
         public_hive_auth=dict(runtime.public_hive_auth or {}),
+        provider_capability_truth=tuple(dict(item) for item in tuple(runtime.provider_capability_truth or ())),
     )
 
 

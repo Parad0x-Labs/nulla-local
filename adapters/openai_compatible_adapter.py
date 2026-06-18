@@ -9,6 +9,7 @@ import requests
 
 from adapters.base_adapter import ModelAdapter, ModelRequest, ModelResponse, ModelStreamChunk
 from core.compute_mode import get_active_compute_budget
+from core.memory_prompt_builder import apply_memory_prefix_to_messages
 
 logger = logging.getLogger("nulla.model_adapter")
 
@@ -141,6 +142,8 @@ class OpenAICompatibleAdapter(ModelAdapter):
                 "keep_alive": keep_alive,
                 "options": options,
             }
+            if self._ollama_thinking_disabled():
+                payload["think"] = False
             return f"{native_base_url}/api/chat", payload
 
         prompt = prewarm_config.get("prompt")
@@ -299,9 +302,10 @@ class OpenAICompatibleAdapter(ModelAdapter):
 
     def _build_openai_payload(self, request: ModelRequest, *, force_json: bool, stream: bool) -> dict[str, Any]:
         generation_profile = dict(request.metadata.get("generation_profile") or {})
+        messages = _request_messages_with_memory(request)
         payload: dict[str, Any] = {
             "model": self.manifest.model_name,
-            "messages": request.messages or _build_messages(request.system_prompt, request.prompt, attachments=request.attachments),
+            "messages": messages,
             "temperature": request.temperature
             if request.temperature is not None
             else generation_profile.get("temperature", self.manifest.runtime_config.get("temperature", 0.2)),
@@ -319,6 +323,9 @@ class OpenAICompatibleAdapter(ModelAdapter):
             payload["options"] = {
                 "num_thread": int(max(1, budget.cpu_threads)),
             }
+            context_window = self._ollama_context_window()
+            if context_window > 0:
+                payload["options"]["num_ctx"] = context_window
         stop_sequences = [str(item) for item in list(generation_profile.get("stop_sequences") or []) if str(item or "").strip()]
         if stop_sequences:
             payload["stop"] = stop_sequences
@@ -344,12 +351,18 @@ class OpenAICompatibleAdapter(ModelAdapter):
             options["stop"] = stop_sequences
         budget = get_active_compute_budget()
         options["num_thread"] = int(max(1, budget.cpu_threads))
+        context_window = self._ollama_context_window()
+        if context_window > 0:
+            options["num_ctx"] = context_window
+        messages = _request_messages_with_memory(request)
         payload: dict[str, Any] = {
             "model": self.manifest.model_name,
-            "messages": request.messages or _build_messages(request.system_prompt, request.prompt, attachments=request.attachments),
+            "messages": messages,
             "stream": bool(stream),
             "options": options,
         }
+        if self._ollama_thinking_disabled():
+            payload["think"] = False
         keep_alive = str(self.manifest.runtime_config.get("keep_alive") or "").strip()
         if keep_alive:
             payload["keep_alive"] = keep_alive
@@ -364,6 +377,16 @@ class OpenAICompatibleAdapter(ModelAdapter):
 
     def _runtime_family(self) -> str:
         return str(self.manifest.metadata.get("runtime_family") or "").strip().lower()
+
+    def _ollama_context_window(self) -> int:
+        raw = self.manifest.runtime_config.get("context_window") or self.manifest.metadata.get("context_window") or 0
+        try:
+            return max(0, int(raw or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _ollama_thinking_disabled(self) -> bool:
+        return self.manifest.runtime_config.get("think") is False
 
     def _headers(self) -> dict[str, str]:
         headers: dict[str, str] = {"Content-Type": "application/json"}
@@ -403,6 +426,11 @@ def _build_messages(system_prompt: str | None, prompt: str, *, attachments: list
                 content.append({"type": "text", "text": snippet})
     messages.append({"role": "user", "content": content})
     return messages
+
+
+def _request_messages_with_memory(request: ModelRequest) -> list[dict[str, Any]]:
+    messages = request.messages or _build_messages(request.system_prompt, request.prompt, attachments=request.attachments)
+    return apply_memory_prefix_to_messages(messages, request)
 
 
 def _extract_openai_text(payload: dict[str, Any]) -> str:

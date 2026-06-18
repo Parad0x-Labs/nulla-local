@@ -21,6 +21,10 @@ def test_build_llamacpp_local_config_uses_runtime_home_defaults(tmp_path: Path) 
     assert config.model_path.endswith("/models/llamacpp/qwen2.5-coder-14b-instruct-q4_k_m.gguf")
     assert config.base_url == "http://127.0.0.1:8090/v1"
     assert config.port == 8090
+    assert config.cache is True
+    assert config.cache_type == "ram"
+    assert config.draft_model == "prompt-lookup-decoding"
+    assert config.draft_model_num_pred_tokens == 10
 
 
 def test_write_llamacpp_local_config_persists_json(tmp_path: Path) -> None:
@@ -54,6 +58,8 @@ def test_provision_llamacpp_local_script_emits_shell_env(tmp_path: Path) -> None
     assert "export LLAMACPP_BASE_URL=" in output
     assert "export NULLA_LLAMACPP_MODEL=qwen2.5:14b-gguf" in output
     assert "export NULLA_LLAMACPP_MODEL_PATH=" in output
+    assert "export NULLA_LLAMACPP_CACHE=1" in output
+    assert "export NULLA_LLAMACPP_DRAFT_MODEL=prompt-lookup-decoding" in output
 
 
 def test_download_llamacpp_model_prefers_public_curl_download(monkeypatch, tmp_path: Path) -> None:

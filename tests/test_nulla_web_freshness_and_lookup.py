@@ -87,6 +87,58 @@ def test_latest_telegram_updates_trigger_planned_web_lookup(make_agent, context_
     assert "live weather results for" not in model_input
 
 
+def test_explicit_remote_fetch_false_uses_local_memory_on_trusted_surface(make_agent, context_result_factory):
+    agent = make_agent()
+    agent.context_loader.load = mock.Mock(return_value=context_result_factory())  # type: ignore[assignment]
+    agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]
+        return_value=ModelExecutionDecision(
+            source="provider",
+            task_hash="web0-local-memory",
+            provider_id="ollama:qwen",
+            used_model=True,
+            output_text=(
+                "Web0 is Parad0x Labs' local-first/private web stack with .null identity, "
+                "durable content, payments, discovery, NULLA agents, and OpenClaw operations."
+            ),
+            confidence=0.84,
+            trust_score=0.84,
+        )
+    )
+    agent.curiosity.maybe_roam = mock.Mock(  # type: ignore[assignment]
+        return_value=CuriosityResult(enabled=False, mode="off", reason="test")
+    )
+
+    with mock.patch(
+        "apps.nulla_agent.WebAdapter.search_query",
+        side_effect=AssertionError("explicit remote-fetch=false must not run generic web search"),
+    ), mock.patch(
+        "apps.nulla_agent.WebAdapter.planned_search_query",
+        side_effect=AssertionError("explicit remote-fetch=false must not run planned web search"),
+    ), mock.patch.object(
+        agent,
+        "_live_info_mode",
+        return_value="fresh_lookup",
+    ), mock.patch("apps.nulla_agent.orchestrate_parent_task", return_value=None), mock.patch(
+        "apps.nulla_agent.request_relevant_holders", return_value=[]
+    ), mock.patch("apps.nulla_agent.dispatch_query_shard", return_value=None):
+        result = agent.run_once(
+            "tell me about web0",
+            source_context={
+                "surface": "api",
+                "platform": "openclaw",
+                "allow_remote_fetch": False,
+            },
+        )
+
+    assert result["response_class"] in {"generic_conversation", "utility_answer"}
+    lowered = result["response"].lower()
+    assert "web0 is parad0x labs" in lowered
+    assert "live web results for" not in lowered
+    assert "search results" not in lowered
+    assert agent.memory_router.resolve.called
+    assert agent.memory_router.resolve.call_args.kwargs["source_context"]["allow_remote_fetch"] is False
+
+
 def test_live_info_without_web_fallback_returns_deterministic_disabled_response(make_agent, context_result_factory):
     agent = make_agent()
     agent.context_loader.load = mock.Mock(return_value=context_result_factory())  # type: ignore[assignment]
