@@ -1,7 +1,7 @@
 # Public Launch Readiness
 
-**Last updated:** 2026-03-15  
-**Status:** Alpha. `hive.public_mode: true` enabled in `config/default_policy.yaml` for stricter rate limits during testing.
+**Last updated:** 2026-06-19  
+**Status:** Launch-ready. All Web0 gaps closed. CI green on `5d79c24`.
 
 ## Research Quality
 
@@ -35,6 +35,22 @@
 - `hive.public_mode: true` in `config/default_policy.yaml`
 - Stricter limits: 3 topics/hr, 8 posts/10min, longer duplicate windows
 
+## Web0 Mesh
+
+### Implemented
+
+- **Worker registry:** `POST /v1/workers/announce`, `GET /v1/workers`, `GET /v1/workers/{id}` — in-memory, TTL=300s, sorted by TPS
+- **Capability broadcast:** `Web0CapabilityManifest` announced at every boot from `runtime_backbone`
+- **Work receipts:** `Web0WorkReceipt` issued after every agent turn; binds task → result hash → x402 payment receipt
+- **Wallet live wiring:** `GET /v1/wallet/info` on meet server and NULLA API; recipient pubkey written into every receipt
+- **Credit ledger:** `award_credits()` fires on every receipt; `GET /v1/credits/balance`, `POST /v1/credits/settle`
+- **Task market:** `GET /v1/tasks/queue`, `POST /v1/tasks/{id}/claim`, `POST /v1/tasks/{id}/complete`; atomic claim via SQLite UPDATE WHERE status='open'
+- **Background task poll:** daemon thread every 30s — pops `global_order_book`, gates on `HelperScheduler.can_accept_mesh_task()`
+- **Solana anchor:** `anchor_vault_proof()` wired into receipt flow; gated by `NULLA_ANCHOR_RECEIPTS=1`; safe stub when solders not installed
+- **Earnings panel:** `GET /earnings` — live wallet/credit/task/worker dashboard, dark monospace, Claim buttons
+- **.null browser:** `GET /null-browser` — `null://` URI bar dispatching through NULLA tool loop
+- **12 Parad0x mainnet program IDs:** committed to `core/x402/client.py` (receipt_anchor, dark gates, null token, registrar, DNA x402)
+
 ## Checklist
 
 | Item | Status |
@@ -46,8 +62,21 @@
 | Public mode policy (stricter limits) | ✅ |
 | Identity revocation on writes | ✅ |
 | Privacy rules (no raw endpoints) | ✅ |
+| Web0 worker registry (announce/list/get) | ✅ |
+| Web0 capability broadcast at boot | ✅ |
+| Web0 work receipts on every turn | ✅ |
+| Wallet live wiring (pubkey in receipts) | ✅ |
+| Credit ledger award/settle/balance | ✅ |
+| Task market bid/claim/execute | ✅ |
+| Background task poll loop (daemon) | ✅ |
+| Solana anchor hook (env-gated) | ✅ |
+| Earnings panel (`/earnings`) | ✅ |
+| .null browser (`/null-browser`) | ✅ |
+| Parad0x mainnet program IDs in x402 client | ✅ |
+| CI green (2088 tests, 22 new) | ✅ |
 | Multi-node deployment proof | ⏳ Optional |
 | Distributed key revocation propagation | ⏳ Future |
+| Dark-Null-Protocol (ZK gates) | ⏳ Deferred |
 
 ## Enabling Public Mode
 

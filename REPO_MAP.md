@@ -59,6 +59,24 @@ Core lane:
 - `tools/README.md`: explicit tool-contract boundary
 - `network/README.md`: transport/auth/routing boundary
 
+## Current Web0 Spine
+
+- `core/web0_capability_broadcast.py`: `Web0CapabilityManifest` builder + `announce_from_env()` — fires at boot to announce TPS/tier/tools/price to the local mesh registry
+- `core/web0_mesh_registry.py`: in-memory worker registry (TTL=300s, sorted by TPS desc); `announce_worker()` / `list_workers()` / `get_worker()` / `evict_expired()`
+- `core/web0_work_receipt.py`: `Web0WorkReceipt` dataclass + `issue_work_receipt()` — binds task → result hash → x402 payment receipt; issued after every agent turn
+- `core/null_browser_page.py`: `render_null_browser_html()` — dark-theme `null://` URI browser; served at `GET /null-browser`
+- `core/earnings_page.py`: `render_earnings_html()` — wallet/credit/task-queue/worker panel; served at `GET /earnings`; polls all `/v1/*` APIs every 10s
+- `core/null_protocol.py`: `null://` URI parser and priced task dispatcher
+- `core/nulla_wallet.py`: Ed25519 wallet; `get_or_create_wallet()` → `.pubkey` / `.export_safe(include_balances=True)` / SOL+USDC balance via RPC
+- `core/credit_ledger.py`: full award/burn/escrow/settle/balance ledger; `award_credits()` called on every completed receipt
+- `core/order_book.py`: `global_order_book` priority queue (`OrderBookItem` sorted by reward desc, deadline asc)
+- `core/helper_scheduler.py`: `HelperScheduler.can_accept_mesh_task()` — CPU/memory/concurrency gate for background task claiming
+- `core/solana_anchor.py`: `anchor_vault_proof()` — anchors SHA-256 receipt hash on-chain; safe stub when `solders` not installed; gated by `NULLA_ANCHOR_RECEIPTS=1`
+- `core/task_decomposer.py`: `decompose_task()` + `broadcast_decomposed_subtasks()` — splits large tasks and pushes sub-offers to the order book
+- `core/runtime_backbone.py`: boots `start_web0_background_workers()` (idempotent daemon thread) + fires capability announce on every provider snapshot build
+- `storage/task_offer_store.py`: SQLite wrapper over `task_offers` table; `list_open_task_offers()` / `claim_task_offer()` / `complete_task_offer()` / `get_task_offer()`
+- `core/x402/client.py`: x402 HTTP 402 payment rail (stub/devnet/mainnet modes); hosts 12 Parad0x mainnet program ID constants + `PARAD0X_UPGRADE_AUTHORITY`
+
 ## Current WAN Transport Spine
 
 - `apps/nulla_daemon.py`: transport-mode discovery, capability advertising, and local presence broadcast entrypoint

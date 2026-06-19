@@ -454,6 +454,133 @@ Current intended use:
 - same-region delta sync uses `regional_detail`
 - cross-region replication should prefer summarized snapshots rather than full-fidelity delta chatter
 
+## Web0 Worker Endpoints
+
+### `POST /v1/workers/announce`
+
+Register or refresh a worker in the local mesh registry (TTL=300s).
+
+Request fields:
+
+- `worker_id` (string, required)
+- `top_tps` (float)
+- `top_tier` (string) — e.g. `"queen"`, `"drone"`
+- `context_window` (int)
+- `tools` (list of strings)
+- `price_per_token_usdc` (float)
+- `privacy_mode` (string) — `"plain"` or `"dark"`
+
+Response: `{ "status": "ok", "worker_id": "..." }`
+
+### `GET /v1/workers`
+
+List active workers in the mesh registry.
+
+Query parameters:
+
+- `active_only` (bool, default `true`) — filter to workers with a live TTL
+- `limit` (int, default 100)
+
+Response: `{ "result": [ { "worker_id", "top_tps", "top_tier", "context_window", "tools", "price_per_token_usdc", "privacy_mode", "active", "last_seen" }, ... ] }`
+
+### `GET /v1/workers/{worker_id}`
+
+Fetch a single worker record.
+
+Response: `{ "result": { ...worker fields... } }` or `{ "error": "worker not found", "status": 404 }`.
+
+## Web0 Task Market Endpoints
+
+### `GET /v1/tasks/queue`
+
+List open task offers available for claiming.
+
+Query parameters:
+
+- `limit` (int, default 50)
+
+Response: `{ "result": [ { "task_id", "subtask_type", "summary", "priority", "deadline_ts", "reward_hint": { "points" } }, ... ] }`
+
+### `POST /v1/tasks/{task_id}/claim`
+
+Atomically claim an open task for the local peer.
+
+Returns `409` if the task is already claimed or does not exist.
+
+Response: `{ "result": { "task_id": "...", "status": "claimed" } }`
+
+### `POST /v1/tasks/{task_id}/complete`
+
+Mark a task complete and trigger escrow release to the claiming helper.
+
+Request fields:
+
+- `result_hash` (string) — SHA-256 of the result payload
+
+Response: `{ "result": { "task_id": "...", "status": "complete" } }`
+
+### `GET /v1/tasks/{task_id}`
+
+Fetch a single task offer by ID.
+
+Response: `{ "result": { ...task fields... } }` or `404` if not found.
+
+## Web0 Wallet and Credits Endpoints
+
+### `GET /v1/wallet/info`
+
+Returns the local node's Ed25519 wallet state.
+
+Response fields:
+
+- `pubkey` — base58 public key
+- `sol_balance` — SOL balance (mainnet RPC, read-only)
+- `usdc_balance` — USDC balance
+- `price_per_token_usdc` — this worker's advertised price
+
+Available on both the meet server (`:11434`) and the NULLA API (`:11435`).
+
+### `GET /v1/credits/balance`
+
+Returns the local peer's credit ledger state.
+
+Query parameters:
+
+- `peer_id` (string, optional — defaults to local peer)
+- `limit` (int, default 20)
+
+Response fields:
+
+- `peer_id`
+- `balance` (float)
+- `entries` — list of recent ledger events with `amount`, `reason`, `receipt_id`, `timestamp`
+
+### `POST /v1/credits/settle`
+
+Runs `reconcile_ledger()` against the local peer and returns the settled balance.
+
+Response fields:
+
+- `balance` (float)
+- `mode` (string)
+
+## Web0 UI Routes
+
+These routes serve HTML panels directly from the meet server.
+
+### `GET /earnings`
+
+Earnings and task queue panel. Dark monospace theme. Polls all `/v1/*` endpoints every 10s. Shows:
+
+- wallet pubkey, SOL/USDC balance, price/token
+- credit balance and recent ledger entries
+- open task queue with per-row Claim buttons
+- mesh worker list with TPS/tier/privacy columns
+
+### `GET /null-browser`
+
+`.null browser` — a URI bar that accepts `null://task/...` URIs and dispatches them through the NULLA tool loop. Shows quote, payment receipt, and response body inline.
+
 ## Payment Marker Endpoints
 
 ### `POST /v1/payments/status`
