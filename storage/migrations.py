@@ -1238,6 +1238,23 @@ CREATE TABLE IF NOT EXISTS hive_commons_promotion_reviews (
 
 CREATE INDEX IF NOT EXISTS idx_hive_commons_promotion_reviews_candidate
 ON hive_commons_promotion_reviews(candidate_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS web0_workers (
+    worker_id TEXT PRIMARY KEY,
+    provider_ids_json TEXT NOT NULL DEFAULT '[]',
+    top_tps REAL NOT NULL DEFAULT 0.0,
+    top_tier TEXT NOT NULL DEFAULT 'drone',
+    context_window INTEGER NOT NULL DEFAULT 32768,
+    tools_json TEXT NOT NULL DEFAULT '[]',
+    price_per_token_usdc REAL NOT NULL DEFAULT 0.000001,
+    privacy_mode TEXT NOT NULL DEFAULT 'plain',
+    announced_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_web0_workers_expires_at
+ON web0_workers(expires_at DESC);
 """
 
 def _utcnow() -> str:

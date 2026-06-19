@@ -51,15 +51,18 @@ def test_get_worker_missing_returns_none() -> None:
 
 
 def test_evict_expired_removes_stale_entries() -> None:
-    import time
 
-    from core.web0_mesh_registry import _lock, _workers
+    from storage.db import get_connection
 
     worker_id = "stale-unit-worker"
     announce_worker({"worker_id": worker_id})
-    # Manually backdate the expiry
-    with _lock:
-        _workers[worker_id].expires_at = time.time() - 1
+    # Backdate expiry directly in SQLite
+    conn = get_connection()
+    conn.execute(
+        "UPDATE web0_workers SET expires_at = ? WHERE worker_id = ?",
+        (time.time() - 1, worker_id),
+    )
+    conn.commit()
 
     count = evict_expired()
     assert count >= 1
@@ -67,11 +70,16 @@ def test_evict_expired_removes_stale_entries() -> None:
 
 
 def test_active_flag_false_after_expiry() -> None:
-    from core.web0_mesh_registry import _lock, _workers
+
+    from storage.db import get_connection
 
     announce_worker({"worker_id": "flag-test"})
-    with _lock:
-        _workers["flag-test"].expires_at = time.time() - 1
+    conn = get_connection()
+    conn.execute(
+        "UPDATE web0_workers SET expires_at = ? WHERE worker_id = ?",
+        (time.time() - 1, "flag-test"),
+    )
+    conn.commit()
 
     entry = get_worker("flag-test")
     assert entry is not None

@@ -1,108 +1,143 @@
 """
 core/web0_mesh_registry.py
 ==========================
-In-process Web0 worker registry.
+Web0 worker registry backed by SQLite.
 
-NULLA instances POST to /v1/workers/announce when they boot.
-The registry tracks them with a TTL and exposes a list endpoint.
-No external dependency — pure Python dict + threading lock.
+Workers POST to /v1/workers/announce on boot and periodically re-announce
+(TTL=300s).  Rows survive restarts; expired rows are filtered on read and
+pruned by evict_expired().
 """
 from __future__ import annotations
 
-import threading
+import json
 import time
-from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Any
 
-_WORKER_TTL_SECONDS = 300  # 5 min — workers must re-announce to stay visible
+from storage.db import get_connection
 
-_lock = threading.Lock()
-_workers: dict[str, _WorkerEntry] = {}
+_WORKER_TTL_SECONDS = 300  # workers must re-announce within 5 min
 
 
-@dataclass
-class _WorkerEntry:
-    worker_id: str
-    provider_ids: list[str]
-    top_tps: float
-    top_tier: str
-    context_window: int
-    tools: list[str]
-    price_per_token_usdc: float
-    privacy_mode: str
-    announced_at: float
-    expires_at: float
+def _utcnow() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _row_to_dict(row: tuple) -> dict[str, Any]:
+    (
+        worker_id,
+        provider_ids_json,
+        top_tps,
+        top_tier,
+        context_window,
+        tools_json,
+        price_per_token_usdc,
+        privacy_mode,
+        announced_at,
+        expires_at,
+        _updated_at,
+    ) = row
+    return {
+        "worker_id": worker_id,
+        "provider_ids": json.loads(provider_ids_json or "[]"),
+        "top_tps": top_tps,
+        "top_tier": top_tier,
+        "context_window": context_window,
+        "tools": json.loads(tools_json or "[]"),
+        "price_per_token_usdc": price_per_token_usdc,
+        "privacy_mode": privacy_mode,
+        "announced_at": announced_at,
+        "expires_at": expires_at,
+        "active": expires_at > time.time(),
+    }
 
 
 def announce_worker(payload: dict[str, Any]) -> dict[str, Any]:
-    """
-    Accept a Web0CapabilityManifest payload and store it.
-    Returns {ok, worker_id, expires_at}.
-    """
+    """Upsert a worker announcement. Returns {ok, worker_id, expires_at}."""
     worker_id = str(payload.get("worker_id") or "").strip()
     if not worker_id:
         return {"ok": False, "error": "worker_id required"}
 
     now = time.time()
-    entry = _WorkerEntry(
-        worker_id=worker_id,
-        provider_ids=[str(p) for p in list(payload.get("provider_ids") or [])],
-        top_tps=float(payload.get("top_tps") or 0.0),
-        top_tier=str(payload.get("top_tier") or "drone"),
-        context_window=int(payload.get("context_window") or 32768),
-        tools=[str(t) for t in list(payload.get("tools") or [])],
-        price_per_token_usdc=float(payload.get("price_per_token_usdc") or 0.000001),
-        privacy_mode=str(payload.get("privacy_mode") or "plain"),
-        announced_at=float(payload.get("announced_at") or now),
-        expires_at=now + _WORKER_TTL_SECONDS,
+    expires_at = now + _WORKER_TTL_SECONDS
+
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO web0_workers
+            (worker_id, provider_ids_json, top_tps, top_tier, context_window,
+             tools_json, price_per_token_usdc, privacy_mode, announced_at, expires_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(worker_id) DO UPDATE SET
+            provider_ids_json     = excluded.provider_ids_json,
+            top_tps               = excluded.top_tps,
+            top_tier              = excluded.top_tier,
+            context_window        = excluded.context_window,
+            tools_json            = excluded.tools_json,
+            price_per_token_usdc  = excluded.price_per_token_usdc,
+            privacy_mode          = excluded.privacy_mode,
+            announced_at          = excluded.announced_at,
+            expires_at            = excluded.expires_at,
+            updated_at            = excluded.updated_at
+        """,
+        (
+            worker_id,
+            json.dumps([str(p) for p in list(payload.get("provider_ids") or [])]),
+            float(payload.get("top_tps") or 0.0),
+            str(payload.get("top_tier") or "drone"),
+            int(payload.get("context_window") or 32768),
+            json.dumps([str(t) for t in list(payload.get("tools") or [])]),
+            float(payload.get("price_per_token_usdc") or 0.000001),
+            str(payload.get("privacy_mode") or "plain"),
+            float(payload.get("announced_at") or now),
+            expires_at,
+            _utcnow(),
+        ),
     )
-    with _lock:
-        _workers[worker_id] = entry
+    conn.commit()
 
     return {
         "ok": True,
         "worker_id": worker_id,
-        "expires_at": entry.expires_at,
+        "expires_at": expires_at,
         "ttl_seconds": _WORKER_TTL_SECONDS,
     }
 
 
 def list_workers(*, active_only: bool = True, limit: int = 200) -> list[dict[str, Any]]:
-    """Return visible workers, optionally filtered to non-expired ones."""
-    now = time.time()
-    with _lock:
-        entries = list(_workers.values())
-
+    """Return workers sorted by TPS descending."""
+    conn = get_connection()
     if active_only:
-        entries = [e for e in entries if e.expires_at > now]
-
-    entries.sort(key=lambda e: e.top_tps, reverse=True)
-    rows = []
-    for e in entries[:limit]:
-        d = asdict(e)
-        d["active"] = e.expires_at > now
-        rows.append(d)
-    return rows
+        rows = conn.execute(
+            "SELECT * FROM web0_workers WHERE expires_at > ? ORDER BY top_tps DESC LIMIT ?",
+            (time.time(), limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM web0_workers ORDER BY top_tps DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
 
 
 def get_worker(worker_id: str) -> dict[str, Any] | None:
-    with _lock:
-        entry = _workers.get(worker_id)
-    if entry is None:
-        return None
-    d = asdict(entry)
-    d["active"] = entry.expires_at > time.time()
-    return d
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM web0_workers WHERE worker_id = ?",
+        (worker_id,),
+    ).fetchone()
+    return _row_to_dict(row) if row else None
 
 
 def evict_expired() -> int:
-    """Remove stale entries; returns count removed."""
-    now = time.time()
-    with _lock:
-        stale = [wid for wid, e in _workers.items() if e.expires_at <= now]
-        for wid in stale:
-            del _workers[wid]
-    return len(stale)
+    """Delete rows whose TTL has lapsed. Returns count removed."""
+    conn = get_connection()
+    cur = conn.execute(
+        "DELETE FROM web0_workers WHERE expires_at <= ?",
+        (time.time(),),
+    )
+    conn.commit()
+    return cur.rowcount
 
 
 __all__ = [
