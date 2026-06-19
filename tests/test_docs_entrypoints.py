@@ -62,6 +62,7 @@ def test_docs_root_is_curated_after_archive_sweep() -> None:
         "PROCEDURAL_LLM_AUDIT_HARNESS.md",
         "PROOF_PATH.md",
         "PROOF_PASS_REPORT.md",
+        "LAUNCH_TECH_BRIEF.md",
         "PUBLIC_LAUNCH_READINESS.md",
         "README.md",
         "STATUS.md",
