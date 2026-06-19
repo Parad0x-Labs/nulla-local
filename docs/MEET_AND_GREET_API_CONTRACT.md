@@ -458,7 +458,7 @@ Current intended use:
 
 ### `POST /v1/workers/announce`
 
-Register or refresh a worker in the local mesh registry (TTL=300s).
+Register or refresh a worker in the local mesh registry (TTL=300s). Backed by SQLite — survives restarts. Workers re-announce on every boot so the local entry is always current.
 
 Request fields:
 

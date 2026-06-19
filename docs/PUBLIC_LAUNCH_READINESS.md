@@ -39,7 +39,7 @@
 
 ### Implemented
 
-- **Worker registry:** `POST /v1/workers/announce`, `GET /v1/workers`, `GET /v1/workers/{id}` — in-memory, TTL=300s, sorted by TPS
+- **Worker registry:** `POST /v1/workers/announce`, `GET /v1/workers`, `GET /v1/workers/{id}` — SQLite-backed, TTL=300s, survives restarts, sorted by TPS
 - **Capability broadcast:** `Web0CapabilityManifest` announced at every boot from `runtime_backbone`
 - **Work receipts:** `Web0WorkReceipt` issued after every agent turn; binds task → result hash → x402 payment receipt
 - **Wallet live wiring:** `GET /v1/wallet/info` on meet server and NULLA API; recipient pubkey written into every receipt

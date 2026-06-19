@@ -62,7 +62,7 @@ Core lane:
 ## Current Web0 Spine
 
 - `core/web0_capability_broadcast.py`: `Web0CapabilityManifest` builder + `announce_from_env()` — fires at boot to announce TPS/tier/tools/price to the local mesh registry
-- `core/web0_mesh_registry.py`: in-memory worker registry (TTL=300s, sorted by TPS desc); `announce_worker()` / `list_workers()` / `get_worker()` / `evict_expired()`
+- `core/web0_mesh_registry.py`: SQLite-backed worker registry (TTL=300s, survives restarts, sorted by TPS desc); `announce_worker()` / `list_workers()` / `get_worker()` / `evict_expired()`
 - `core/web0_work_receipt.py`: `Web0WorkReceipt` dataclass + `issue_work_receipt()` — binds task → result hash → x402 payment receipt; issued after every agent turn
 - `core/null_browser_page.py`: `render_null_browser_html()` — dark-theme `null://` URI browser; served at `GET /null-browser`
 - `core/earnings_page.py`: `render_earnings_html()` — wallet/credit/task-queue/worker panel; served at `GET /earnings`; polls all `/v1/*` APIs every 10s
