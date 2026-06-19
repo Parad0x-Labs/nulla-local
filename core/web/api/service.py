@@ -101,13 +101,40 @@ def _attach_work_receipt(
         response_text = str(result.get("response") or "").strip()
         if not response_text:
             return payload
+        worker_id = str(os.environ.get("NULLA_WORKER_ID") or "nulla")
+        # Wire live wallet pubkey as payment recipient when available
+        recipient_wallet = "stub-wallet"
+        try:
+            from core.nulla_wallet import get_or_create_wallet
+            recipient_wallet = get_or_create_wallet().pubkey
+        except Exception:
+            pass
         receipt = issue_work_receipt(
             task_id=session_id,
             result=response_text,
-            worker_id=str(os.environ.get("NULLA_WORKER_ID") or "nulla"),
+            worker_id=worker_id,
+            recipient_wallet=recipient_wallet,
         )
         payload = dict(payload)
         payload["web0_receipt"] = receipt.to_dict()
+        # Award 1 credit to self per completed task turn
+        try:
+            from core.credit_ledger import award_credits
+            from network.signer import get_local_peer_id
+            award_credits(get_local_peer_id(), amount=1.0, reason="task_completion", receipt_id=receipt.receipt_id)
+        except Exception:
+            pass
+        # Anchor receipt hash on Solana when NULLA_ANCHOR_RECEIPTS=1
+        if os.environ.get("NULLA_ANCHOR_RECEIPTS") == "1":
+            try:
+                from core.solana_anchor import anchor_vault_proof
+                anchor_vault_proof(
+                    parent_task_id=session_id,
+                    final_response_hash=receipt.result_hash,
+                    confidence=1.0,
+                )
+            except Exception:
+                pass
     except Exception:
         pass
     return payload
@@ -392,6 +419,31 @@ def dispatch_get(
             runtime,
         )
 
+    if normalized_path in {"/v1/wallet/info", "/api/wallet/info"}:
+        try:
+            from core.nulla_wallet import get_or_create_wallet
+            w = get_or_create_wallet()
+            payload = w.export_safe(include_balances=True)
+        except Exception as exc:
+            payload = {"error": str(exc)}
+        return apply_runtime_headers(json_response(200, payload), runtime)
+
+    if normalized_path in {"/v1/credits/balance", "/api/credits/balance"}:
+        try:
+            from core.credit_ledger import get_credit_balance, list_credit_ledger_entries
+            from network.signer import get_local_peer_id
+            raw_limit = str((query.get("limit") or ["20"])[0] or "20")
+            limit = int(raw_limit) if raw_limit.isdigit() else 20
+            peer_id = str((query.get("peer_id") or [""])[0] or get_local_peer_id())
+            payload = {
+                "peer_id": peer_id,
+                "balance": get_credit_balance(peer_id),
+                "entries": list_credit_ledger_entries(peer_id, limit=limit),
+            }
+        except Exception as exc:
+            payload = {"error": str(exc)}
+        return apply_runtime_headers(json_response(200, payload), runtime)
+
     return apply_runtime_headers(json_response(404, {"error": "not found"}), runtime)
 
 
@@ -613,5 +665,21 @@ def dispatch_post(
 
     if normalized_path == "/api/adaptation/loop/tick":
         return apply_runtime_headers(json_response(200, schedule_adaptation_autopilot_tick(force=True, wait=True)), runtime)
+
+    if normalized_path in {"/v1/credits/settle", "/api/credits/settle"}:
+        try:
+            from core.credit_ledger import reconcile_ledger
+            from network.signer import get_local_peer_id
+            peer_id = str(body.get("peer_id") or get_local_peer_id())
+            result = reconcile_ledger(peer_id)
+            resp_payload: dict[str, Any] = {
+                "peer_id": result.peer_id,
+                "balance": result.balance,
+                "entries": result.entries,
+                "mode": result.mode,
+            }
+        except Exception as exc:
+            resp_payload = {"error": str(exc)}
+        return apply_runtime_headers(json_response(200, resp_payload), runtime)
 
     return apply_runtime_headers(json_response(404, {"error": "not found"}), runtime)

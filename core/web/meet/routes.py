@@ -119,6 +119,10 @@ def resolve_static_route(path: str) -> tuple[int, str, bytes] | None:
                     posts_api_endpoint=f"/v1/hive/topics/{topic_id}/posts",
                 ).encode("utf-8"),
             )
+    if clean_path == "/earnings":
+        from core.earnings_page import render_earnings_html
+
+        return 200, "text/html; charset=utf-8", render_earnings_html().encode("utf-8")
     if clean_path == "/null-browser":
         from core.null_browser_page import render_null_browser_html
 
@@ -329,6 +333,35 @@ def dispatch_request(
                 return _handle_nullabook_search(query)
             if clean_path == "/v1/hive/search":
                 return _handle_hive_search(query)
+            if clean_path == "/v1/wallet/info":
+                from core.nulla_wallet import get_or_create_wallet
+
+                w = get_or_create_wallet()
+                return _ok(w.export_safe(include_balances=True))
+            if clean_path == "/v1/credits/balance":
+                from core.credit_ledger import get_credit_balance, list_credit_ledger_entries
+                from network.signer import get_local_peer_id
+
+                peer_id = _query_str(query, "peer_id") or get_local_peer_id()
+                limit = _query_int(query, "limit") or 20
+                return _ok({
+                    "peer_id": peer_id,
+                    "balance": get_credit_balance(peer_id),
+                    "entries": list_credit_ledger_entries(peer_id, limit=limit),
+                })
+            if clean_path == "/v1/tasks/queue":
+                from storage.task_offer_store import list_open_task_offers
+
+                limit = _query_int(query, "limit") or 50
+                return _ok(list_open_task_offers(limit=limit))
+            if clean_path.startswith("/v1/tasks/") and "/" not in clean_path.removeprefix("/v1/tasks/"):
+                task_id = clean_path.removeprefix("/v1/tasks/").strip("/")
+                from storage.task_offer_store import get_task_offer
+
+                offer = get_task_offer(task_id)
+                if offer is None:
+                    return _error(404, f"Task not found: {task_id}")
+                return _ok(offer)
             if clean_path == "/v1/workers":
                 from core.web0_mesh_registry import evict_expired, list_workers
 
@@ -450,6 +483,39 @@ def dispatch_request(
                 if not result.get("ok"):
                     return _error(422, result.get("error") or "Invalid announce payload")
                 return _ok(result)
+            if clean_path.startswith("/v1/tasks/") and clean_path.endswith("/claim"):
+                task_id = clean_path.removeprefix("/v1/tasks/").removesuffix("/claim").strip("/")
+                from network.signer import get_local_peer_id
+                from storage.task_offer_store import claim_task_offer
+
+                helper_id = str(payload.get("helper_peer_id") or get_local_peer_id())
+                if not claim_task_offer(task_id, helper_id):
+                    return _error(409, "Task already claimed or not found")
+                return _ok({"task_id": task_id, "status": "claimed", "helper_peer_id": helper_id})
+            if clean_path.startswith("/v1/tasks/") and clean_path.endswith("/complete"):
+                task_id = clean_path.removeprefix("/v1/tasks/").removesuffix("/complete").strip("/")
+                result_hash = str(payload.get("result_hash") or "")
+                from core.credit_ledger import get_escrow_for_task, release_escrow_to_helper
+                from network.signer import get_local_peer_id
+                from storage.task_offer_store import complete_task_offer
+
+                helper_id = str(payload.get("helper_peer_id") or get_local_peer_id())
+                complete_task_offer(task_id, result_hash)
+                escrow = get_escrow_for_task(task_id)
+                released = 0.0
+                if escrow and escrow.get("status") == "active":
+                    payout = float(escrow.get("total_escrowed") or 0) - float(escrow.get("total_released") or 0)
+                    if payout > 0:
+                        release_escrow_to_helper(task_id, helper_id, payout)
+                        released = payout
+                return _ok({"task_id": task_id, "status": "complete", "credits_released": released})
+            if clean_path == "/v1/credits/settle":
+                from core.credit_ledger import reconcile_ledger
+                from network.signer import get_local_peer_id
+
+                peer_id = str(payload.get("peer_id") or get_local_peer_id())
+                result = reconcile_ledger(peer_id)
+                return _ok({"peer_id": result.peer_id, "balance": result.balance, "entries": result.entries, "mode": result.mode})
             return _error(404, f"Unknown POST path: {clean_path}")
 
         return _error(405, f"Unsupported method: {method}")

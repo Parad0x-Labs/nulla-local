@@ -1,8 +1,46 @@
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
 from typing import Any
+
+_TASK_POLL_STARTED = False
+_TASK_POLL_LOCK = threading.Lock()
+
+
+def _web0_task_poll_loop() -> None:
+    """Daemon thread: poll the order book and auto-claim tasks when capacity allows."""
+    import time
+    while True:
+        time.sleep(30)
+        try:
+            from core.helper_scheduler import HelperScheduler
+            from core.order_book import global_order_book
+            from network.signer import get_local_peer_id
+            from storage.task_offer_store import claim_task_offer
+            scheduler = HelperScheduler()
+            if not scheduler.can_accept_mesh_task():
+                continue
+            offer = global_order_book.pop_best_offer()
+            if offer is None:
+                continue
+            task_id = str(offer.offer_dict.get("task_id") or "").strip()
+            if task_id:
+                claim_task_offer(task_id, get_local_peer_id())
+        except Exception:
+            pass
+
+
+def start_web0_background_workers() -> None:
+    """Start background daemons once (idempotent)."""
+    global _TASK_POLL_STARTED
+    with _TASK_POLL_LOCK:
+        if _TASK_POLL_STARTED:
+            return
+        _TASK_POLL_STARTED = True
+    t = threading.Thread(target=_web0_task_poll_loop, daemon=True, name="web0-task-poll")
+    t.start()
 
 from core.backend_manager import BackendManager
 from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwen_tier, tier_summary
@@ -95,6 +133,10 @@ def build_provider_registry_snapshot(
             prewarm_results = tuple(active_registry.prewarm_enabled_providers(provider_ids=visible_provider_ids or None))
         except Exception:
             prewarm_results = tuple()
+    # Web0 background workers (task poll loop) — start once at boot
+    import contextlib
+    with contextlib.suppress(Exception):
+        start_web0_background_workers()
     # Web0 capability announce — fire-and-forget, no-op when gate is off
     try:
         from core.web0_capability_broadcast import announce_from_env, build_manifest
@@ -249,4 +291,5 @@ __all__ = [
     "RuntimeBackbone",
     "build_provider_registry_snapshot",
     "build_runtime_backbone",
+    "start_web0_background_workers",
 ]
