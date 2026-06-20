@@ -2,16 +2,24 @@
 ZK verification is the strongest anti-cheat layer.
 A Groth16 proof cryptographically guarantees computation was performed correctly
 WITHOUT revealing the private inputs (the actual result).
-Verification happens on Solana mainnet via dark_bn254_gate.
-A worker cannot fake a ZK proof without actually doing the computation.
+Verification is designed to happen on-chain via the dark_bn254_gate Groth16
+verifier: a worker cannot fake a ZK proof without actually doing the computation.
 
 ZK Verifier — NULLA x dark_bn254_gate Bridge
 =============================================
-This module is the bridge between NULLA task results and the
-dark_bn254_gate Groth16 verifier deployed on Solana mainnet.
+This module is the bridge between NULLA task results and the dark_bn254_gate
+Groth16 verifier.
+
+STATUS — stub bridge, gate not live.  Local verification (verify_locally) is not
+yet implemented, and the on-chain gate is NOT currently deployed to a live
+cluster: the previous dark_bn254_gate program id was part of the set seized in
+the 2026-06-14 security incident and is pending a clean redeploy.  Do not treat
+the on-chain path as live mainnet verification until a clean gate is redeployed.
 
 On-chain program:
-  dark_bn254_gate  GCptvBYF8S6eVYoh15B7WAESc54FUHCpN1Ui6aHeQYZd
+  dark_bn254_gate  — program id supplied via the DARK_BN254_GATE_PROGRAM_ID
+                     environment variable (cluster / config source of truth),
+                     not hardcoded here.
 
 Instruction layout (512 bytes):
   [0..7]    magic      b"GROTH16\\x00"  (8 bytes)
@@ -37,9 +45,13 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# dark_bn254_gate program ID (Solana mainnet)
+# dark_bn254_gate program id
 # ---------------------------------------------------------------------------
-DARK_BN254_GATE_PROGRAM_ID = "GCptvBYF8S6eVYoh15B7WAESc54FUHCpN1Ui6aHeQYZd"
+# Sourced from the environment / cluster config — never hardcoded.  The prior
+# on-chain id was part of the set seized in the 2026-06-14 incident and the gate
+# is pending a clean redeploy, so there is no live default here.  Set
+# DARK_BN254_GATE_PROGRAM_ID once a clean gate has been deployed.
+DARK_BN254_GATE_PROGRAM_ID = os.environ.get("DARK_BN254_GATE_PROGRAM_ID", "").strip()
 
 # Expected Groth16 proof byte length
 GROTH16_PROOF_BYTES = 256
@@ -226,7 +238,8 @@ class ZKVerifier:
         Raises
         ------
         ValueError  : If proof fields are invalid.
-        RuntimeError: If the RPC call fails (real submission path only).
+        RuntimeError: If the dark_bn254_gate program id is not configured, or
+                      if the RPC call fails (real submission path only).
         """
         proof.validate()
 
@@ -407,6 +420,13 @@ class ZKVerifier:
 
         Attempts solders/solana-py if installed, falls back to stdlib HTTP.
         """
+        if not DARK_BN254_GATE_PROGRAM_ID:
+            raise RuntimeError(
+                "dark_bn254_gate program id is not configured: set the "
+                "DARK_BN254_GATE_PROGRAM_ID environment variable. The previous "
+                "gate was seized in the 2026-06-14 incident and is pending a "
+                "clean redeploy, so there is no built-in default."
+            )
         try:
             return ZKVerifier._send_via_solana_sdk(
                 rpc_url, keypair_b58, instruction_data

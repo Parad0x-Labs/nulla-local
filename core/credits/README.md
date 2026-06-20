@@ -47,8 +47,14 @@ High-reputation workers (≥ 85% honest completions) earn a 20% stake discount.
 
 ### Layer 3: ZK Proof (`zk_verifier.py`)
 
-`ZKVerifier` bridges NULLA task results to `dark_bn254_gate` on Solana mainnet
-(`GCptvBYF8S6eVYoh15B7WAESc54FUHCpN1Ui6aHeQYZd`).
+`ZKVerifier` bridges NULLA task results to the `dark_bn254_gate` Groth16
+verifier. The program id is supplied via the `DARK_BN254_GATE_PROGRAM_ID`
+environment variable (cluster / config source of truth) — it is **not** hardcoded.
+
+> **Status — gate not live.** This is a stub bridge: `verify_locally` is not yet
+> implemented and `dark_bn254_gate` is **not currently deployed** to a live
+> cluster. The previous program id was part of the set seized in the 2026-06-14
+> incident and is pending a clean redeploy, so there is no live mainnet gate yet.
 
 A Groth16 proof cryptographically guarantees computation was performed correctly
 **without revealing the private inputs** (the actual result).
