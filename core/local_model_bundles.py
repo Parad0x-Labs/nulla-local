@@ -94,6 +94,8 @@ MODEL_METADATA: dict[str, dict[str, Any]] = {
         "license_name": "Apache-2.0",
         "license_reference": "https://ollama.com/library/qwen3",
         "parameter_count": "4B",
+        "bundle_role": "lightweight_utility",
+        "eagle3_draft_eligible": False,
     },
     "qwen3:8b": {
         "family": "qwen3",

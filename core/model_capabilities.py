@@ -27,6 +27,14 @@ TASK_KIND_TO_CAPABILITIES: dict[str, set[str]] = {
     "coding_help_basic": {"code_basic"},
     "coding_help_complex": {"code_complex", "long_context"},
     "multimodal_review": {"multimodal", "summarize"},
+    # new task kinds
+    "format": {"format"},
+    "extract": {"extract", "structured_json"},
+    "tag": {"classify", "structured_json"},
+    "reasoning": {"summarize", "structured_json"},
+    "agent_planning": {"summarize", "structured_json"},
+    "qa_short": {"summarize"},
+    "qa_long": {"summarize", "long_context"},
 }
 
 OUTPUT_MODE_TO_CAPABILITIES: dict[str, set[str]] = {

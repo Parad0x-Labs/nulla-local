@@ -105,7 +105,7 @@ def _lane_fit_score(manifest: ModelProviderManifest, request: ModelSelectionRequ
     output_mode = str(request.output_mode or "").strip().lower()
     parameter_b = model_parameter_billions(manifest.model_name)
 
-    if task_kind in {"classification", "tool_intent"} or output_mode == "tool_intent":
+    if task_kind in {"classification", "tool_intent", "format", "extract", "tag"} or output_mode == "tool_intent":
         if bundle_role == "lightweight_utility":
             return 0.75
         if bundle_role in {"reasoning", "heavy_reasoning"} or orchestration_role == "queen":
@@ -113,6 +113,15 @@ def _lane_fit_score(manifest: ModelProviderManifest, request: ModelSelectionRequ
         if parameter_b >= 13.0:
             return -0.25
         return 0.12
+
+    if task_kind in {"reasoning", "agent_planning"}:
+        if bundle_role in {"reasoning", "heavy_reasoning"}:
+            return 0.6
+        if bundle_role == "coding":
+            return 0.3
+        if bundle_role == "lightweight_utility":
+            return -1.2
+        return 0.0
 
     if task_kind == "normalization_assist" and output_mode == "plain_text":
         if bundle_role == "general":

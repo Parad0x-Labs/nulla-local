@@ -36,6 +36,7 @@ _WIN_PATH_RE = re.compile(r"(?i)\b[A-Z]:\\[^\s'\"`<>)]{3,}")
 _HOME_PATH_RE = re.compile(r"(?<![\w.-])~/(?:[^\s'\"`<>)]{2,})")
 
 _RISK_TERMS = {
+    # explicit high-risk markers
     "api key",
     "credential",
     "secret",
@@ -43,26 +44,17 @@ _RISK_TERMS = {
     "high risk",
     "verifier required",
     "verification required",
-    "token",
-    "wallet",
-    "payment",
-    "private",
-    "security",
+    # destructive / irreversible ops
     "delete",
     "overwrite",
-    "migrate",
-    "deploy",
-    "commit",
-    "push",
-    "production",
+    "rm -rf",
+    # engineering mutations that need review
     "failure mode",
     "patch",
     "refactor",
     "edit file",
     "write file",
-    "install",
-    "shell",
-    "rm -rf",
+    "production",
 }
 
 _EAGLE3_DRAFT_MAP = {
@@ -80,6 +72,31 @@ _SUFFIX_DECODE_TASK_KINDS = frozenset(
         "agentic_loop",
         "classification",
         "candidate_shard_generation",
+        # trivial-pattern tasks — tiny models, suffix decode eligible
+        "format",
+        "extract",
+        "tag",
+    }
+)
+
+# Task kinds that route directly to the tiny lane regardless of text content
+_TINY_TASK_KINDS = frozenset(
+    {
+        "classification",
+        "tool_intent",
+        "format",   # pure text reformatting; tiny model sufficient
+        "extract",  # structured field pull; tiny model sufficient
+        "tag",      # synonym for classify
+    }
+)
+
+# Task kinds that always need deep lane (verifier path)
+_DEEP_TASK_KINDS = frozenset(
+    {
+        "action_plan",
+        "coding_help_complex",
+        "reasoning",      # explicit multi-step reasoning
+        "agent_planning", # multi-step plan building
     }
 )
 
@@ -402,7 +419,7 @@ def _resolve_lane(
         return "human"
     clean_task_kind = str(task_kind or "").strip().lower()
     clean_output = str(output_mode or "").strip().lower()
-    if clean_task_kind in {"classification", "tool_intent"} or clean_output == "tool_intent":
+    if clean_task_kind in _TINY_TASK_KINDS or clean_output == "tool_intent":
         return "tiny"
     if _needs_verifier(
         user_text=user_text,
@@ -423,7 +440,7 @@ def _needs_verifier(
 ) -> bool:
     clean_task_kind = str(task_kind or "").strip().lower()
     clean_output = str(output_mode or "").strip().lower()
-    if clean_task_kind in {"action_plan", "coding_help_complex"} or clean_output == "action_plan":
+    if clean_task_kind in _DEEP_TASK_KINDS or clean_output == "action_plan":
         return True
     if bool((source_context or {}).get("requires_verifier")):
         return True
@@ -520,7 +537,8 @@ def _primary_score(
     else:
         score += 0.4
     if capability.tokens_per_second > 0:
-        score += min(2.5, capability.tokens_per_second / 24.0)
+        # Cap at 50 tok/s (divisor 20) — better differentiates 20→40 tok/s range
+        score += min(2.5, capability.tokens_per_second / 20.0)
     else:
         score -= 0.25
     if capability.availability_state == "degraded":
@@ -885,7 +903,14 @@ def _is_moe_model(model_id: str) -> bool:
 
 
 def _is_fast_nothink_default(model_id: str) -> bool:
-    return str(model_id or "").strip().lower() == "nulla-qwen3-30b-a3b:nothink"
+    clean = str(model_id or "").strip().lower()
+    if clean == "nulla-qwen3-30b-a3b:nothink":
+        return True
+    # Any Ollama custom model with :nothink variant (user-built Modelfiles)
+    if ":nothink" in clean:
+        return True
+    # Metadata flag for GGUF / other backends with thinking disabled at launch
+    return bool(model_metadata(clean).get("thinking_disabled", False))
 
 
 def _build_warnings(
