@@ -76,9 +76,9 @@ NULL_TOKEN_HOOK_MAINNET          = "14ivonrNRmaMbJMQkGdHVVTcqZYhNvchULWxveazhW2g
 NULL_LOTTERY_MAINNET             = "3t5c2Trk4SFK7hvKVjsmmC2xQtasFnK9pJQRdwPHqxbG"
 NULL_MINT_GATE_MAINNET           = "5jduvBZggszFeE7uxxNrvZAp8pJxzqtgzBGqg12fKhC1"
 
-# NULL ecosystem (under deployer / founder key)
-NULL_REGISTRAR_MAINNET           = "H4wbFJucY9shJt95N8Bra532Z4nnkKhGEfqWvLcYfuDm"
-DNA_X402_MAIN_MAINNET            = "9bPBmDNnKGxF8GTt4SqodNJZ1b9nSjoKia2ML4V5gGCF"
+# NULL ecosystem
+NULL_REGISTRAR_MAINNET           = "NXgQhepFpDCu935H1D4g34g59ZYbo1jR4tBCZWhV8Np"
+DNA_X402_MAIN_MAINNET            = "6HSRGivdYR5D7yTDy1TFMCM8h3LzXxRtKU1RA3RnCMRN"
 
 # $NULL token mint (Token-2022)
 NULL_TOKEN_MINT_MAINNET          = "8EeDdvCRmFAzVD4takkBrNNwkeUTUQh4MscRK5Fzpump"

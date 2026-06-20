@@ -46,7 +46,7 @@ Browser / Agent
 
 | Program | Address | Status |
 |---------|---------|--------|
-| `null_registrar v2` | `H4wbFJucY9shJt95N8Bra532Z4nnkKhGEfqWvLcYfuDm` | live, pilot=free |
+| `null_registrar v2` | `NXgQhepFpDCu935H1D4g34g59ZYbo1jR4tBCZWhV8Np` | live, pilot=free |
 | `null-auction v3` | same upgrade authority | live, sealed-bid |
 | `receipt_anchor` | `6HSRGivdYR5D7yTDy1TFMCM8h3LzXxRtKU1RA3RnCMRN` | live |
 | `dark_x402_access_gate` | `PmSCTuehX1MYxf8GNsGsUZySYTtqWAtuTt3N2xZLpw2` | live |
