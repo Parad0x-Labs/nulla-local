@@ -151,11 +151,23 @@ Full install docs: [docs/INSTALL.md](docs/INSTALL.md)
 - **Bounded coding/operator flow** — search → read → patch → validate → rollback if broken.
 - **Append-only task/proof spine** — every repair and orchestration step is inspectable, not locked inside the executor.
 - **Mesh task market** — decompose → escrow → offer → claim → execute → review → reward. Ed25519-signed credit settlement. Single-node and loopback verified end-to-end.
-- **3-layer anti-cheat proof-of-work credits** — challenge-response, staking, ZK-proof path.
-- **Compute-rental market** — prices your real hardware, welds x402 receipt hash into tamper-evident `WorkProof`.
+- **3-layer anti-cheat proof-of-work credits** — challenge-response, staking, ZK-proof path. The **stake-before-work / slash-on-cheat guard** is built and self-tests green (wrong, late, and cheating workers are slashed).
+- **Multi-result consensus validator** — cross-validates worker answers, spawns a verification job on disagreement (built + tested).
+- **Capability-token authorization** — signed, scoped, single-use, expiring task tokens gate who may run what (built + tested).
+- **Contribution-proof receipt chain + proof-of-execution + proof manifest** — hash-canonical contribution receipts and a git-source proof manifest, distinct from the task/proof event spine (built + tested).
+- **Compute-rental market** — prices your real hardware, welds x402 receipt hash into tamper-evident `WorkProof`. The `rent()` → `_pay_x402()` pay-upfront path is **wired and integration-tested** (315-LOC end-to-end test; stub/devnet modes — live mainnet anchor pending).
+- **DNA x402 payment bridge + wallet manager** — buy compute credits with USDC (1 USDC = 1000 credits) against a local SQLite wallet (built + tested).
+- **Directory-less peer discovery** — Kademlia DHT routing table (k=20 buckets) + verified-endpoint liveness index; nodes find each other without a central directory (built + tested).
 - **Role-aware provider routing** — local drone lanes vs synthesis lanes, local llama.cpp, vLLM, and Kimi lanes when configured.
 - **Honest capability API** — `GET /api/runtime/capabilities` — implemented / simulated / disabled, per feature.
 - **CI** — sharded local regression + GitHub Actions + fast LLM acceptance suite.
+
+Built core, still partial (real implementations with tests, but thinner coverage):
+
+- **Credit DEX / order book** — P2P, cheapest-first marketplace for compute credits (built core; thin).
+- **Sybil / collusion fraud detection** — reputation graph + closed-loop collusion detection + score decay (built core, covered by `test_fraud_and_timeouts`).
+- **Encrypted P2P transport + NAT traversal** — TLS streams plus STUN, hole-punching, and relay fallback (built core, covered by transport test suite; some helpers thin).
+- **Sandboxed helper-worker isolation** — runs untrusted mesh jobs behind filesystem, network, and resource guards (built core).
 
 ---
 
