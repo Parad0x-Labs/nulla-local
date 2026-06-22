@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core import audit_logger
-from core.final_response_store import store_final_response
+from core.final_response_store import set_anchored_signature, store_final_response
 from core.identity_manager import load_active_persona, render_with_persona
 from core.liquefy_bridge import export_task_bundle
 from core.solana_anchor import anchor_enabled, anchor_vault_proof
@@ -186,7 +186,13 @@ def finalize_parent_response(parent_task_id: str, *, persona_id: str = "default"
     # Gated: a real anchor broadcasts a SOL-spending tx, so only fire when opted in
     # (shared helper keeps this in lockstep with the API service's gate).
     if anchor_enabled():
-        anchor_vault_proof(parent_task_id, plan.result_hash or parent_task_id, plan.confidence)
+        # anchor_vault_proof returns the real tx signature (or None on any
+        # failure). Capture it and persist on the finalized row so the receipt
+        # links to its on-chain proof. Behavior is unchanged when anchoring is
+        # off (the gate above) or when the broadcast fails (signature is None).
+        signature = anchor_vault_proof(parent_task_id, plan.result_hash or parent_task_id, plan.confidence)
+        if signature:
+            set_anchored_signature(parent_task_id, signature)
 
     return FinalizedResponse(
         parent_task_id=parent_task_id,

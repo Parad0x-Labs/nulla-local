@@ -56,6 +56,8 @@ def build_memo_anchor_message(payer_pubkey: str, payload_hash: str, recent_block
 
 
 def _latest_blockhash() -> str | None:
+    # Anchor against a 'finalized' blockhash so the tx commits to a rooted slot
+    # (no risk of building on a forked/dropped recent block).
     result = _rpc_call("getLatestBlockhash", [{"commitment": "finalized"}])
     if isinstance(result, dict):
         value = result.get("value") or {}
@@ -63,6 +65,48 @@ def _latest_blockhash() -> str | None:
         if bh:
             return str(bh)
     return None
+
+
+def parse_signature_status(result: object) -> dict[str, object] | None:
+    """Pull the single per-signature status out of a getSignatureStatuses result.
+
+    Pure parser (no network) so it is trivially testable against a fixture.
+    Returns the status dict (with ``confirmationStatus``, ``err``, ``slot``) for
+    the first/only signature, or None when the signature is unknown to the RPC
+    (the ``value`` slot is null) or the shape is unexpected.
+    """
+    if not isinstance(result, dict):
+        return None
+    value = result.get("value")
+    if not isinstance(value, list) or not value:
+        return None
+    first = value[0]
+    return first if isinstance(first, dict) else None
+
+
+def confirm_signature(signature: str, *, commitment: str = "finalized") -> dict[str, object] | None:
+    """OPTIONAL, light landed-confirmation check for an anchor tx signature.
+
+    Does a single getSignatureStatuses call (with searchTransactionHistory) and
+    returns the parsed status dict, or None if unknown/unavailable. This is NOT
+    wired into the broadcast hot path — broadcasting stays fire-and-forget so the
+    finalize path runs at full speed; callers opt in to confirmation explicitly.
+    """
+    if not signature:
+        return None
+    try:
+        result = _rpc_call(
+            "getSignatureStatuses",
+            [[signature], {"searchTransactionHistory": True}],
+        )
+    except Exception:
+        return None
+    status = parse_signature_status(result)
+    if status is None:
+        return None
+    # Surface the requested commitment alongside the raw status for callers that
+    # want to compare without re-passing it.
+    return {"requested_commitment": commitment, **status}
 
 
 def submit_memo_anchor(payload_hash: str) -> str | None:
@@ -121,4 +165,11 @@ def anchor_vault_proof(parent_task_id: str, final_response_hash: str, confidence
         return None
 
 
-__all__ = ["anchor_enabled", "anchor_vault_proof", "build_memo_anchor_message", "submit_memo_anchor"]
+__all__ = [
+    "anchor_enabled",
+    "anchor_vault_proof",
+    "build_memo_anchor_message",
+    "confirm_signature",
+    "parse_signature_status",
+    "submit_memo_anchor",
+]
