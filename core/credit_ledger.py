@@ -801,9 +801,9 @@ def release_escrow_to_helper(
             """
             UPDATE dispatch_credit_escrow
             SET total_released = total_released + ?, updated_at = ?
-            WHERE parent_task_id = ? AND status = 'active'
+            WHERE escrow_id = ?
             """,
-            (actual_payout, now_iso, parent_task_id),
+            (actual_payout, now_iso, escrow["escrow_id"]),
         )
         conn.commit()
         return True
@@ -838,8 +838,8 @@ def refund_escrow_remainder(parent_task_id: str) -> float:
         remaining = float(escrow["total_escrowed"]) - float(escrow["total_released"]) - float(escrow["total_refunded"])
         if remaining <= 0:
             conn.execute(
-                "UPDATE dispatch_credit_escrow SET status = 'settled', updated_at = ? WHERE parent_task_id = ? AND status = 'active'",
-                (now_iso, parent_task_id),
+                "UPDATE dispatch_credit_escrow SET status = 'settled', updated_at = ? WHERE escrow_id = ?",
+                (now_iso, escrow["escrow_id"]),
             )
             conn.commit()
             return 0.0
@@ -857,9 +857,9 @@ def refund_escrow_remainder(parent_task_id: str) -> float:
             """
             UPDATE dispatch_credit_escrow
             SET total_refunded = total_refunded + ?, status = 'settled', updated_at = ?
-            WHERE parent_task_id = ? AND status = 'active'
+            WHERE escrow_id = ?
             """,
-            (remaining, now_iso, parent_task_id),
+            (remaining, now_iso, escrow["escrow_id"]),
         )
         conn.commit()
         return remaining
