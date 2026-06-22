@@ -76,9 +76,9 @@ High-importance turns are prioritised during retrieval. Your `sk-prod-xxxx` stay
 
 Plugs into `nomic-embed-text` via Ollama (274MB, 768-dim). Falls back to a hash bag-of-words if not installed. The same embedding service backs L3 retrieval across sessions — ask something in session 2, get a relevant fact from session 1.
 
-### Honest capability reporting
+### Capability reporting
 
-`GET /api/runtime/capabilities` tells you exactly what is implemented, what is simulated, and what is disabled — per feature, no marketing spin. `/healthz` reports commit + dirty bit. The runtime surfaces its own truth.
+`GET /api/runtime/capabilities` reports, per feature, whether it is implemented, simulated, or disabled — so payments show as simulated, WAN mesh as experimental, and live web lookup as off in local-only mode. `/healthz` reports commit + dirty bit. The runtime surfaces its own status.
 
 ---
 
@@ -168,10 +168,10 @@ static command guard (set `network_isolation_mode="heuristic_only"`).
 - **Capability-token authorization** — signed, scoped, single-use, expiring task tokens gate who may run what (built + tested).
 - **Contribution-proof receipt chain + proof-of-execution + proof manifest** — hash-canonical contribution receipts and a git-source proof manifest, distinct from the task/proof event spine (built + tested).
 - **Compute-rental market** — prices your real hardware, welds x402 receipt hash into tamper-evident `WorkProof`. The `rent()` → `_pay_x402()` pay-upfront path is **wired and integration-tested** (315-LOC end-to-end test; stub/devnet modes — live mainnet anchor pending).
-- **DNA x402 payment bridge + wallet manager** — buy compute credits with USDC (1 USDC = 1000 credits) against a local SQLite wallet (built + tested).
+- **DNA x402 payment bridge + wallet manager** — simulated USDC→credit purchase path (1 USDC = 1000 credits) against a local SQLite wallet; settlement is simulated today (stub/devnet), live on-chain settlement coming. A local on-chain receipt verifier gates real settlement so reputation can't be self-claimed (built + tested).
 - **Directory-less peer discovery** — Kademlia DHT routing table (k=20 buckets) + verified-endpoint liveness index; nodes find each other without a central directory (built + tested).
 - **Role-aware provider routing** — local drone lanes vs synthesis lanes, local llama.cpp, vLLM, and Kimi lanes when configured.
-- **Honest capability API** — `GET /api/runtime/capabilities` — implemented / simulated / disabled, per feature.
+- **Capability-reporting API** — `GET /api/runtime/capabilities` — implemented / simulated / disabled, per feature.
 - **CI** — sharded local regression + GitHub Actions + fast LLM acceptance suite.
 
 Built core, still partial (real implementations with tests, but thinner coverage):
@@ -255,7 +255,7 @@ Architecture: [docs/SYSTEM_SPINE.md](docs/SYSTEM_SPINE.md) · [docs/CONTROL_PLAN
 
 ---
 
-*NULLA is alpha. The core runtime and memory system are real and working on `main`. Mesh economics and live settlement are still hardening. `GET /api/runtime/capabilities` tells you the exact truth at any moment.*
+*NULLA is alpha. The core runtime and memory system are real and working on `main`. Payments are simulated, WAN mesh is experimental, and live settlement is still hardening. `GET /api/runtime/capabilities` reports the current per-feature status at any moment.*
 
 <p align="center">
   <img src="./docs/assets/github-footer-parad0xlabs.png" alt="NULLA — Parad0x Labs open source systems" width="100%" />

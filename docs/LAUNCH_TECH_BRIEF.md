@@ -231,7 +231,7 @@ Every receipt hashes the previous (`prevHash`) → verifiable chain per shop. `r
 
 **Earnings panel** (`GET /earnings`): dark monospace dashboard polling every 10s — wallet pubkey, SOL/USDC balance, credit balance + ledger, open tasks + bids, mesh worker count, TPS/tier/price per worker, recent receipts.
 
-**Solana anchor** (`NULLA_ANCHOR_RECEIPTS=1`): `anchor_vault_proof(session_id, result_hash, confidence=1.0)` → `receipt_anchor` on mainnet-beta after every turn. Safe stub when `solders` not installed.
+**Solana anchor** — opt-in, OFF by default (gated on `NULLA_ANCHOR_RECEIPTS=1`): when enabled, `anchor_vault_proof(session_id, result_hash, confidence=1.0)` writes an SPL-Memo carrying the receipt hash over the keyless publicnode RPC. Fails closed (no-op) when `solders` is absent or the wallet is unfunded; never fires by default.
 
 CI: 2088 tests passing.
 
