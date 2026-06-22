@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Lock
@@ -678,6 +679,10 @@ def release_escrow_to_helper(
     receipt_id: str | None = None,
     receipt_hash: str | None = None,
     settlement_mode_hint: str | None = None,
+    settlement_verifier: Callable[..., bool] | None = None,
+    payment_tx: str | None = None,
+    payment_recipient_wallet: str | None = None,
+    payment_amount_usdc: float | None = None,
 ) -> bool:
     """Transfer credits from task escrow to a helper who completed work.
 
@@ -685,12 +690,51 @@ def release_escrow_to_helper(
     is stamped with the on-chain settlement mode ("mainnet"/"devnet") and the
     receipt hash, so the payout earns full proof-of-settlement reputation.
     Otherwise the row stays ``LEDGER_MODE`` ("simulated") exactly as before.
+
+    Optional settlement gate (default OFF, fully backward-compatible)
+    ----------------------------------------------------------------
+    A caller-supplied ``receipt_hash`` is a SELF-CLAIM: an
+    :class:`core.x402.client.X402Receipt` carries a real 64-hex SHA-256 hash even
+    in stub mode, so a hash alone proves nothing about an on-chain payment. To
+    close that reputation-inflation hole, pass ``settlement_verifier`` (e.g.
+    :func:`core.x402.receipt_verifier.verify_payment_receipt`) together with the
+    ``payment_tx`` / ``payment_recipient_wallet`` / ``payment_amount_usdc`` of the
+    claimed settlement. The row is then stamped "mainnet"/"devnet" ONLY when the
+    verifier confirms the matching USDC transfer on-chain; on any failure it
+    falls back to ``LEDGER_MODE`` ("simulated").
+
+    When ``settlement_verifier`` is ``None`` (the default, and what every existing
+    caller passes), behavior is byte-for-byte identical to before: the mode is
+    resolved from ``receipt_hash`` / ``settlement_mode_hint`` with no network call.
     """
     if payout <= 0:
         return True
     _init_ledger_table()
     release_receipt = receipt_id or f"escrow_release:{parent_task_id}:{helper_peer_id}"
     settlement_mode = settlement_mode_for_receipt_hash(receipt_hash, mode_hint=settlement_mode_hint)
+    # Opt-in on-chain gate: a claimed "mainnet"/"devnet" settlement is only
+    # honored when an injected verifier confirms the real USDC transfer. The
+    # verifier is read-only and fails closed; any False / exception downgrades
+    # the payout to "simulated" rather than rewarding an unverifiable claim.
+    if settlement_verifier is not None and settlement_mode in SETTLED_MODES:
+        verified = False
+        try:
+            verified = bool(
+                settlement_verifier(
+                    str(payment_tx or "").strip(),
+                    recipient_wallet=str(payment_recipient_wallet or helper_peer_id).strip(),
+                    amount_usdc=(
+                        float(payment_amount_usdc)
+                        if payment_amount_usdc is not None
+                        else float(payout)
+                    ),
+                    mode=settlement_mode,
+                )
+            )
+        except Exception:
+            verified = False
+        if not verified:
+            settlement_mode = LEDGER_MODE
     stamped_hash = str(receipt_hash).strip() if settlement_mode in SETTLED_MODES else ""
     now_iso = _utcnow_iso()
     conn = get_connection()
