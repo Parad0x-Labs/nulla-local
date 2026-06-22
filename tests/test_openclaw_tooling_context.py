@@ -32,6 +32,12 @@ from storage.migrations import run_migrations
 class OpenClawToolingContextTests(unittest.TestCase):
     def setUp(self) -> None:
         run_migrations()
+        # Web access is opt-in/off by default. These tooling-context tests cover
+        # the live web lookup path (and its degradation behavior), so enable web
+        # explicitly. Tests asserting the disabled path gate locally.
+        web_patch = mock.patch("core.policy_engine.allow_web_fallback", return_value=True)
+        web_patch.start()
+        self.addCleanup(web_patch.stop)
 
     def _clear_nullabook_state(self) -> None:
         from storage.db import get_connection

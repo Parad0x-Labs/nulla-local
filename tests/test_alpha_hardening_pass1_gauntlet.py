@@ -1154,7 +1154,7 @@ def test_alpha_hardening_definition_is_complete() -> None:
     assert len(HONEST_DEGRADATION_CASES) == 5
 
 
-def test_alpha_primary_chat_surface_hit_rate_broader_non_command_corpus(make_agent, context_result_factory) -> None:
+def test_alpha_primary_chat_surface_hit_rate_broader_non_command_corpus(make_agent, context_result_factory, enable_web) -> None:
     passed = 0
     failures: list[str] = []
 
@@ -1365,7 +1365,7 @@ def test_alpha_builder_bounded_flow_truth_soak(make_agent, context_result_factor
     )
 
 
-def test_alpha_honest_degradation_under_provider_failure(make_agent, context_result_factory) -> None:
+def test_alpha_honest_degradation_under_provider_failure(make_agent, context_result_factory, enable_web) -> None:
     passed = 0
     failures: list[str] = []
     for case in HONEST_DEGRADATION_CASES:

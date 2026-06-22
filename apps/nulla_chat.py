@@ -163,6 +163,15 @@ def main() -> int:
 
             cmd_manifest()
             continue
+        if user_text.lower().startswith("/web"):
+            from apps.nulla_cli import cmd_web
+
+            query = user_text[len("/web"):].strip()
+            if not query:
+                print("usage: /web <query>")
+                continue
+            cmd_web(query=query)
+            continue
         if user_text.lower().startswith("/quote"):
             from apps.nulla_cli import cmd_sell_quote
 

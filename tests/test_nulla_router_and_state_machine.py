@@ -154,7 +154,7 @@ def test_ambiguous_hive_followup_clarifies_instead_of_silent_guess(make_agent):
     research_topic_from_signal.assert_not_called()
 
 
-def test_fresh_web_query_beats_evaluative_detection(make_agent, context_result_factory):
+def test_fresh_web_query_beats_evaluative_detection(make_agent, context_result_factory, enable_web):
     agent = make_agent()
     agent.context_loader.load = mock.Mock(return_value=context_result_factory())  # type: ignore[assignment]
     agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]

@@ -46,7 +46,7 @@ def runtime_capability_ledger(
             "surface": "web",
             "claim": "run live web search, fetch pages, bounded web research, and browser rendering",
             "supported": bool(allow_web_fallback_fn()),
-            "unsupported_reason": "Live web lookup is disabled on this runtime.",
+            "unsupported_reason": "Web lookup is opt-in; enable with NULLA_ENABLE_WEB=1",
             "intents": sorted(_WEB_TOOL_INTENTS),
             "public_tag": "web.live_lookup",
         },

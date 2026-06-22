@@ -6,7 +6,7 @@ from core.curiosity_roamer import CuriosityResult
 from core.memory_first_router import ModelExecutionDecision
 
 
-def test_research_lane_uses_planned_search_for_fresh_updates(make_agent, context_result_factory) -> None:
+def test_research_lane_uses_planned_search_for_fresh_updates(make_agent, context_result_factory, enable_web) -> None:
     agent = make_agent()
     agent.context_loader.load = mock.Mock(return_value=context_result_factory())  # type: ignore[assignment]
     agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]

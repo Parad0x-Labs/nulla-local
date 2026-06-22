@@ -4,12 +4,14 @@ import json
 from unittest import mock
 
 from apps.nulla_cli import (
+    WEB_DISABLED_MESSAGE,
     _explorer_tx_link,
     _quote_target_to_uri,
     _strip_null_suffix,
     cmd_manifest,
     cmd_resolve,
     cmd_sell_quote,
+    cmd_web,
     format_receipt_row,
     render_manifest_lines,
     render_quote_lines,
@@ -17,6 +19,7 @@ from apps.nulla_cli import (
     render_resolve_lines,
     resolve_record_payload,
 )
+from core.execution.models import ToolIntentExecution
 from core.null_resolver import NullDomainRecord
 
 # --- resolve --------------------------------------------------------------
@@ -220,3 +223,67 @@ def test_cmd_sell_quote_runs_read_only(capsys) -> None:
 
 def test_cmd_sell_quote_empty_target() -> None:
     assert cmd_sell_quote("") == 2
+
+
+# --- web (opt-in) ---------------------------------------------------------
+
+def test_cmd_web_disabled_prints_opt_in_message_and_makes_no_call(capsys) -> None:
+    # Web is off by default. The command must refuse without dispatching anything.
+    with mock.patch("apps.nulla_cli.policy_engine.allow_web_fallback", return_value=False), mock.patch(
+        "apps.nulla_cli._run_web_intent",
+        side_effect=AssertionError("web command must not dispatch while web is off"),
+    ):
+        assert cmd_web(query="latest qwen release notes") == 2
+    out = capsys.readouterr().out
+    assert WEB_DISABLED_MESSAGE in out
+    assert "NULLA_ENABLE_WEB=1" in out
+
+
+def test_cmd_web_disabled_json_reports_enabled_false(capsys) -> None:
+    with mock.patch("apps.nulla_cli.policy_engine.allow_web_fallback", return_value=False):
+        assert cmd_web(query="anything", json_mode=True) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["enabled"] is False
+    assert payload["intent"] == "web.search"
+
+
+def test_cmd_web_empty_query_returns_usage() -> None:
+    assert cmd_web(query="") == 2
+
+
+def test_cmd_web_enabled_routes_search_through_executor(capsys) -> None:
+    execution = ToolIntentExecution(
+        handled=True,
+        ok=True,
+        status="executed",
+        response_text='Search results for "qwen":\n- Qwen notes - https://example.test/qwen',
+        mode="tool_executed",
+        tool_name="web.search",
+    )
+    with mock.patch("apps.nulla_cli.policy_engine.allow_web_fallback", return_value=True), mock.patch(
+        "apps.nulla_cli._bootstrap_cli_storage", return_value=None
+    ), mock.patch("apps.nulla_cli._run_web_intent", return_value=execution) as runner:
+        assert cmd_web(query="qwen") == 0
+    runner.assert_called_once()
+    intent, arguments = runner.call_args.args
+    assert intent == "web.search"
+    assert arguments["query"] == "qwen"
+    assert "Search results for" in capsys.readouterr().out
+
+
+def test_cmd_web_enabled_fetch_routes_web_fetch_intent(capsys) -> None:
+    execution = ToolIntentExecution(
+        handled=True,
+        ok=True,
+        status="executed",
+        response_text="Fetched https://example.test/\n- Status: ok",
+        mode="tool_executed",
+        tool_name="web.fetch",
+    )
+    with mock.patch("apps.nulla_cli.policy_engine.allow_web_fallback", return_value=True), mock.patch(
+        "apps.nulla_cli._bootstrap_cli_storage", return_value=None
+    ), mock.patch("apps.nulla_cli._run_web_intent", return_value=execution) as runner:
+        assert cmd_web(fetch_url="https://example.test/") == 0
+    intent, arguments = runner.call_args.args
+    assert intent == "web.fetch"
+    assert arguments["url"] == "https://example.test/"

@@ -2,8 +2,20 @@ from __future__ import annotations
 
 from unittest import mock
 
+import pytest
+
 from core.curiosity_roamer import CuriosityResult
 from core.memory_first_router import ModelExecutionDecision
+
+
+@pytest.fixture(autouse=True)
+def _enable_web_for_freshness_suite(enable_web):
+    """These tests cover the live web-lookup path, which is opt-in/off by
+    default. Enable it for the whole module; tests that assert the disabled
+    path still pass because they gate locally (per-call `allow_remote_fetch`
+    or their own `allow_web_fallback` patch)."""
+    yield
+
 
 FORBIDDEN_CHAT_WRAPPERS = (
     "workflow:",

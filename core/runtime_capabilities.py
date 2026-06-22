@@ -189,6 +189,9 @@ def runtime_capability_snapshot(context: RuntimeContext | None = None) -> dict[s
     }
 
 
+_WEB_OPT_IN_REASON = "Web lookup is opt-in; enable with NULLA_ENABLE_WEB=1"
+
+
 def _browser_tools_capability() -> dict[str, Any]:
     web_enabled = bool(policy_engine.allow_web_fallback())
     playwright_enabled = bool(policy_engine.playwright_enabled()) or str(os.environ.get("PLAYWRIGHT_ENABLED", "")).lower() in {"1", "true", "yes"}
@@ -200,18 +203,25 @@ def _browser_tools_capability() -> dict[str, Any]:
         if playwright_installed
         else "missing_dependency"
     )
+    web_fetch: dict[str, Any] = {
+        "supported": web_enabled,
+        "status": "ok" if web_enabled else "disabled_by_policy",
+        "policy_flag": "system.allow_web_fallback",
+        "max_fetch_bytes": policy_engine.max_fetch_bytes(),
+    }
+    browser_render: dict[str, Any] = {
+        "supported": web_enabled and playwright_enabled and playwright_installed,
+        "status": browser_status,
+        "policy_flag": "web.playwright_enabled",
+        "engine": policy_engine.browser_engine(),
+        "playwright_installed": playwright_installed,
+    }
+    if not web_enabled:
+        web_fetch["unsupported_reason"] = _WEB_OPT_IN_REASON
+        browser_render["unsupported_reason"] = _WEB_OPT_IN_REASON
     return {
-        "web_fetch": {
-            "status": "ok" if web_enabled else "disabled_by_policy",
-            "policy_flag": "system.allow_web_fallback",
-            "max_fetch_bytes": policy_engine.max_fetch_bytes(),
-        },
-        "browser_render": {
-            "status": browser_status,
-            "policy_flag": "web.playwright_enabled",
-            "engine": policy_engine.browser_engine(),
-            "playwright_installed": playwright_installed,
-        },
+        "web_fetch": web_fetch,
+        "browser_render": browser_render,
     }
 
 

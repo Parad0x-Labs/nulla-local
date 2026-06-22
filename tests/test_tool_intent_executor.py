@@ -73,7 +73,9 @@ class ToolIntentExecutorTests(unittest.TestCase):
 
     def test_execute_web_search_intent_formats_results(self) -> None:
         tracker = HiveActivityTracker(config=HiveActivityTrackerConfig(enabled=False, watcher_api_url=None))
-        with mock.patch("core.tool_intent_executor.load_builtin_tools", return_value=None), mock.patch(
+        with mock.patch(
+            "core.tool_intent_executor.policy_engine.allow_web_fallback", return_value=True
+        ), mock.patch("core.tool_intent_executor.load_builtin_tools", return_value=None), mock.patch(
             "core.tool_intent_executor.WebAdapter.planned_search_query",
             return_value=[
                 {
@@ -234,6 +236,8 @@ class ToolIntentExecutorTests(unittest.TestCase):
     def test_execute_web_research_uses_adaptive_controller(self) -> None:
         tracker = HiveActivityTracker(config=HiveActivityTrackerConfig(enabled=False, watcher_api_url=None))
         with mock.patch(
+            "core.tool_intent_executor.policy_engine.allow_web_fallback", return_value=True
+        ), mock.patch(
             "core.tool_intent_executor.CuriosityRoamer.adaptive_research",
             return_value=AdaptiveResearchResult(
                 enabled=True,
@@ -278,6 +282,8 @@ class ToolIntentExecutorTests(unittest.TestCase):
     def test_execute_web_research_reports_uncertainty_honestly(self) -> None:
         tracker = HiveActivityTracker(config=HiveActivityTrackerConfig(enabled=False, watcher_api_url=None))
         with mock.patch(
+            "core.tool_intent_executor.policy_engine.allow_web_fallback", return_value=True
+        ), mock.patch(
             "core.tool_intent_executor.CuriosityRoamer.adaptive_research",
             return_value=AdaptiveResearchResult(
                 enabled=True,

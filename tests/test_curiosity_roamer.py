@@ -40,6 +40,13 @@ class CuriosityRoamerTests(unittest.TestCase):
             conn.commit()
         finally:
             conn.close()
+        # Web access is opt-in/off by default; adaptive research exercises the
+        # live web path, so enable it explicitly for these tests.
+        self._web_patch = mock.patch(
+            "core.curiosity_roamer.policy_engine.allow_web_fallback", return_value=True
+        )
+        self._web_patch.start()
+        self.addCleanup(self._web_patch.stop)
 
     def test_derive_topics_prefers_technical_sources_for_bot_building(self) -> None:
         config = CuriosityConfig(

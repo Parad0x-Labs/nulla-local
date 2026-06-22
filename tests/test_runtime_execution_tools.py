@@ -44,11 +44,16 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
         self.assertEqual(hints["domain"], "nully")
 
     def test_web_fetch_reports_policy_disabled_without_weakening_machine_reads(self) -> None:
-        result = execute_runtime_tool(
-            "web.fetch",
-            {"url": "https://example.com/"},
-            source_context={"allow_remote_fetch": False},
-        )
+        # Web is opt-in/off by default; enable it so this asserts the
+        # per-call `allow_remote_fetch: False` policy path, not the global gate.
+        with mock.patch(
+            "core.runtime_tool_contracts.policy_engine.allow_web_fallback", return_value=True
+        ):
+            result = execute_runtime_tool(
+                "web.fetch",
+                {"url": "https://example.com/"},
+                source_context={"allow_remote_fetch": False},
+            )
 
         assert result is not None
         self.assertFalse(result.ok)
@@ -58,6 +63,10 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
 
     def test_browser_render_surfaces_runtime_status(self) -> None:
         with mock.patch(
+            "core.runtime_tool_contracts.policy_engine.allow_web_fallback", return_value=True
+        ), mock.patch(
+            "core.runtime_tool_contracts.policy_engine.allow_browser_fallback", return_value=True
+        ), mock.patch(
             "core.runtime_execution_tools.browser_render",
             return_value={
                 "status": "ok",

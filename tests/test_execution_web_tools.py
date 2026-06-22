@@ -8,7 +8,7 @@ from core.execution.models import _tool_observation
 from core.tool_intent_executor import _execute_web_tool
 
 
-def test_web_tool_facade_matches_extracted_module_for_search() -> None:
+def test_web_tool_facade_matches_extracted_module_for_search(enable_web) -> None:
     planned_rows = [
         {
             "result_title": "Qwen release notes",
@@ -45,7 +45,7 @@ def test_web_tool_facade_matches_extracted_module_for_search() -> None:
     assert result == expected
 
 
-def test_web_tool_facade_matches_extracted_module_for_research_uncertainty() -> None:
+def test_web_tool_facade_matches_extracted_module_for_research_uncertainty(enable_web) -> None:
     research_result = SimpleNamespace(
         strategy="verify",
         actions_taken=["initial_search", "verify_claim"],
