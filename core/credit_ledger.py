@@ -12,6 +12,11 @@ from storage.db import get_connection
 from storage.migrations import run_migrations
 
 LEDGER_MODE = "simulated"
+# Settlement modes that denote a payout backed by a REAL on-chain x402 receipt.
+# A receipt is "real" when its hash is a 64-char hex SHA-256 digest (see
+# core.x402.client.X402Receipt) rather than a "stub-*" placeholder. Such payouts
+# earn full proof-of-settlement reputation; LEDGER_MODE ("simulated") earns less.
+SETTLED_MODES = ("mainnet", "devnet")
 _LEDGER_TABLE_READY = False
 _LEDGER_TABLE_LOCK = Lock()
 
@@ -242,6 +247,38 @@ def _receipt_exists(conn, receipt_id: str | None) -> bool:
         (receipt_id,),
     ).fetchone()
     return bool(row)
+
+
+def is_real_receipt_hash(receipt_hash: str | None) -> bool:
+    """True when ``receipt_hash`` is a real on-chain x402 receipt digest.
+
+    Real receipts carry a 64-char hex SHA-256 hash. "stub-*" placeholders and
+    empty/None values are NOT real — they get no proof-of-settlement weight.
+    """
+    if not receipt_hash:
+        return False
+    value = str(receipt_hash).strip().lower()
+    if value.startswith("stub"):
+        return False
+    if len(value) != 64:
+        return False
+    return all(ch in "0123456789abcdef" for ch in value)
+
+
+def settlement_mode_for_receipt_hash(receipt_hash: str | None, *, mode_hint: str | None = None) -> str:
+    """Resolve the ledger settlement_mode for a payout.
+
+    Returns ``LEDGER_MODE`` ("simulated") unless a real on-chain receipt hash is
+    present, in which case it returns the on-chain cluster mode. ``mode_hint``
+    (the x402 receipt's own "mainnet"/"devnet" tag) is honored when valid;
+    otherwise a real receipt defaults to "mainnet".
+    """
+    if not is_real_receipt_hash(receipt_hash):
+        return LEDGER_MODE
+    hint = str(mode_hint or "").strip().lower()
+    if hint in SETTLED_MODES:
+        return hint
+    return "mainnet"
 
 
 def award_credits(peer_id: str, amount: float, reason: str = "provider_reward", *, receipt_id: str | None = None) -> bool:
@@ -542,12 +579,22 @@ def release_escrow_to_helper(
     payout: float,
     *,
     receipt_id: str | None = None,
+    receipt_hash: str | None = None,
+    settlement_mode_hint: str | None = None,
 ) -> bool:
-    """Transfer credits from task escrow to a helper who completed work."""
+    """Transfer credits from task escrow to a helper who completed work.
+
+    When ``receipt_hash`` is a real on-chain x402 receipt digest, the ledger row
+    is stamped with the on-chain settlement mode ("mainnet"/"devnet") and the
+    receipt hash, so the payout earns full proof-of-settlement reputation.
+    Otherwise the row stays ``LEDGER_MODE`` ("simulated") exactly as before.
+    """
     if payout <= 0:
         return True
     _init_ledger_table()
     release_receipt = receipt_id or f"escrow_release:{parent_task_id}:{helper_peer_id}"
+    settlement_mode = settlement_mode_for_receipt_hash(receipt_hash, mode_hint=settlement_mode_hint)
+    stamped_hash = str(receipt_hash).strip() if settlement_mode in SETTLED_MODES else ""
     now_iso = _utcnow_iso()
     conn = get_connection()
     try:
@@ -577,10 +624,18 @@ def release_escrow_to_helper(
         conn.execute(
             """
             INSERT INTO compute_credit_ledger (
-                peer_id, amount, reason, receipt_id, settlement_mode, timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                peer_id, amount, reason, receipt_id, settlement_mode, receipt_hash, timestamp
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (helper_peer_id, actual_payout, f"task_reward:{parent_task_id}", release_receipt, LEDGER_MODE, now_iso),
+            (
+                helper_peer_id,
+                actual_payout,
+                f"task_reward:{parent_task_id}",
+                release_receipt,
+                settlement_mode,
+                stamped_hash,
+                now_iso,
+            ),
         )
         conn.execute(
             """

@@ -640,17 +640,37 @@ def _pick_best_claim(task_id: str, parent_peer_id: str) -> tuple[str, str] | Non
     """
     Returns (claim_id, helper_peer_id) for the best pending claim.
     Very simple v1: trust + capability fit handled upstream in discovery.
+
+    Bid order keeps ``trust_score`` as the DOMINANT term. A proof-of-settlement
+    tiebreak is folded in *after* trust_score: among helpers of equal trust, the
+    one with the larger REAL-settled reward total (payouts whose settlement_mode
+    is 'mainnet'/'devnet') wins. The tiebreak is the SUM of those settled
+    amounts (COALESCE to 0) — NOT a ratio — so a helper with only 'simulated'
+    rewards scores 0 exactly like an idle helper and is never reordered relative
+    to it. When no real receipts exist (the current state, and CI) every helper
+    scores 0 here and the original current_load / claimed_at ordering is
+    preserved byte-for-byte.
     """
     conn = get_connection()
     try:
         rows = conn.execute(
             """
             SELECT c.claim_id, c.helper_peer_id, c.current_load,
-                   p.trust_score
+                   p.trust_score,
+                   (
+                     SELECT COALESCE(SUM(l.amount), 0)
+                     FROM compute_credit_ledger l
+                     WHERE l.peer_id = c.helper_peer_id
+                       AND l.amount > 0
+                       AND l.settlement_mode IN ('mainnet', 'devnet')
+                   ) AS settled_amount
             FROM task_claims c
             LEFT JOIN peers p ON p.peer_id = c.helper_peer_id
             WHERE c.task_id = ? AND c.status = 'pending'
-            ORDER BY COALESCE(p.trust_score, 0.5) DESC, c.current_load ASC, c.claimed_at ASC
+            ORDER BY COALESCE(p.trust_score, 0.5) DESC,
+                     settled_amount DESC,
+                     c.current_load ASC,
+                     c.claimed_at ASC
             LIMIT 1
             """,
             (task_id,),

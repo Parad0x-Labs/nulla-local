@@ -278,6 +278,35 @@ def runtime_tool_specs(
             "read_only": True,
             "arguments": {},
         },
+        {
+            "intent": "sell.quote",
+            "description": (
+                "Quote NULLA's own compute for another agent over x402 (read-only, no spend). "
+                "Returns the live USDC amount, recipient wallet, and signed quote hash."
+            ),
+            "read_only": True,
+            "arguments": {
+                "resource": "null:// URI optional",
+                "null_name": ".null name optional",
+            },
+        },
+        {
+            "intent": "pay.x402",
+            "description": (
+                "Buy external x402-gated compute with USDC. Safe by default: never spends "
+                "without an explicit per-call allow_spend + approve opt-in and a max_spend_usdc cap; "
+                "otherwise it only returns the quote and requests confirmation."
+            ),
+            "read_only": False,
+            "arguments": {
+                "resource": "https x402 resource URL",
+                "null_name": ".null name optional",
+                "max_spend_usdc": "number cap, required to authorize spend",
+                "allow_spend": "boolean, must be true to spend",
+                "approve": "boolean, must be true to spend",
+                "privacy_path": "normal|dark-null optional",
+            },
+        },
     ]
     if allow_web_fallback_fn():
         specs.extend(
