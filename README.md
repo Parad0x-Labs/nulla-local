@@ -138,6 +138,18 @@ cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set
 
 Full install docs: [docs/INSTALL.md](docs/INSTALL.md)
 
+### Platform support
+
+| OS | Inference | Job sandbox | Launchers |
+|---|---|---|---|
+| **macOS** (Apple Silicon) | Metal GPU via Ollama | kernel-enforced (`sandbox-exec`) | `.command` |
+| **Linux** | Ollama + native llama.cpp | kernel-enforced (`bwrap`/`unshare`/`firejail`) | `.sh` |
+| **Windows** | Ollama (CPU; consumer-GPU lane coming) | static network guard (`heuristic_only`) | `.bat` / PowerShell |
+
+Apple Silicon is the primary development target. Temp paths, signal handling, and
+the sandbox all run cross-platform; on Windows the no-network job sandbox uses the
+static command guard (set `network_isolation_mode="heuristic_only"`).
+
 ---
 
 ## What works right now

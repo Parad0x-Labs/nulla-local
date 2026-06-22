@@ -84,6 +84,43 @@ class JobRunnerTests(unittest.TestCase):
                 argv = runner._with_network_isolation(["python3", "-c", "print('x')"])
                 self.assertEqual(argv[:3], ["/usr/bin/unshare", "-n", "--"])
 
+    def test_macos_sandbox_exec_prefix_applied_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = JobRunner(
+                ExecutionPolicy(
+                    workspace_root=Path(tmpdir),
+                    network_isolation_mode="auto",
+                )
+            )
+
+            def _which(cmd: str) -> str | None:
+                return "/usr/bin/sandbox-exec" if cmd == "sandbox-exec" else None
+
+            with patch("sandbox.job_runner.sys.platform", "darwin"), patch(
+                "sandbox.job_runner.shutil.which", side_effect=_which
+            ):
+                argv = runner._with_network_isolation(["python3", "-c", "print('x')"])
+                self.assertEqual(argv[0], "/usr/bin/sandbox-exec")
+                self.assertEqual(argv[1], "-p")
+                self.assertIn("deny network*", argv[2])
+                self.assertEqual(argv[3], "--")
+                self.assertEqual(argv[4:], ["python3", "-c", "print('x')"])
+
+    @unittest.skipUnless(sys.platform == "darwin", "sandbox-exec is macOS-only")
+    def test_macos_sandbox_exec_real_execution_succeeds(self) -> None:
+        # Real end-to-end on macOS: a no-network 'auto' job runs under the kernel
+        # Seatbelt wrapper without raising, and produces correct output.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = JobRunner(
+                ExecutionPolicy(
+                    workspace_root=Path(tmpdir),
+                    network_isolation_mode="auto",
+                )
+            )
+            result = runner.run(["/bin/echo", "sandbox-ok"])
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("sandbox-ok", result.stdout)
+
     def test_linux_bwrap_prefix_preferred_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             runner = JobRunner(

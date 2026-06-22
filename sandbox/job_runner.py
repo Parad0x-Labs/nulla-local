@@ -6,6 +6,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# macOS Seatbelt profile: allow everything the job needs locally, deny all
+# network (inbound, outbound, bind, system sockets). Gives the same "no network
+# egress" guarantee as Linux `unshare -n` / `bwrap --unshare-net`, enforced by
+# the kernel rather than by the static command heuristic.
+_MACOS_DENY_NETWORK_PROFILE = "(version 1)(allow default)(deny network*)"
+
 from sandbox.container_adapter import ExecutionResult
 from sandbox.network_guard import command_uses_network
 from sandbox.resource_limits import ExecutionPolicy, normalize_policy, path_within_roots
@@ -67,10 +73,15 @@ class JobRunner:
         isolated = self._kernel_network_isolation_prefix(argv)
         if isolated is not None:
             return isolated
+        # No OS-enforced backend available on this host. Fail closed by default
+        # (both 'auto' and 'os_enforced'): macOS has sandbox-exec and Linux has
+        # bwrap/unshare/firejail, so reaching here means no kernel enforcement is
+        # possible. 'heuristic_only' remains the explicit, informed opt-in to the
+        # weaker static-guard guarantee (e.g. on Windows).
         if mode in {"auto", "os_enforced"}:
             raise ValueError(
                 "OS-level network isolation is required but unavailable "
-                "(expected one of: bwrap, unshare, firejail). "
+                "(expected one of: bwrap, unshare, firejail on Linux; sandbox-exec on macOS). "
                 "Set network_isolation_mode='heuristic_only' only for an explicit unsafe local override."
             )
         return argv
@@ -83,7 +94,19 @@ class JobRunner:
         isolated = self._linux_unshare_prefix(argv)
         if isolated is not None:
             return isolated
-        return self._linux_firejail_prefix(argv)
+        isolated = self._linux_firejail_prefix(argv)
+        if isolated is not None:
+            return isolated
+        # macOS: real kernel-enforced network denial via Seatbelt (sandbox-exec).
+        return self._macos_sandbox_exec_prefix(argv)
+
+    def _macos_sandbox_exec_prefix(self, argv: list[str]) -> list[str] | None:
+        if sys.platform != "darwin":
+            return None
+        sandbox_exec = shutil.which("sandbox-exec")
+        if not sandbox_exec:
+            return None
+        return [sandbox_exec, "-p", _MACOS_DENY_NETWORK_PROFILE, "--", *list(argv)]
 
     def _linux_bwrap_prefix(self, argv: list[str]) -> list[str] | None:
         if os.name != "posix":

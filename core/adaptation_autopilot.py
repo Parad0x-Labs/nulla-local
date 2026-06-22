@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -609,7 +610,7 @@ def _local_fallback_base_model(
     effective_project_root = Path(project_root or _project_root())
     fallback_candidates = (
         effective_project_root / "data" / "trainable_models" / "sshleifer-tiny-gpt2",
-        Path("/tmp/nulla_tiny_gpt2"),
+        Path(tempfile.gettempdir()) / "nulla_tiny_gpt2",
     )
     if prefer_project_fallback:
         for candidate in fallback_candidates:

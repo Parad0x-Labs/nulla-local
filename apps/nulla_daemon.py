@@ -413,8 +413,18 @@ def main() -> int:
     def _request_stop(_signum, _frame) -> None:
         stop_event.set()
 
-    signal.signal(signal.SIGTERM, _request_stop)
-    signal.signal(signal.SIGINT, _request_stop)
+    # Register stop signals defensively: a given signal may not exist on every
+    # platform (Windows lacks several POSIX signals) and signal.signal() raises
+    # if called off the main thread. Either way the daemon should still start and
+    # be stoppable via stop_event; missing a handler is not fatal.
+    for _sig_name in ("SIGTERM", "SIGINT", "SIGBREAK"):
+        _sig = getattr(signal, _sig_name, None)
+        if _sig is None:
+            continue
+        try:
+            signal.signal(_sig, _request_stop)
+        except (ValueError, OSError, RuntimeError):
+            continue
     try:
         while not stop_event.wait(1.0):
             continue
