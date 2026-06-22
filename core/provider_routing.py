@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlparse
@@ -348,6 +349,64 @@ def _routing_rejection_reason(capability: ProviderCapabilityTruth, requirements:
     return ""
 
 
+@lru_cache(maxsize=1)
+def _device_probe():
+    """Probe the host once per process; hardware is stable for a run.
+
+    Returns None if probing fails for any reason, so scoring degrades to its
+    prior behavior rather than erroring.
+    """
+    try:
+        from core.hardware_tier import probe_machine
+
+        return probe_machine()
+    except Exception:
+        return None
+
+
+def _hardware_fit_adjustment(
+    capability: ProviderCapabilityTruth,
+    *,
+    ram_gb: float,
+    vram_gb: float,
+    accelerator: str,
+) -> float:
+    """Score delta for whether a manifest's declared footprint fits this machine.
+
+    Penalizes a model that will not fit the box the user actually has (the core
+    commodity-hardware concern); mildly prefers one that leaves headroom. INERT
+    when the manifest declares no footprint — we never penalize on missing data,
+    so manifests without ram/vram budgets keep their prior score exactly.
+
+    Unified memory (Apple mps) has no separate VRAM pool: weights live in the
+    SAME RAM the OS uses, and the probe reports vram_gb == ram_gb. Gauging the
+    requirement against a phantom VRAM budget would double-count and over-admit,
+    so on mps the footprint is measured against total RAM.
+    """
+    need_ram = float(capability.ram_budget_gb or 0.0)
+    need_vram = float(capability.vram_budget_gb or 0.0)
+    if need_ram <= 0.0 and need_vram <= 0.0:
+        return 0.0
+    accel = (accelerator or "cpu").strip().lower()
+    if accel == "mps":
+        need, budget = max(need_ram, need_vram), ram_gb
+    elif accel in {"cuda", "directml"} and need_vram > 0.0 and vram_gb > 0.0:
+        need, budget = need_vram, vram_gb
+    else:
+        need, budget = max(need_ram, need_vram), ram_gb
+    if need <= 0.0 or budget <= 0.0:
+        return 0.0
+    if need > budget:
+        # Over capacity — strong, overage-scaled penalty that sinks the candidate
+        # below any model that actually fits. Base scores differ by O(1), so this
+        # is decisive without being a hard reject (a no-fit box can still pick the
+        # least-bad option if nothing fits).
+        return -3.0 - min(5.0, (need - budget) / budget)
+    # Fits — small headroom bonus (<= +0.6) that nudges among fitting models
+    # without overriding role/locality intent.
+    return min(0.6, (budget - need) / budget * 0.6)
+
+
 def _envelope_manifest_score(
     capability: ProviderCapabilityTruth,
     *,
@@ -388,6 +447,16 @@ def _envelope_manifest_score(
     score -= min(2.5, queue_pressure)
     if provider_role == "queen" and capability.locality == "remote":
         score += 0.15
+    # Hardware-fit: prefer a model that fits the user's actual box, sink one that
+    # won't. Inert for manifests that declare no ram/vram footprint.
+    probe = _device_probe()
+    if probe is not None:
+        score += _hardware_fit_adjustment(
+            capability,
+            ram_gb=float(probe.ram_gb or 0.0),
+            vram_gb=float(probe.vram_gb or 0.0),
+            accelerator=str(probe.accelerator or "cpu"),
+        )
     return score
 
 
