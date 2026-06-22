@@ -108,27 +108,43 @@ def resolve_null_request(
     x402_client: X402Client | None = None,
     price_per_token_usdc: float = 0.000001,
     recipient_wallet: str = "stub-wallet",
+    measured_output_tokens: int | None = None,
 ) -> NullRequest:
     """
     Parse a null:// URI and build an x402 quote for the service.
 
-    Uses stub X402Client by default — wire a real client for live payments.
+    When ``measured_output_tokens`` is supplied (e.g. the adapter's eval_count
+    after a run), the quote is metered as tokens × price — a real invoice tied to
+    the count the model emitted — instead of a flat per-service estimate. An
+    explicit ``?price=`` on the URI still wins. Uses a stub X402Client by default.
     """
     uri = parse_null_uri(uri_str)
     sid = session_id or f"null-{uuid.uuid4().hex[:12]}"
     client = x402_client or X402Client(X402Config(mode=X402Mode.STUB))
-    amount = _price_for(uri, price_per_token_usdc=price_per_token_usdc)
+    amount = _price_for(
+        uri,
+        price_per_token_usdc=price_per_token_usdc,
+        measured_output_tokens=measured_output_tokens,
+    )
     quote = client.quote(amount_usdc=max(amount, price_per_token_usdc), recipient_wallet=recipient_wallet)
     return NullRequest(uri=uri, session_id=sid, quote=quote)
 
 
-def _price_for(uri: NullUri, *, price_per_token_usdc: float) -> float:
+def _price_for(
+    uri: NullUri,
+    *,
+    price_per_token_usdc: float,
+    measured_output_tokens: int | None = None,
+) -> float:
+    # Precedence: explicit ?price= override > measured tokens × price > flat table.
     explicit = (uri.params.get("price") or [None])[0]
     if explicit is not None:
         try:
             return max(0.0, float(explicit))
         except Exception:
             pass
+    if measured_output_tokens is not None and measured_output_tokens > 0:
+        return max(0.0, float(measured_output_tokens) * price_per_token_usdc)
     return _BASE_PRICES.get(uri.service, price_per_token_usdc * 500)
 
 

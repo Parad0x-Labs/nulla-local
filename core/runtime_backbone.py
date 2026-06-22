@@ -139,7 +139,13 @@ def build_provider_registry_snapshot(
         start_web0_background_workers()
     # Web0 capability announce — fire-and-forget, no-op when gate is off
     try:
-        from core.web0_capability_broadcast import announce_from_env, build_manifest
+        from core.web0_capability_broadcast import (
+            DEFAULT_PRICE_PER_TOKEN,
+            announce_from_env,
+            build_manifest,
+            resolve_announced_price_usdc,
+            resolve_privacy_mode,
+        )
         top = max(capability_truth, key=lambda c: float(c.tokens_per_second or 0), default=None)
         _manifest = build_manifest(
             worker_id=str(env_map.get("NULLA_WORKER_ID") or "nulla"),
@@ -148,6 +154,9 @@ def build_provider_registry_snapshot(
             top_tier=str(top.role_fit or "drone") if top else "drone",
             context_window=int(top.context_window or 32768) if top else 32768,
             tools=tuple(str(t) for t in (top.tool_support or ())) if top else (),
+            # Advertise the node's REAL price + privacy posture, not the default.
+            price_per_token_usdc=resolve_announced_price_usdc(env_map, default=DEFAULT_PRICE_PER_TOKEN),
+            privacy_mode=resolve_privacy_mode(env_map),
         )
         announce_from_env(_manifest, env=env_map)
     except Exception:
