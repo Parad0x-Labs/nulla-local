@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -318,13 +319,11 @@ class NullaMemory:
                     score, ts, ts,
                 ),
             )
-            try:
+            with contextlib.suppress(sqlite3.Error):  # FTS is a best-effort leg
                 self._conn.execute(
                     "INSERT INTO memory_fts (node_id, agent_id, content, keywords) VALUES (?, ?, ?, ?)",
                     (node_id, self._agent_id, text, " ".join(node.keywords)),
                 )
-            except sqlite3.Error:
-                pass  # FTS is a best-effort leg
             self._conn.commit()
         return node
 

@@ -32,9 +32,9 @@ from pathlib import Path
 # allow running as a file or module
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from core.embedding_service import embed, embedding_backend  # noqa: E402
-from core.nulla_memory import NullaMemory  # noqa: E402
-from core.context_window import _score_importance  # the system's OWN scorer (fair)  # noqa: E402
+from core.context_window import _score_importance  # the system's OWN scorer (fair)
+from core.embedding_service import embed, embedding_backend
+from core.nulla_memory import NullaMemory
 
 # ── labeled corpus: a personal-assistant relationship over 3 sessions ──────────
 # Each turn: (session, role, content, fact_id, supersedes_fact_id, importance_hint)
