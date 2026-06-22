@@ -12,6 +12,12 @@ from storage.db import get_connection
 from storage.migrations import run_migrations
 
 LEDGER_MODE = "simulated"
+# USDC has 6 decimal places on Solana — the smallest transferable unit ("atomic"
+# unit) is 1e-6 USDC. A whole-USDC amount maps to ``amount * 10**USDC_DECIMALS``
+# atomic units. We round (not truncate) to the nearest atomic unit so fractional
+# value is not silently dropped, and reject amounts that round to 0.
+USDC_DECIMALS = 6
+USDC_ATOMIC_PER_UNIT = 10 ** USDC_DECIMALS
 # Settlement modes that denote a payout backed by a REAL on-chain x402 receipt.
 # A receipt is "real" when its hash is a 64-char hex SHA-256 digest (see
 # core.x402.client.X402Receipt) rather than a "stub-*" placeholder. Such payouts
@@ -53,6 +59,62 @@ def starter_credit_amount() -> float:
         return max(0.0, float(policy_engine.get("economics.starter_credits_amount", 24.0)))
     except (TypeError, ValueError):
         return 24.0
+
+
+def usdc_to_atomic(amount_usdc: float) -> int:
+    """Convert a USDC amount to integer atomic units (1 unit = 1e-6 USDC).
+
+    The amount is **rounded** to the nearest atomic unit (banker's rounding via
+    :func:`round`) rather than truncated, so fractional value below 1e-6 is not
+    silently discarded on the way down. A positive amount that rounds to 0 atomic
+    units (i.e. below half an atomic unit) is rejected with :class:`ValueError`
+    rather than emitting a silent zero-value transfer.
+
+    Parameters
+    ----------
+    amount_usdc:
+        Whole-USDC amount, e.g. ``0.001`` for one milli-USDC.
+
+    Returns
+    -------
+    int
+        The amount expressed in atomic units (always ``> 0``).
+
+    Raises
+    ------
+    ValueError
+        If ``amount_usdc`` is non-finite, ``<= 0``, or rounds to 0 atomic units.
+    """
+    try:
+        value = float(amount_usdc)
+    except (TypeError, ValueError):
+        raise ValueError(f"amount_usdc is not a number: {amount_usdc!r}") from None
+    if value != value or value in (float("inf"), float("-inf")):  # NaN / inf guard
+        raise ValueError(f"amount_usdc must be finite, got {amount_usdc!r}")
+    if value <= 0:
+        raise ValueError(f"amount_usdc must be > 0, got {value}")
+    atomic = round(value * USDC_ATOMIC_PER_UNIT)
+    if atomic <= 0:
+        raise ValueError(
+            f"amount_usdc={value} rounds to 0 atomic units "
+            f"(< {1 / USDC_ATOMIC_PER_UNIT:.0e} USDC); refusing silent zero-value transfer"
+        )
+    return atomic
+
+
+def _allocate_pool_atomic(pool_atomic: int, shares: int) -> list[int]:
+    """Split ``pool_atomic`` atomic units across ``shares`` recipients exactly.
+
+    Uses integer division so no atomic unit is lost to float/round drift; the
+    leftover remainder is handed out one unit at a time to the leading recipients
+    so the returned allocations always sum to ``pool_atomic`` exactly.
+    """
+    if shares <= 0:
+        return []
+    base = pool_atomic // shares
+    remainder = pool_atomic - base * shares
+    allocations = [base + (1 if i < remainder else 0) for i in range(shares)]
+    return allocations
 
 
 def _init_ledger_table() -> None:
@@ -110,29 +172,64 @@ def _dispatch_limits() -> tuple[float, float]:
     return daily_limit, per_dispatch_limit
 
 
-def _dispatch_receipt_record(conn, receipt_id: str | None) -> tuple[str, float] | None:
+def _dispatch_receipt_record(
+    conn, receipt_id: str | None, *, reason: str | None = None
+) -> tuple[str, float] | None:
+    """Find a prior dispatch reservation that reused ``receipt_id``.
+
+    A paid dispatch reservation is recorded in ``compute_credit_ledger`` as a
+    **charge** (negative ``amount``) with the dispatch ``reason``. Matching on the
+    ``receipt_id`` alone is too loose: the same id can also appear on a positive
+    award/refund/transfer-receive row, which would be mis-reported here as a prior
+    *paid* dispatch and select the wrong row. We therefore tighten the match to
+    the dispatch debit (``amount < 0``) and, when a ``reason`` is supplied, to that
+    exact reason — so only a genuine prior reservation for this dispatch is
+    treated as a replay.
+    """
     if not receipt_id:
         return None
-    row = conn.execute(
-        """
-        SELECT 'paid' AS dispatch_mode, ABS(amount) AS amount
-        FROM compute_credit_ledger
-        WHERE receipt_id = ?
-        LIMIT 1
-        """,
-        (receipt_id,),
-    ).fetchone()
+    if reason is not None:
+        row = conn.execute(
+            """
+            SELECT 'paid' AS dispatch_mode, ABS(amount) AS amount
+            FROM compute_credit_ledger
+            WHERE receipt_id = ? AND amount < 0 AND reason = ?
+            LIMIT 1
+            """,
+            (receipt_id, reason),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT 'paid' AS dispatch_mode, ABS(amount) AS amount
+            FROM compute_credit_ledger
+            WHERE receipt_id = ? AND amount < 0
+            LIMIT 1
+            """,
+            (receipt_id,),
+        ).fetchone()
     if row:
         return str(row["dispatch_mode"]), float(row["amount"] or 0.0)
-    row = conn.execute(
-        """
-        SELECT dispatch_mode, amount
-        FROM swarm_dispatch_budget_events
-        WHERE receipt_id = ?
-        LIMIT 1
-        """,
-        (receipt_id,),
-    ).fetchone()
+    if reason is not None:
+        row = conn.execute(
+            """
+            SELECT dispatch_mode, amount
+            FROM swarm_dispatch_budget_events
+            WHERE receipt_id = ? AND reason = ?
+            LIMIT 1
+            """,
+            (receipt_id, reason),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT dispatch_mode, amount
+            FROM swarm_dispatch_budget_events
+            WHERE receipt_id = ?
+            LIMIT 1
+            """,
+            (receipt_id,),
+        ).fetchone()
     if row:
         return str(row["dispatch_mode"]), float(row["amount"] or 0.0)
     return None
@@ -406,7 +503,7 @@ def reserve_swarm_dispatch_budget(
             conn.rollback()
         conn.execute("BEGIN IMMEDIATE")
 
-        existing = _dispatch_receipt_record(conn, receipt_id)
+        existing = _dispatch_receipt_record(conn, receipt_id, reason=reason)
         if existing:
             mode, reserved_amount = existing
             used = _free_tier_usage_in_tx(conn, peer_id, day_bucket=day_bucket)
@@ -808,10 +905,15 @@ def settle_hive_task_escrow(
 
     payout_pool = round(remaining_before * payout_fraction, 4)
     helper_count = len(unique_helpers)
-    per_helper = round(payout_pool / helper_count, 4)
-    allocations = [per_helper for _ in unique_helpers]
-    if allocations:
-        allocations[-1] = round(payout_pool - sum(allocations[:-1]), 4)
+    # Allocate in integer credit-ticks (1e-4 granularity, matching the 4-decimal
+    # rounding used throughout this function) so no value is lost to float/round
+    # drift. The leftover tick remainder is distributed deterministically to the
+    # leading helpers; the per-helper allocations therefore sum to ``payout_pool``
+    # exactly rather than dropping a fractional remainder.
+    _CREDIT_TICKS = 10_000  # 1 credit = 10_000 ticks (4 decimal places)
+    pool_ticks = round(payout_pool * _CREDIT_TICKS)
+    allocation_ticks = _allocate_pool_atomic(pool_ticks, helper_count)
+    allocations = [round(ticks / _CREDIT_TICKS, 4) for ticks in allocation_ticks]
 
     settlements: list[dict[str, Any]] = []
     total_released = 0.0

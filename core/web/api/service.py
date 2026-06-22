@@ -124,8 +124,9 @@ def _attach_work_receipt(
             award_credits(get_local_peer_id(), amount=1.0, reason="task_completion", receipt_id=receipt.receipt_id)
         except Exception:
             pass
-        # Anchor receipt hash on Solana when NULLA_ANCHOR_RECEIPTS=1
-        if os.environ.get("NULLA_ANCHOR_RECEIPTS") == "1":
+        # Anchor receipt hash on Solana when anchoring is opted in (shared gate)
+        from core.solana_anchor import anchor_enabled
+        if anchor_enabled():
             try:
                 from core.solana_anchor import anchor_vault_proof
                 anchor_vault_proof(

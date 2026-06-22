@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from collections.abc import Callable
@@ -41,6 +42,7 @@ class MaintenanceConfig:
     dht_discovery_min_verified_endpoints: int = 3
     dht_candidate_probe_cooldown_seconds: int = 300
     dht_candidate_probe_failure_limit: int = 3
+    max_failure_backoff_seconds: int = 300
 
 
 def _dht_discovery_targets(
@@ -443,10 +445,47 @@ class MaintenanceLoop:
         )
 
     def _loop(self) -> None:
+        consecutive_failures = 0
         while not self._stop.is_set():
-            self.run_tick()
+            try:
+                self.run_tick()
+                consecutive_failures = 0
+            except Exception as e:
+                # A transient fault (e.g. a momentary sqlite error) must not
+                # permanently and silently kill this non-daemon thread. Log it,
+                # then back off (bounded) and retry on the next iteration.
+                consecutive_failures += 1
+                # Even the audit sink may be momentarily unavailable; never let
+                # logging the failure become the thing that kills the loop.
+                with contextlib.suppress(Exception):
+                    audit_logger.log(
+                        "maintenance_tick_failed",
+                        target_id="maintenance",
+                        target_type="maintenance",
+                        details={
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                            "consecutive_failures": consecutive_failures,
+                        },
+                    )
+                if self._backoff_sleep(consecutive_failures):
+                    continue
 
             # responsive sleep
             deadline = time.time() + self.config.tick_seconds
             while time.time() < deadline and not self._stop.is_set():
                 time.sleep(0.25)
+
+    def _backoff_sleep(self, consecutive_failures: int) -> bool:
+        """Sleep a bounded, exponentially growing interval after a failed tick.
+
+        Returns True if the loop should immediately re-evaluate the stop flag
+        (i.e. a stop was requested during the backoff).
+        """
+        base = max(1, int(self.config.tick_seconds))
+        capped_exp = min(int(consecutive_failures), 6)
+        backoff_seconds = min(base * (2 ** (capped_exp - 1)), self.config.max_failure_backoff_seconds)
+        deadline = time.time() + max(0.0, float(backoff_seconds))
+        while time.time() < deadline and not self._stop.is_set():
+            time.sleep(0.25)
+        return self._stop.is_set()

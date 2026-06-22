@@ -33,6 +33,8 @@ from core.identity_manager import load_active_persona
 from core.install_recommendations import build_install_recommendation_truth
 from core.local_worker_pool import resolve_local_worker_capacity
 from core.lora_training_pipeline import promote_adaptation_job, run_adaptation_job
+from core.null_protocol import NullProtocolError, resolve_null_request
+from core.null_resolver import NullDomainRecord, resolve_null_domain
 from core.nulla_user_summary import build_user_summary, render_user_summary
 from core.release_channel import release_manifest_snapshot
 from core.runtime_backbone import build_provider_registry_snapshot, build_runtime_backbone
@@ -53,6 +55,7 @@ from core.runtime_install_profiles import (
 )
 from core.runtime_paths import data_path
 from core.trainable_base_manager import stage_trainable_base, trainable_base_status
+from core.web0_capability_broadcast import build_manifest_from_env
 from network.signer import get_local_peer_id
 from storage.adaptation_store import (
     create_adaptation_corpus,
@@ -173,6 +176,236 @@ def cmd_summary(json_mode: bool = False, limit: int = 5) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         print(render_user_summary(report))
+    return 0
+
+
+def _strip_null_suffix(name: str) -> str:
+    """Normalize a .null name: trim whitespace and a single trailing '.null'."""
+    value = str(name or "").strip()
+    if value.lower().endswith(".null"):
+        value = value[: -len(".null")]
+    return value.strip()
+
+
+def _explorer_tx_link(signature: str) -> str:
+    """Copy-pasteable mainnet explorer link for a Solana tx signature."""
+    return f"https://explorer.solana.com/tx/{signature}"
+
+
+def resolve_record_payload(name: str, record: NullDomainRecord | None) -> dict[str, object]:
+    """Pure: shape a resolved .null record (or a miss) into a serializable payload."""
+    if record is None:
+        return {"name": name, "resolved": False}
+    return {
+        "name": name,
+        "resolved": True,
+        "owner": record.owner,
+        "arweave_txid": record.arweave_txid,
+        "x402_endpoint": record.x402_endpoint or "",
+        "passport_present": record.passport_hash is not None,
+    }
+
+
+def render_resolve_lines(payload: dict[str, object]) -> list[str]:
+    """Pure: human-readable lines for a resolve payload."""
+    name = str(payload.get("name") or "")
+    lines = [
+        "NULLA .null resolution",
+        "======================",
+        f"Name:           {name}.null",
+    ]
+    if not payload.get("resolved"):
+        lines.append("Status:         unresolved (no on-chain record)")
+        return lines
+    arweave = payload.get("arweave_txid")
+    endpoint = str(payload.get("x402_endpoint") or "")
+    lines.extend(
+        [
+            f"Owner:          {payload.get('owner')}",
+            f"Arweave txid:   {arweave if arweave else 'none'}",
+            f"x402 endpoint:  {endpoint if endpoint else 'unset'}",
+            f"Passport:       {'present' if payload.get('passport_present') else 'none'}",
+        ]
+    )
+    return lines
+
+
+def cmd_resolve(name: str, *, json_mode: bool = False) -> int:
+    clean = _strip_null_suffix(name)
+    if not clean:
+        print("usage: nulla resolve <name>.null")
+        return 2
+    record = resolve_null_domain(clean)
+    payload = resolve_record_payload(clean, record)
+    if json_mode:
+        _emit_json(payload)
+        return 0 if payload.get("resolved") else 1
+    print("\n".join(render_resolve_lines(payload)))
+    return 0 if payload.get("resolved") else 1
+
+
+_RECEIPT_EVENT_TYPES = ("solana_proof_anchored", "parent_output_finalized")
+
+
+def _load_receipt_rows(limit: int = 50) -> list[dict[str, object]]:
+    """Local SQLite read of anchored / finalized proof events from audit_log."""
+    from storage.db import get_connection
+
+    conn = get_connection()
+    try:
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT event_type, target_id, details_json, created_at
+                FROM audit_log
+                WHERE event_type IN (?, ?)
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (_RECEIPT_EVENT_TYPES[0], _RECEIPT_EVENT_TYPES[1], max(1, int(limit))),
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+    return rows
+
+
+def format_receipt_row(row: dict[str, object]) -> dict[str, object]:
+    """Pure: shape one audit_log row into a receipt entry with an explorer link."""
+    details = row.get("details") if isinstance(row.get("details"), dict) else None
+    if details is None:
+        raw = row.get("details_json")
+        try:
+            details = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            details = {}
+    signature = str(details.get("signature") or "")
+    entry: dict[str, object] = {
+        "event_type": str(row.get("event_type") or ""),
+        "task_id": str(row.get("target_id") or ""),
+        "confidence": float(details.get("confidence") or 0.0),
+        "signature": signature,
+        "created_at": str(row.get("created_at") or ""),
+    }
+    entry["explorer_link"] = _explorer_tx_link(signature) if signature else ""
+    return entry
+
+
+def render_receipt_lines(entries: list[dict[str, object]]) -> list[str]:
+    """Pure: human-readable receipt block."""
+    lines = ["NULLA receipts", "=============="]
+    if not entries:
+        lines.append("No anchored or finalized proofs recorded yet.")
+        return lines
+    for entry in entries:
+        lines.append(f"{entry['event_type']}")
+        lines.append(f"  Task:      {entry['task_id'] or 'unknown'}")
+        lines.append(f"  Confidence:{' '}{float(entry['confidence']):.2f}")
+        if entry.get("signature"):
+            lines.append(f"  Signature: {entry['signature']}")
+            lines.append(f"  Explorer:  {entry['explorer_link']}")
+        else:
+            lines.append("  Signature: none (local finalize, not yet anchored)")
+        lines.append(f"  When:      {entry['created_at']}")
+    return lines
+
+
+def cmd_receipts(*, limit: int = 20, json_mode: bool = False) -> int:
+    _bootstrap_cli_storage()
+    rows = _load_receipt_rows(limit=max(1, min(int(limit), 200)))
+    entries = [format_receipt_row(row) for row in rows]
+    if json_mode:
+        _emit_json(entries)
+        return 0
+    print("\n".join(render_receipt_lines(entries)))
+    return 0
+
+
+def render_manifest_lines(manifest_dict: dict[str, object]) -> list[str]:
+    """Pure: human-readable capability+price card for this node's manifest."""
+    provider_ids = list(manifest_dict.get("provider_ids") or [])
+    tools = list(manifest_dict.get("tools") or [])
+    return [
+        "NULLA capability manifest",
+        "=========================",
+        f"Worker ID:      {manifest_dict.get('worker_id')}",
+        f"Top tier:       {manifest_dict.get('top_tier')}",
+        f"Top TPS:        {float(manifest_dict.get('top_tps') or 0.0):.2f}",
+        f"Context window: {int(manifest_dict.get('context_window') or 0)}",
+        f"Providers:      {', '.join(provider_ids) if provider_ids else 'none registered'}",
+        f"Tools:          {', '.join(tools) if tools else 'none'}",
+        f"Price/token:    {float(manifest_dict.get('price_per_token_usdc') or 0.0):.8f} USDC",
+        f"Privacy mode:   {manifest_dict.get('privacy_mode')}",
+    ]
+
+
+def cmd_manifest(*, json_mode: bool = False) -> int:
+    manifest = build_manifest_from_env()
+    payload = manifest.to_dict()
+    if json_mode:
+        _emit_json(payload)
+        return 0
+    print("\n".join(render_manifest_lines(payload)))
+    return 0
+
+
+def _quote_target_to_uri(target: str) -> str:
+    """Map a `null://...` URI or a `<name>.null` into a null:// task URI."""
+    value = str(target or "").strip()
+    if value.lower().startswith("null://"):
+        return value
+    name = _strip_null_suffix(value)
+    return f"null://task/{name}" if name else ""
+
+
+def render_quote_lines(payload: dict[str, object]) -> list[str]:
+    """Pure: invoice preview for a resolved null:// request."""
+    quote = payload.get("quote") if isinstance(payload.get("quote"), dict) else {}
+    quote = quote or {}
+    return [
+        "NULLA sell-quote preview",
+        "========================",
+        f"URI:            {payload.get('uri')}",
+        f"Service:        {payload.get('service')}",
+        f"Path:           {payload.get('path') or '(none)'}",
+        f"Session ID:     {payload.get('session_id')}",
+        f"Amount:         {float(quote.get('amount_usdc') or 0.0):.8f} USDC",
+        f"Recipient:      {quote.get('recipient_wallet') or 'unset'}",
+        f"USDC mint:      {quote.get('usdc_mint') or 'unset'}",
+        f"Quote hash:     {quote.get('quote_hash') or 'unset'}",
+    ]
+
+
+def cmd_sell_quote(target: str, *, json_mode: bool = False) -> int:
+    uri = _quote_target_to_uri(target)
+    if not uri:
+        print("usage: nulla sell-quote [null://service/path | <name>.null]")
+        return 2
+    try:
+        request = resolve_null_request(uri)
+    except NullProtocolError as exc:
+        print(f"Invalid null:// request: {exc}")
+        return 2
+    quote = request.quote
+    payload: dict[str, object] = {
+        "uri": request.uri.raw,
+        "service": request.uri.service,
+        "path": request.uri.path,
+        "session_id": request.session_id,
+        "quote": None
+        if quote is None
+        else {
+            "amount_usdc": quote.amount_usdc,
+            "recipient_wallet": quote.recipient_wallet,
+            "usdc_mint": quote.usdc_mint,
+            "quote_hash": quote.quote_hash,
+        },
+    }
+    if json_mode:
+        _emit_json(payload)
+        return 0
+    print("\n".join(render_quote_lines(payload)))
     return 0
 
 
@@ -1001,6 +1234,21 @@ def build_parser() -> argparse.ArgumentParser:
     summary = sub.add_parser("summary", help="Show what Nulla learned, stored, indexed, and exchanged.")
     summary.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     summary.add_argument("--limit", type=int, default=5, help="Number of recent items to show per section.")
+
+    resolve = sub.add_parser("resolve", help="Resolve a .null name on mainnet (read-only): owner, Arweave, x402 endpoint.")
+    resolve.add_argument("name", help="The .null name to resolve, e.g. web0.null")
+    resolve.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
+
+    receipts = sub.add_parser("receipts", help="Show locally recorded anchored/finalized proofs with explorer links.")
+    receipts.add_argument("--limit", type=int, default=20, help="Number of recent receipts to show.")
+    receipts.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
+
+    manifest = sub.add_parser("manifest", help="Show this node's advertised capability + price card.")
+    manifest.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
+
+    sell_quote = sub.add_parser("sell-quote", help="Preview the x402 invoice for a null:// request or a .null name (read-only).")
+    sell_quote.add_argument("target", help="A null:// service URI or a <name>.null")
+    sell_quote.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     providers = sub.add_parser("providers", help="Show registered external model providers and declared licenses.")
     providers.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     install_profile = sub.add_parser(
@@ -1170,6 +1418,14 @@ def main() -> int:
         return cmd_up()
     if args.command == "summary":
         return cmd_summary(json_mode=bool(args.json), limit=int(args.limit))
+    if args.command == "resolve":
+        return cmd_resolve(str(args.name or ""), json_mode=bool(args.json))
+    if args.command == "receipts":
+        return cmd_receipts(limit=int(args.limit), json_mode=bool(args.json))
+    if args.command == "manifest":
+        return cmd_manifest(json_mode=bool(args.json))
+    if args.command == "sell-quote":
+        return cmd_sell_quote(str(args.target or ""), json_mode=bool(args.json))
     if args.command == "providers":
         return cmd_providers(json_mode=bool(args.json))
     if args.command == "install-profile":

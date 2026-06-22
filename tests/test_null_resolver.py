@@ -7,6 +7,7 @@ from core.null_resolver import (
     NULL_DOMAIN_SIZE,
     decode_null_domain,
     domain_filters,
+    is_valid_x402_endpoint,
     pad_name64,
     resolve_x402_endpoint,
 )
@@ -74,6 +75,38 @@ class ResolveGuardTests(unittest.TestCase):
     def test_resolve_x402_endpoint_none_on_overflow(self) -> None:
         # name too long -> filters None -> resolve returns None, no network call
         self.assertIsNone(resolve_x402_endpoint("x" * 65))
+
+
+class EndpointValidatorTests(unittest.TestCase):
+    def test_accepts_https(self) -> None:
+        self.assertTrue(is_valid_x402_endpoint("https://parad0xlabs.com/x402"))
+        self.assertTrue(is_valid_x402_endpoint("https://pay.web0.null/x402?asset=usdc"))
+
+    def test_accepts_http_localhost_only(self) -> None:
+        self.assertTrue(is_valid_x402_endpoint("http://localhost:11435/x402"))
+        self.assertTrue(is_valid_x402_endpoint("http://127.0.0.1:11435/x402"))
+        # bare http to a remote host is rejected
+        self.assertFalse(is_valid_x402_endpoint("http://parad0xlabs.com/x402"))
+
+    def test_rejects_javascript_and_other_schemes(self) -> None:
+        self.assertFalse(is_valid_x402_endpoint("javascript:alert(1)"))
+        self.assertFalse(is_valid_x402_endpoint("data:text/html,<script>x</script>"))
+        self.assertFalse(is_valid_x402_endpoint("file:///etc/passwd"))
+        self.assertFalse(is_valid_x402_endpoint("ftp://parad0xlabs.com/x402"))
+
+    def test_rejects_empty_overlong_and_bad_charset(self) -> None:
+        self.assertFalse(is_valid_x402_endpoint(""))
+        # over the 128-byte on-chain field width
+        self.assertFalse(is_valid_x402_endpoint("https://parad0xlabs.com/" + "a" * 130))
+        # spaces / control bytes have no place in a stored URL
+        self.assertFalse(is_valid_x402_endpoint("https://parad0xlabs.com/ x402"))
+        self.assertFalse(is_valid_x402_endpoint("https://parad0xlabs.com/\nx402"))
+
+    def test_decode_blanks_unsafe_endpoint(self) -> None:
+        rec = decode_null_domain(_blob(endpoint="javascript:alert(1)"))
+        self.assertEqual(rec.x402_endpoint, "")
+        ok = decode_null_domain(_blob(endpoint="https://parad0xlabs.com/x402"))
+        self.assertEqual(ok.x402_endpoint, "https://parad0xlabs.com/x402")
 
 
 if __name__ == "__main__":

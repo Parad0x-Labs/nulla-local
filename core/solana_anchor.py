@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 
 from core import audit_logger
 
@@ -23,6 +24,16 @@ except ImportError:  # solders not installed -> anchoring degrades to no-op
 # a clickable Solana transaction whose memo carries the work-receipt hash.
 _MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
 _ANCHOR_TAG = b"nulla-receipt:"
+
+
+def anchor_enabled() -> bool:
+    """True only when receipt anchoring is explicitly opted in (NULLA_ANCHOR_RECEIPTS=1).
+
+    A real anchor broadcasts a SOL-spending memo tx, so it must never fire by
+    default. Both call sites (finalizer + the API service) gate on this single
+    helper so they cannot drift apart.
+    """
+    return os.environ.get("NULLA_ANCHOR_RECEIPTS") == "1"
 
 
 def build_memo_anchor_message(payer_pubkey: str, payload_hash: str, recent_blockhash: str) -> bytes:
@@ -110,4 +121,4 @@ def anchor_vault_proof(parent_task_id: str, final_response_hash: str, confidence
         return None
 
 
-__all__ = ["anchor_vault_proof", "build_memo_anchor_message", "submit_memo_anchor"]
+__all__ = ["anchor_enabled", "anchor_vault_proof", "build_memo_anchor_message", "submit_memo_anchor"]

@@ -8,6 +8,7 @@ from apps.nulla_api_server import create_app
 from core.nulla_wallet import NullaWallet
 from core.web.api.runtime import RuntimeServices
 from core.web0_gated_html import (
+    GateChallengeStore,
     NullaGateHandler,
     WalletKeyStore,
     decrypt_content_block,
@@ -100,3 +101,72 @@ def test_api_gate_unlock_route_verifies_signature_and_sets_cors_headers(tmp_path
     assert status == 200
     assert headers["access-control-allow-origin"] == "*"
     assert payload == {"aes_key": encrypted.secret.aes_key.hex()}
+
+
+def _signed_gate_body_for_challenge(wallet: NullaWallet, block_id: str, challenge: str) -> dict[str, str]:
+    return {
+        "block_id": block_id,
+        "wallet_pubkey": wallet.pubkey,
+        "nonce": challenge,
+        "signature": base64.b64encode(wallet.sign_message(challenge)).decode("ascii"),
+    }
+
+
+def test_challenge_store_nonce_changes_per_issue() -> None:
+    store = GateChallengeStore()
+    a = store.issue("block-1", "WALLET")
+    b = store.issue("block-1", "WALLET")
+    assert a != b  # a fresh server nonce per issue
+    assert a.startswith("nulla-gate-v2:block-1:WALLET:")
+
+
+def test_challenge_store_consumes_once_then_rejects_replay() -> None:
+    store = GateChallengeStore()
+    challenge = store.issue("block-1", "WALLET")
+    assert store.consume("block-1", "WALLET", challenge) is True
+    # single use: a second consume of the same nonce is rejected (replay closed)
+    assert store.consume("block-1", "WALLET", challenge) is False
+
+
+def test_challenge_store_rejects_expired_and_cross_binding() -> None:
+    store = GateChallengeStore(ttl_seconds=0.0)
+    expired = store.issue("block-1", "WALLET")
+    assert store.consume("block-1", "WALLET", expired) is False  # TTL already elapsed
+
+    fresh_store = GateChallengeStore()
+    challenge = fresh_store.issue("block-1", "WALLET")
+    # nonce bound to (block, wallet): cannot be replayed against another binding
+    assert fresh_store.consume("block-2", "WALLET", challenge) is False
+    assert fresh_store.consume("block-1", "OTHER", challenge) is False
+
+
+def test_handler_with_challenge_store_requires_fresh_nonce_and_blocks_replay(tmp_path: Path) -> None:
+    wallet = _wallet(tmp_path, "alpha")
+    encrypted = encrypt_content_block("private", [wallet.pubkey])
+    key_store = WalletKeyStore()
+    key_store.register_encrypted_block(encrypted)
+    challenge_store = GateChallengeStore()
+    handler = NullaGateHandler(key_store, challenge_store=challenge_store)
+    block_id = encrypted.block.block_id
+
+    # static v1 challenge is no longer accepted when a challenge store is wired
+    stale = _signed_gate_body(wallet, block_id)
+    assert handler.handle(stale) == {"error": "invalid_nonce"}
+
+    # fresh server-issued challenge unlocks exactly once
+    challenge = challenge_store.issue(block_id, wallet.pubkey)
+    body = _signed_gate_body_for_challenge(wallet, block_id, challenge)
+    assert handler.handle(body) == {"aes_key": encrypted.secret.aes_key.hex()}
+    # replaying the exact same body is rejected (nonce was burned)
+    assert handler.handle(body) == {"error": "invalid_nonce"}
+
+
+def test_handler_without_challenge_store_keeps_v1_behavior(tmp_path: Path) -> None:
+    wallet = _wallet(tmp_path, "alpha")
+    encrypted = encrypt_content_block("private", [wallet.pubkey])
+    key_store = WalletKeyStore()
+    key_store.register_encrypted_block(encrypted)
+    handler = NullaGateHandler(key_store)  # no challenge store -> backward compatible
+    body = _signed_gate_body(wallet, encrypted.block.block_id)
+    assert body["nonce"] == make_gate_challenge(encrypted.block.block_id, wallet.pubkey)
+    assert handler.handle(body) == {"aes_key": encrypted.secret.aes_key.hex()}

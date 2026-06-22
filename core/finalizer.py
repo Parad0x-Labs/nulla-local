@@ -7,7 +7,7 @@ from core import audit_logger
 from core.final_response_store import store_final_response
 from core.identity_manager import load_active_persona, render_with_persona
 from core.liquefy_bridge import export_task_bundle
-from core.solana_anchor import anchor_vault_proof
+from core.solana_anchor import anchor_enabled, anchor_vault_proof
 from core.task_reassembler import ReassembledPlan
 from core.task_reassembler import check_and_reassemble as reassemble_parent_task
 from storage.db import get_connection
@@ -183,7 +183,10 @@ def finalize_parent_response(parent_task_id: str, *, persona_id: str = "default"
     )
 
     export_task_bundle(parent_task_id)
-    anchor_vault_proof(parent_task_id, plan.result_hash or parent_task_id, plan.confidence)
+    # Gated: a real anchor broadcasts a SOL-spending tx, so only fire when opted in
+    # (shared helper keeps this in lockstep with the API service's gate).
+    if anchor_enabled():
+        anchor_vault_proof(parent_task_id, plan.result_hash or parent_task_id, plan.confidence)
 
     return FinalizedResponse(
         parent_task_id=parent_task_id,

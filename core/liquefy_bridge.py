@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import gzip
 import hashlib
 import json
@@ -54,9 +55,36 @@ def _vault_dir(category: str) -> Path:
 
 
 def _async_run(func):
+    def _guarded(*args, **kwargs):
+        # The export/telemetry work is best-effort background bookkeeping. A
+        # failure here (db hiccup, disk full, etc.) must never propagate out of
+        # the worker thread, where it would only surface as an unhandled-thread
+        # traceback. Swallow + audit so the caller is never affected.
+        try:
+            func(*args, **kwargs)
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                audit_logger.log(
+                    "liquefy_async_task_error",
+                    target_id=str(getattr(func, "__name__", "liquefy_async")),
+                    target_type="system",
+                    details={"error": str(exc)},
+                )
+
     def wrapper(*args, **kwargs):
-        worker = threading.Thread(target=func, args=args, kwargs=kwargs, daemon=True)
-        worker.start()
+        # Guard thread creation/start too: if the runtime cannot spawn a thread,
+        # the caller's hot path should not crash over background bookkeeping.
+        try:
+            worker = threading.Thread(target=_guarded, args=args, kwargs=kwargs, daemon=True)
+            worker.start()
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                audit_logger.log(
+                    "liquefy_async_spawn_error",
+                    target_id=str(getattr(func, "__name__", "liquefy_async")),
+                    target_type="system",
+                    details={"error": str(exc)},
+                )
 
     return wrapper
 
@@ -88,8 +116,9 @@ def export_task_bundle(parent_task_id: str) -> None:
 
 
 def _export_task_bundle_sync(parent_task_id: str) -> None:
-    conn = get_connection()
+    conn = None
     try:
+        conn = get_connection()
         parent = conn.execute("SELECT * FROM local_tasks WHERE task_id = ?", (parent_task_id,)).fetchone()
         if not parent:
             return
@@ -145,7 +174,9 @@ def _export_task_bundle_sync(parent_task_id: str) -> None:
     except Exception as exc:
         audit_logger.log("liquefy_vault_error", target_id=parent_task_id, target_type="task", details={"error": str(exc)})
     finally:
-        conn.close()
+        if conn is not None:
+            with contextlib.suppress(Exception):
+                conn.close()
 
 
 def _pack_bundle_via_liquefy(parent_task_id: str, bundle: dict[str, Any]):

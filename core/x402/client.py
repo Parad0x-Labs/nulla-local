@@ -55,14 +55,16 @@ USDC_MINT_DEVNET  = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
 PAYAI_FACILITATOR_MAINNET = "https://facilitator.payai.network"
 PAYAI_FACILITATOR_DEVNET  = "https://devnet.facilitator.payai.network"
 
-# Solana RPC endpoints
-SOLANA_RPC_MAINNET = "https://api.mainnet-beta.solana.com"
+# Solana RPC endpoints. Mainnet uses the keyless publicnode endpoint — the
+# api.mainnet-beta endpoint 403s on requests carrying an Origin header and is
+# banned for this stack; this constant is what effective_rpc broadcasts against.
+SOLANA_RPC_MAINNET = "https://solana-rpc.publicnode.com"
 SOLANA_RPC_DEVNET  = "https://api.devnet.solana.com"
 
 # ---------------------------------------------------------------------------
 # Parad0x / dna-x402 on-chain program IDs (mainnet-beta)
 # Multisig upgrade authority: 9M949AfyYCHp9hUk7crZZx3N6Y8sigyWBN6RM6tFq1q5
-# Source: configs/mainnet.commercial.json + docs/WEB0_MASTER_PLAN.md
+# Source: configs/mainnet.commercial.json
 # ---------------------------------------------------------------------------
 
 # Core receipt / ZK programs (2026-05-29 batch, under Squads multisig)
