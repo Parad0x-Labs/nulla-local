@@ -9,6 +9,7 @@ from core.execution import capabilities as execution_capabilities
 from core.execution.constants import (
     _HIVE_TOOL_INTENTS,
     _MUTATING_OPERATOR_INTENTS,
+    _PAYMENT_TOOL_INTENTS,
     _READ_ONLY_OPERATOR_INTENTS,
     _WEB_TOOL_INTENTS,
 )
@@ -20,6 +21,7 @@ from core.execution.operator_tools import (
     build_operator_action_intent as _build_operator_action_intent_impl,
 )
 from core.execution.operator_tools import execute_operator_tool as _execute_operator_tool_impl
+from core.execution.payment_tools import execute_payment_tool as _execute_payment_tool_impl
 from core.execution.planner import (
     _looks_like_workspace_bootstrap_request,
     plan_tool_workflow,
@@ -297,6 +299,18 @@ def execute_tool_intent(
             idempotency_key=idempotency_key,
         )
         return execution
+    if intent in _PAYMENT_TOOL_INTENTS:
+        execution = _execute_payment_tool(intent, arguments, source_context=source_context)
+        _maybe_store_tool_receipt(
+            execution,
+            receipt_key=receipt_key,
+            session_id=session_id,
+            checkpoint_id=checkpoint_id,
+            intent=intent,
+            arguments=arguments,
+            idempotency_key=idempotency_key,
+        )
+        return execution
 
     audit_logger.log(
         "tool_intent_unsupported",
@@ -436,6 +450,15 @@ def _execute_operator_tool(
         session_id=session_id,
         dispatch_operator_action_fn=dispatch_operator_action,
     )
+
+
+def _execute_payment_tool(
+    intent: str,
+    arguments: dict[str, Any],
+    *,
+    source_context: dict[str, Any] | None,
+) -> ToolIntentExecution:
+    return _execute_payment_tool_impl(intent, arguments, source_context=source_context)
 
 
 def _build_operator_action_intent(operator_kind: str, arguments: dict[str, Any]) -> OperatorActionIntent:

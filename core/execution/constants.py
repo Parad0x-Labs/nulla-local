@@ -304,6 +304,10 @@ _WEB_TOOL_INTENTS = {
     "web.research",
     "browser.render",
 }
+_PAYMENT_TOOL_INTENTS = {
+    "pay.x402",
+    "sell.quote",
+}
 _HIVE_TOOL_INTENTS = {
     "hive.list_available",
     "hive.list_research_queue",

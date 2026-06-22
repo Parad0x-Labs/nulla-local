@@ -634,6 +634,13 @@ def _tooling_guidance(*, has_openclaw_tools: bool) -> str:
         str(spec.get("intent") or "").strip() == "web0.open_builder_draft"
         for spec in runtime_specs
     )
+    runtime_intents = {str(spec.get("intent") or "").strip() for spec in runtime_specs}
+    sell_quote_wired = "sell.quote" in runtime_intents
+    pay_x402_wired = "pay.x402" in runtime_intents
+    if pay_x402_wired:
+        available_tools.insert(0, "gated x402 buy of external agent compute (approval + cap required)")
+    if sell_quote_wired:
+        available_tools.insert(0, "read-only x402 quote of NULLA's own compute")
     if web0_builder_wired:
         available_tools.insert(0, "local Web0 builder draft generation")
     if policy_engine.get("filesystem.allow_read_workspace", True):
@@ -675,6 +682,12 @@ def _tooling_guidance(*, has_openclaw_tools: bool) -> str:
         if web0_builder_wired
         else ""
     )
+    payment_guidance = (
+        "Use sell.quote freely to price NULLA's own compute for another agent — it is read-only and never spends. "
+        "For pay.x402 (buying external x402 compute), never spend USDC on your own: it stays safe by default and only returns a quote unless the user has given an explicit per-call allow_spend + approve opt-in and a max_spend_usdc cap."
+        if (sell_quote_wired or pay_x402_wired)
+        else ""
+    )
     return (
         "These action rules apply only when using tools or proposing real-world side effects; they do not restrict ordinary conversation. "
         f"{capability_line} "
@@ -682,6 +695,7 @@ def _tooling_guidance(*, has_openclaw_tools: bool) -> str:
         "Never claim you searched the web, checked Hive, fetched live data, or used an external tool unless concrete evidence from that action is present in this run. "
         f"{research_guidance} "
         f"{web0_guidance} "
+        f"{payment_guidance} "
         f"{approval_line}"
     )
 
