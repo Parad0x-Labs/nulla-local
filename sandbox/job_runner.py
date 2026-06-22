@@ -25,6 +25,16 @@ def _truncate(text: str, limit_kb: int) -> str:
     return encoded[-(limit_kb * 1024) :].decode("utf-8", errors="replace")
 
 
+def _decode_partial(captured: object) -> str:
+    # subprocess.TimeoutExpired.stdout/stderr may be None, str (text=True), or
+    # bytes depending on how far the read got; normalize to a string.
+    if captured is None:
+        return ""
+    if isinstance(captured, bytes):
+        return captured.decode("utf-8", errors="replace")
+    return str(captured)
+
+
 class JobRunner:
     def __init__(self, policy: ExecutionPolicy):
         self.policy = normalize_policy(policy)
@@ -47,15 +57,30 @@ class JobRunner:
         env["NO_PROXY"] = "*"
         env["no_proxy"] = "*"
 
-        completed = subprocess.run(
-            argv,
-            cwd=str(cwd_path),
-            capture_output=True,
-            text=True,
-            timeout=self.policy.max_seconds,
-            shell=False,
-            env=env,
-        )
+        try:
+            completed = subprocess.run(
+                argv,
+                cwd=str(cwd_path),
+                capture_output=True,
+                text=True,
+                timeout=self.policy.max_seconds,
+                shell=False,
+                env=env,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # The job exceeded its wall-clock budget. subprocess has already sent
+            # SIGKILL and reaped the child; surface a graceful non-zero result
+            # (with any captured partial output) instead of propagating, so a
+            # slow/hung job is a normal failed run rather than a caller crash.
+            partial_stdout = _decode_partial(exc.stdout)
+            partial_stderr = _decode_partial(exc.stderr)
+            timeout_note = f"Execution timed out after {self.policy.max_seconds}s and was terminated."
+            combined_stderr = f"{partial_stderr}\n{timeout_note}".strip() if partial_stderr else timeout_note
+            return ExecutionResult(
+                returncode=124,
+                stdout=_truncate(partial_stdout, self.policy.max_output_kb),
+                stderr=_truncate(combined_stderr, self.policy.max_output_kb),
+            )
         return ExecutionResult(
             returncode=int(completed.returncode),
             stdout=_truncate(completed.stdout, self.policy.max_output_kb),
