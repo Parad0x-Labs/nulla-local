@@ -68,6 +68,28 @@ _EXECUTION_REQUEST_MARKERS = (
     "write file",
     "write files",
     "replace in file",
+    # Natural file-mutation phrasing real users type from the chat/API surface.
+    # Without these, "create a file test.txt with hello" never trips the
+    # execution gate, so the tool loop is skipped and workspace.write_file is
+    # never reached even though the executor is fully wired.
+    "create a file",
+    "create the file",
+    "create file",
+    "write a file",
+    "write to file",
+    "write to a file",
+    "make a file",
+    "new file",
+    "save a file",
+    "save to file",
+    "save to a file",
+    "save it to",
+    "save this to",
+    "append to file",
+    "append to a file",
+    "add to file",
+    "overwrite file",
+    "overwrite a file",
     "folder",
     "directory",
     "mkdir",

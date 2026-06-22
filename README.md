@@ -78,7 +78,7 @@ Plugs into `nomic-embed-text` via Ollama (274MB, 768-dim). Falls back to a hash 
 
 ### Capability reporting
 
-`GET /api/runtime/capabilities` reports, per feature, whether it is implemented, simulated, or disabled — so payments show as simulated, WAN mesh as experimental, and live web lookup as off in local-only mode. `/healthz` reports commit + dirty bit. The runtime surfaces its own status.
+`GET /api/runtime/capabilities` reports, per feature, whether it is implemented, simulated, or disabled — so payments show as simulated, WAN mesh as experimental, and live web lookup as opt-in and off in the local-only profile (enable it on a non-local-only profile). `/healthz` reports commit + dirty bit. The runtime surfaces its own status.
 
 ---
 
@@ -144,11 +144,22 @@ Full install docs: [docs/INSTALL.md](docs/INSTALL.md)
 |---|---|---|---|
 | **macOS** (Apple Silicon) | Metal GPU via Ollama | kernel-enforced (`sandbox-exec`) | `.command` |
 | **Linux** | Ollama + native llama.cpp | kernel-enforced (`bwrap`/`unshare`/`firejail`) | `.sh` |
-| **Windows** | Ollama (CPU; consumer-GPU lane coming) | static network guard (`heuristic_only`) | `.bat` / PowerShell |
+| **Windows** (native host) | Ollama (CPU; consumer-GPU lane coming) | static command guard only (no kernel backend) | `.bat` / PowerShell |
+| **Windows + WSL2/Linux** | Ollama + native llama.cpp | kernel-enforced (`bwrap`/`unshare`/`firejail`) | `.sh` inside WSL2 |
 
-Apple Silicon is the primary development target. Temp paths, signal handling, and
-the sandbox all run cross-platform; on Windows the no-network job sandbox uses the
-static command guard (set `network_isolation_mode="heuristic_only"`).
+Apple Silicon is the primary development target. Temp paths, signal handling, chat,
+three-tier memory, the OpenClaw UI bridge, local Ollama inference, and the workspace
+tools all run on a **native Windows host** today.
+
+Full capability — kernel-enforced no-network job sandbox **and** live web lookup —
+wants **WSL2/Linux plus a non-local-only profile**:
+
+- **Kernel sandbox:** native Windows has no kernel network-namespace backend, so a
+  no-network job fails closed by default. Run under WSL2/Linux for `bwrap`/`unshare`/`firejail`
+  kernel enforcement, or set `network_isolation_mode="heuristic_only"` on a native host as an
+  explicit, informed override (static command guard only, no kernel isolation).
+- **Live web lookup:** opt-in and OFF in the local-only profile. Enable it on a non-local-only
+  profile (and/or `NULLA_ENABLE_WEB=1` when not local-only). See [Web Access](docs/INSTALL.md#web-access-opt-in).
 
 ---
 

@@ -189,7 +189,11 @@ def runtime_capability_snapshot(context: RuntimeContext | None = None) -> dict[s
     }
 
 
-_WEB_OPT_IN_REASON = "Web lookup is opt-in; enable with NULLA_ENABLE_WEB=1"
+_WEB_OPT_IN_REASON = (
+    "Live web lookup is opt-in and OFF in the local-only profile. "
+    "To enable it, run a non-local-only profile (and/or set NULLA_ENABLE_WEB=1 when not local-only). "
+    "In local-only the no-egress guarantee overrides the opt-in, so NULLA_ENABLE_WEB=1 alone will not turn it on."
+)
 
 
 def _browser_tools_capability() -> dict[str, Any]:

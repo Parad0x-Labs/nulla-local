@@ -46,6 +46,7 @@ from .constants import (
     _NAMED_PATH_RE,
     _OVERWRITE_FILE_RE,
     _PATH_STOP_WORDS,
+    _PLAIN_CREATE_FILE_WITH_CONTENT_RE,
     _START_CODE_MARKERS,
     _TOOL_INVENTORY_MARKERS,
     _URL_RE,
@@ -656,7 +657,12 @@ def _extract_workspace_writes_from_text(
             return ([{"path": path, "content": content, "mode": "write"}], directory)
 
     writes: list[dict[str, Any]] = []
-    for pattern in (_OVERWRITE_FILE_RE, _CREATE_NAMED_FILE_WITH_CONTENT_RE, _INLINE_CREATE_FILE_RE):
+    for pattern in (
+        _OVERWRITE_FILE_RE,
+        _CREATE_NAMED_FILE_WITH_CONTENT_RE,
+        _INLINE_CREATE_FILE_RE,
+        _PLAIN_CREATE_FILE_WITH_CONTENT_RE,
+    ):
         for match in pattern.finditer(raw):
             path = _clean_workspace_file_path(
                 str(match.group("path") or "").strip(),

@@ -134,6 +134,17 @@ _INLINE_CREATE_FILE_RE = re.compile(
     rf"\bcreate\s+(?:a\s+file(?:\s+named)?\s+)?[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?\s+(?:with(?:\s+exactly)?(?:\s+(?:this|the))?(?:\s+(?:line|content|code))(?:(?:\s*,?\s*[^:\n.]+?)\s*:|:\s*|\s+)|that\s+says:)\s*(?P<content>.+?)(?=(?:\.\s*(?:Then|Now|Inside it|Do not)\b)|$)",
     re.IGNORECASE | re.DOTALL,
 )
+# Plain natural phrasing the chat/API surface gets most often, e.g.
+# "create a file test.txt with hello", "write a file notes.md saying hi",
+# "make a file called out.txt containing done". Permissive content capture so a
+# bare value after with/saying/containing still resolves to workspace.write_file.
+_PLAIN_CREATE_FILE_WITH_CONTENT_RE = re.compile(
+    rf"\b(?:create|write|make|save|add)\s+(?:a\s+|the\s+|new\s+)*file(?:\s+(?:named|called))?\s+"
+    rf"[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?"
+    r"\s+(?:with(?:\s+(?:the\s+)?(?:text|content|contents|line|body))?|saying|containing|that\s+says|holding)\s*:?\s*"
+    r"(?P<content>.+?)(?=(?:\.\s*(?:Then|Now|Inside it|Do not)\b)|$)",
+    re.IGNORECASE | re.DOTALL,
+)
 _FOLDER_FIRST_CREATE_FILE_RE = re.compile(
     rf"\b(?:pls\s+)?(?:make|create|setup|set up)\s+(?:a\s+)?folder\s+(?P<directory>[A-Za-z0-9_./-]+)"
     r"(?:\s+(?:here|in\s+this\s+workspace))?"

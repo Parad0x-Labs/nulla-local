@@ -121,6 +121,28 @@ class JobRunnerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             self.assertIn("sandbox-ok", result.stdout)
 
+    def test_windows_missing_backend_error_names_heuristic_only_and_wsl2(self) -> None:
+        # On native Windows there is no kernel network-isolation backend, so a
+        # no-network 'auto' job must fail closed with an ACTIONABLE message that
+        # names the two real options: WSL2/Linux and the heuristic_only override.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = JobRunner(
+                ExecutionPolicy(
+                    workspace_root=Path(tmpdir),
+                    network_isolation_mode="auto",
+                )
+            )
+            with patch("sandbox.job_runner.os.name", "nt"), patch(
+                "sandbox.job_runner.sys.platform", "win32"
+            ), patch("sandbox.job_runner.shutil.which", return_value=None):
+                message = runner._no_kernel_isolation_message()
+
+        self.assertIn("heuristic_only", message)
+        self.assertIn("WSL2", message)
+        # Fail-closed default must be preserved: the override is named as an
+        # explicit choice, not silently applied.
+        self.assertIn("explicit", message.lower())
+
     def test_linux_bwrap_prefix_preferred_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             runner = JobRunner(
