@@ -149,6 +149,29 @@ def main() -> int:
 
             print(render_user_summary(build_user_summary()))
             continue
+        if user_text.lower().startswith("/resolve"):
+            from apps.nulla_cli import cmd_resolve
+
+            name = user_text[len("/resolve"):].strip()
+            if not name:
+                print("usage: /resolve <name>.null")
+                continue
+            cmd_resolve(name)
+            continue
+        if user_text.lower() in {"/manifest", "/capabilities"}:
+            from apps.nulla_cli import cmd_manifest
+
+            cmd_manifest()
+            continue
+        if user_text.lower().startswith("/quote"):
+            from apps.nulla_cli import cmd_sell_quote
+
+            target = user_text[len("/quote"):].strip()
+            if not target:
+                print("usage: /quote [null://service/path | <name>.null]")
+                continue
+            cmd_sell_quote(target)
+            continue
         try:
             result = agent.run_once(user_text, source_context=source_context)
         except Exception as exc:
