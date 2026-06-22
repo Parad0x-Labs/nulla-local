@@ -182,6 +182,81 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(write_text.call_args_list[0].args[0], "hello")
         self.assertEqual(result.details["path"], "test.txt")
 
+    def test_trailing_instruction_not_baked_into_file_content(self) -> None:
+        # Regression for the greedy create-file content captures: a trailing
+        # instruction after the body (" and then run the tests") must NOT be
+        # swallowed into the written file. The content stops at the conjunction.
+        source_context = {"surface": "api", "platform": "api", "workspace_root": "/tmp/nulla-router-regression"}
+        for user_text in (
+            "create a file a.txt with hello and then run the tests",
+            "create a file a.txt with content hello and then run the tests",
+            "create a file a.txt with hello and run the tests",
+        ):
+            decision = plan_tool_workflow(
+                user_text=user_text,
+                task_class="chat_conversation",
+                executed_steps=[],
+                source_context=source_context,
+            )
+            self.assertTrue(decision.handled, user_text)
+            self.assertIsNotNone(decision.next_payload, user_text)
+            self.assertEqual(decision.next_payload["intent"], "workspace.write_file", user_text)
+            self.assertEqual(decision.next_payload["arguments"]["path"], "a.txt", user_text)
+            self.assertEqual(decision.next_payload["arguments"]["content"], "hello", user_text)
+
+    def test_legit_single_file_content_with_bare_and_is_preserved(self) -> None:
+        # The conjunction stop must stay narrow: a bare " and " between words is
+        # real body text, not an instruction boundary, so it stays in the file.
+        source_context = {"surface": "api", "platform": "api", "workspace_root": "/tmp/nulla-router-regression"}
+        decision = plan_tool_workflow(
+            user_text="create a file greet.txt with hello and world",
+            task_class="chat_conversation",
+            executed_steps=[],
+            source_context=source_context,
+        )
+        self.assertTrue(decision.handled)
+        self.assertIsNotNone(decision.next_payload)
+        self.assertEqual(decision.next_payload["arguments"]["path"], "greet.txt")
+        self.assertEqual(decision.next_payload["arguments"]["content"], "hello and world")
+
+    def test_conjoined_two_file_request_yields_two_writes_with_split_content(self) -> None:
+        # Regression: "create a file x.txt with A and create a file y.txt with B"
+        # must NOT drop the second file or merge its text into the first. The
+        # planner emits one write per distinct file, in order, across steps.
+        source_context = {"surface": "api", "platform": "api", "workspace_root": "/tmp/nulla-router-regression"}
+        user_text = "create a file x.txt with A and create a file y.txt with B"
+
+        first = plan_tool_workflow(
+            user_text=user_text,
+            task_class="chat_conversation",
+            executed_steps=[],
+            source_context=source_context,
+        )
+        self.assertTrue(first.handled)
+        self.assertIsNotNone(first.next_payload)
+        self.assertEqual(first.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(first.next_payload["arguments"]["path"], "x.txt")
+        self.assertEqual(first.next_payload["arguments"]["content"], "A")
+
+        executed_steps = [
+            {
+                "tool_name": "workspace.write_file",
+                "arguments": {"path": "x.txt", "content": "A"},
+                "observation": {"intent": "workspace.write_file"},
+            }
+        ]
+        second = plan_tool_workflow(
+            user_text=user_text,
+            task_class="chat_conversation",
+            executed_steps=executed_steps,
+            source_context=source_context,
+        )
+        self.assertTrue(second.handled)
+        self.assertIsNotNone(second.next_payload)
+        self.assertEqual(second.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(second.next_payload["arguments"]["path"], "y.txt")
+        self.assertEqual(second.next_payload["arguments"]["content"], "B")
+
     def test_execute_hive_submit_result_uses_public_bridge(self) -> None:
         tracker = HiveActivityTracker(config=HiveActivityTrackerConfig(enabled=False, watcher_api_url=None))
         bridge = mock.Mock()

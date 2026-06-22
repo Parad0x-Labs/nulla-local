@@ -657,6 +657,7 @@ def _extract_workspace_writes_from_text(
             return ([{"path": path, "content": content, "mode": "write"}], directory)
 
     writes: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
     for pattern in (
         _OVERWRITE_FILE_RE,
         _CREATE_NAMED_FILE_WITH_CONTENT_RE,
@@ -670,7 +671,12 @@ def _extract_workspace_writes_from_text(
                 workspace_root=workspace_root,
             )
             content = str(match.group("content") or "").strip()
-            if path and content:
+            # Multiple patterns can match the same prompt (e.g. a "with the line"
+            # phrasing hits both the named and plain regexes). Keep only the first
+            # write per path so the higher-priority pattern's content wins and a
+            # conjoined two-file request yields exactly one write per distinct file.
+            if path and content and path not in seen_paths:
+                seen_paths.add(path)
                 writes.append({"path": path, "content": content, "mode": "write"})
     return writes, base_dir
 

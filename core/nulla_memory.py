@@ -15,6 +15,16 @@ from core.runtime_paths import active_nulla_home
 
 _BLOCK_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 
+# Lexical markers that signal a node is a value-CHANGE (supersedes a prior value
+# of the same fact) rather than a second distinct fact about the same entity.
+# Lowercase and >=3 chars to match _token_set tokenization.
+_SUPERSEDE_MARKERS = frozenset({
+    "moved", "move", "updated", "update", "changed", "change", "now",
+    "instead", "replaced", "replace", "supersedes", "superseded", "revised",
+    "corrected", "renamed", "switched", "switch", "longer", "rescheduled",
+    "bumped", "migrated",
+})
+
 
 @dataclass(frozen=True)
 class MemoryNode:
@@ -150,16 +160,19 @@ class NullaMemory:
             "CREATE INDEX IF NOT EXISTS idx_memory_nodes_live "
             "ON memory_nodes(agent_id, valid_to)"
         )
-        # backfill FTS for any node missing from it (e.g. DB created before upgrade)
+        # backfill FTS for any node missing from it (e.g. DB created before
+        # upgrade). Carry each node's OWN agent_id so a multi-agent DB opened by
+        # one agent does not mis-attribute other agents' rows to the opener
+        # (which would leak them into the opener's BM25 leg).
         try:
             missing = self._conn.execute(
-                "SELECT node_id, content, keywords FROM memory_nodes n "
+                "SELECT node_id, agent_id, content, keywords FROM memory_nodes n "
                 "WHERE NOT EXISTS (SELECT 1 FROM memory_fts f WHERE f.node_id = n.node_id)"
             ).fetchall()
             for row in missing:
                 self._conn.execute(
                     "INSERT INTO memory_fts (node_id, agent_id, content, keywords) VALUES (?, ?, ?, ?)",
-                    (row["node_id"], self._agent_id, str(row["content"]), str(row["keywords"])),
+                    (row["node_id"], str(row["agent_id"]), str(row["content"]), str(row["keywords"])),
                 )
         except sqlite3.Error:
             pass  # FTS is a best-effort leg; never block on it
@@ -457,22 +470,38 @@ class NullaMemory:
     def _temporal_collapse(
         self, scored: list[tuple[MemoryNode, float, str]]
     ) -> list[tuple[MemoryNode, float, str]]:
-        """Collapse same-topic memories to the NEWEST one: the latest value of a
-        fact wins over the stale value it replaced. Walk newest-first; a node is
-        a group representative unless it is near-duplicate (cosine >= COLLAPSE_SIM)
-        to an already-chosen newer rep, in which case the older node's relevance
-        boosts the newer rep's rank but the newer content is what surfaces."""
+        """Collapse a stale value to the NEWER one that supersedes it: the latest
+        value of a fact wins over the value it replaced. Walk newest-first; a node
+        is a group representative unless it BOTH is near-duplicate (cosine >=
+        COLLAPSE_SIM) to an already-chosen newer rep AND looks like a restatement
+        of the SAME fact rather than a second distinct fact about the same entity.
+
+        Embedding cosine alone is NOT enough: two distinct, never-superseded facts
+        about the same entity sit close in embedding space (cosine ~0.9) yet must
+        both survive. We require, on top of cosine, EITHER high token overlap
+        (a near-restatement) OR a shared subject AND an explicit supersession
+        marker on the newer node ("moved"/"updated"/"now"/"instead"/...). A bare
+        shared subject is deliberately insufficient — distinct same-entity facts
+        share the entity token — so those are preserved separately."""
         order = sorted(scored, key=lambda it: it[0].timestamp, reverse=True)
-        reps: list[list] = []  # [node, score, node_id]
+        reps: list[list] = []  # [node, score, node_id, token_set, subject_set]
         for node, score, nid in order:
+            node_tokens = _token_set(node.content)
+            node_subjects = node_tokens | {k.lower() for k in node.keywords if k}
+            marks_update = bool(node_subjects & _SUPERSEDE_MARKERS)
             merged = False
             for rep in reps:
-                if _cosine_similarity(node.embedding, rep[0].embedding) >= self._COLLAPSE_SIM:
+                if _cosine_similarity(node.embedding, rep[0].embedding) < self._COLLAPSE_SIM:
+                    continue
+                supersedes = _token_overlap(node_tokens, rep[3]) >= self._DEDUP_OVERLAP or (
+                    marks_update and bool(node_subjects & rep[4])
+                )
+                if supersedes:
                     rep[1] = max(rep[1], score)  # inherit the older phrasing's relevance
                     merged = True
                     break
             if not merged:
-                reps.append([node, score, nid])
+                reps.append([node, score, nid, node_tokens, node_subjects])
         return [(r[0], r[1], r[2]) for r in reps]
 
     def _bm25_scores(self, query_text: str) -> dict[str, float]:

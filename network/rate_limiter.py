@@ -14,6 +14,42 @@ _BREACHES: dict[str, int] = defaultdict(int)
 _LOCK = RLock()
 _WINDOW_SECONDS = 60.0
 
+# Hard cap on the number of distinct keys tracked. Without this the module
+# dicts grow one entry per distinct peer/nullifier forever (memory-exhaustion
+# / unbounded-growth vector). Stale keys whose window has fully drained are
+# evicted first; if still over the cap, the keys with the oldest activity are
+# dropped. A dropped key simply starts a fresh window on its next request.
+_MAX_TRACKED_KEYS = 50_000
+
+
+def _evict_locked(now: float, *, headroom: int = 0) -> None:
+    """Drop fully-drained keys, then trim to the cap by oldest activity.
+
+    ``headroom`` reserves space for keys about to be inserted, so that the
+    post-insert size still respects ``_MAX_TRACKED_KEYS``. Must be called while
+    ``_LOCK`` is held.
+    """
+    # First pass: remove keys whose sliding window has fully expired. These
+    # carry no rate-limiting state and are pure leak.
+    stale = [
+        key
+        for key, dq in _EVENTS.items()
+        if not dq or (now - dq[-1]) > _WINDOW_SECONDS
+    ]
+    for key in stale:
+        _EVENTS.pop(key, None)
+        _BREACHES.pop(key, None)
+
+    # Second pass: if an adversary churns through many fresh keys we can still
+    # exceed the cap. Trim the keys with the oldest most-recent event, leaving
+    # ``headroom`` slots free for the imminent insert.
+    overflow = len(_EVENTS) - (_MAX_TRACKED_KEYS - headroom)
+    if overflow > 0:
+        oldest = sorted(_EVENTS.items(), key=lambda kv: (kv[1][-1] if kv[1] else 0.0))
+        for key, _dq in oldest[:overflow]:
+            _EVENTS.pop(key, None)
+            _BREACHES.pop(key, None)
+
 # Per-process salt for the anonymous nullifier. Generated once at import; it
 # never leaves the process, so a nullifier cannot be reproduced or correlated
 # across restarts/peers. Pure-local: no crate, no network, no on-chain call.
@@ -65,6 +101,12 @@ def _consume(key: str, *, target_type: str, quarantine_on_abuse: bool) -> bool:
     now = time()
 
     with _LOCK:
+        # Bound growth: evict stale/overflow keys when a previously-unseen key
+        # would be added (the only moment the dicts can grow). Reserve one slot
+        # so the count stays <= _MAX_TRACKED_KEYS after this insert.
+        if key not in _EVENTS and len(_EVENTS) >= _MAX_TRACKED_KEYS:
+            _evict_locked(now, headroom=1)
+
         dq = _EVENTS[key]
 
         while dq and (now - dq[0]) > _WINDOW_SECONDS:

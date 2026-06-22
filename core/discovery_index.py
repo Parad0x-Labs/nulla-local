@@ -463,16 +463,24 @@ def upsert_peer_minimal(peer_id: str) -> None:
 def register_capability_ad(ad: CapabilityAd) -> None:
     upsert_peer_minimal(ad.agent_id)
 
+    # Trust is owned by the local reputation engine (peers.trust_score), NOT by
+    # the peer advertising itself. The routing-read trust_score column is seeded
+    # from our locally-held trust for this peer; the peer's self-declared value
+    # is retained only in self_reported_trust, which no routing/abuse gate reads.
+    # This stops a peer from self-promoting (trust=1.0 for preferential routing)
+    # or defaming a victim (trust=0.0) via the advertised value.
+    routing_trust = peer_trust(ad.agent_id)
+
     conn = get_connection()
     try:
         conn.execute(
             """
             INSERT OR REPLACE INTO agent_capabilities (
                 peer_id, status, capabilities_json, compute_class, supported_models_json, capacity, trust_score,
-                assist_filters_json, host_group_hint_hash,
+                self_reported_trust, assist_filters_json, host_group_hint_hash,
                 last_seen_at, created_at, updated_at
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 COALESCE((SELECT created_at FROM agent_capabilities WHERE peer_id = ?), ?),
                 ?
             )
@@ -484,6 +492,7 @@ def register_capability_ad(ad: CapabilityAd) -> None:
                 ad.compute_class,
                 json.dumps(ad.supported_models, sort_keys=True),
                 ad.capacity,
+                routing_trust,
                 ad.trust_score,
                 json.dumps(ad.assist_filters.model_dump(), sort_keys=True),
                 ad.assist_filters.host_group_hint_hash,
@@ -494,15 +503,17 @@ def register_capability_ad(ad: CapabilityAd) -> None:
             ),
         )
 
+        # Touch liveness only. The peer does NOT get to set its own trust_score
+        # here — that is recomputed solely by the reputation engine from
+        # observed behaviour (successful/failed shards, strikes).
         conn.execute(
             """
             UPDATE peers
-            SET trust_score = ?,
-                last_seen_at = ?,
+            SET last_seen_at = ?,
                 updated_at = ?
             WHERE peer_id = ?
             """,
-            (ad.trust_score, ad.timestamp.isoformat(), _utcnow(), ad.agent_id),
+            (ad.timestamp.isoformat(), _utcnow(), ad.agent_id),
         )
 
         conn.commit()
@@ -527,10 +538,12 @@ def record_bootstrap_presence(
             """
             INSERT OR REPLACE INTO agent_capabilities (
                 peer_id, status, capabilities_json, compute_class, supported_models_json, capacity, trust_score,
-                assist_filters_json, host_group_hint_hash,
+                self_reported_trust, assist_filters_json, host_group_hint_hash,
                 last_seen_at, created_at, updated_at
             ) VALUES (
-                ?, ?, ?, 'cpu_basic', '[]', ?, ?, '{}', ?, ?,
+                ?, ?, ?, 'cpu_basic', '[]', ?, ?,
+                COALESCE((SELECT self_reported_trust FROM agent_capabilities WHERE peer_id = ?), 0.5),
+                '{}', ?, ?,
                 COALESCE((SELECT created_at FROM agent_capabilities WHERE peer_id = ?), ?),
                 ?
             )
@@ -541,6 +554,7 @@ def record_bootstrap_presence(
                 json.dumps(capabilities, sort_keys=True),
                 capacity,
                 trust_score,
+                peer_id,
                 host_group_hint_hash,
                 _utcnow(),
                 peer_id,

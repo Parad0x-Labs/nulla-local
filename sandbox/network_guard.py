@@ -97,13 +97,57 @@ def parse_command(cmd: str) -> list[str]:
     return shlex.split(cmd, posix=True)
 
 
+# Global options that sit BEFORE the subcommand and take a value argument.
+# Without stripping these, a token like "git -C /tmp clone" pushes the real
+# subcommand ("clone") past the window we inspect, letting a network action
+# slip through the static guard. We strip the flag AND its value so the
+# subcommand is identified positionally as if the flags were absent.
+_OPTION_TAKES_VALUE: dict[str, set[str]] = {
+    "git": {"-C", "--git-dir", "--work-tree", "--namespace", "-c", "--exec-path"},
+    "npm": {"--prefix", "-C", "--cache", "-w", "--workspace"},
+    "npx": {"--prefix", "-C", "-p", "--package"},
+    "pnpm": {"--prefix", "-C", "--dir", "-w", "--workspace-root", "--filter", "-F"},
+    "yarn": {"--cwd"},
+    "pip": {"--cache-dir", "--log", "-c", "--config"},
+    "pip3": {"--cache-dir", "--log", "-c", "--config"},
+    "poetry": {"-C", "--directory"},
+    "cargo": {"-C", "--config", "-Z"},
+    "brew": {},
+}
+
+
+def _strip_leading_global_options(base: str, tokens: list[str]) -> list[str]:
+    """Drop leading global flags (and any value they consume) so the positional
+    subcommand can be found regardless of pre-subcommand options."""
+    takes_value = _OPTION_TAKES_VALUE.get(base, set())
+    index = 0
+    n = len(tokens)
+    while index < n:
+        token = tokens[index]
+        if not token.startswith("-"):
+            break
+        # "--flag=value" carries its own value; consume only this token.
+        if "=" in token:
+            index += 1
+            continue
+        if token in takes_value:
+            index += 2  # skip flag and its separate value
+            continue
+        index += 1  # value-less flag (e.g. "-q", "--quiet")
+    return tokens[index:]
+
+
 def _package_manager_uses_network(argv: list[str]) -> bool:
     if not argv:
         return False
     base = _basename(argv[0])
     if base not in _PACKAGE_MANAGER_BINARIES:
         return False
-    subcommands = [str(item or "").strip().lower() for item in argv[1:] if str(item or "").strip()]
+    raw = [str(item or "").strip() for item in argv[1:] if str(item or "").strip()]
+    if not raw:
+        return False
+    positional = _strip_leading_global_options(base, raw)
+    subcommands = [token.lower() for token in positional]
     if not subcommands:
         return False
     if base == "git" and subcommands[:1] == ["remote"]:

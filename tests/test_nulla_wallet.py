@@ -68,3 +68,51 @@ def test_wallet_balance_export_uses_injected_rpc_without_leaking_key(tmp_path: P
     assert exported["usdc_balance"] == 12.75
     assert "private" not in exported
     assert "seed" not in exported
+
+
+def _usdc_account(ui_amount: float) -> dict[str, object]:
+    return {
+        "account": {
+            "data": {
+                "parsed": {
+                    "info": {
+                        "tokenAmount": {"uiAmount": ui_amount},
+                    }
+                }
+            }
+        }
+    }
+
+
+def test_usdc_balance_sums_all_token_accounts(tmp_path: Path) -> None:
+    """A wallet can hold USDC across multiple associated token accounts; the
+    reported balance must be the SUM, not just the first account."""
+
+    def fake_rpc(method: str, params: list[object]) -> dict[str, object]:
+        if method == "getTokenAccountsByOwner":
+            return {"value": [_usdc_account(3.0), _usdc_account(4.5), _usdc_account(0.25)]}
+        raise AssertionError(method)
+
+    wallet = NullaWallet(runtime_home=tmp_path / "runtime", derivation_key=b"m" * 32, rpc_call=fake_rpc)
+    wallet.generate_and_save()
+
+    assert wallet.get_usdc_balance() == pytest.approx(7.75)
+
+
+def test_usdc_balance_skips_malformed_accounts_and_sums_rest(tmp_path: Path) -> None:
+    def fake_rpc(method: str, params: list[object]) -> dict[str, object]:
+        if method == "getTokenAccountsByOwner":
+            return {
+                "value": [
+                    _usdc_account(2.0),
+                    "not-a-dict",
+                    {"account": {"data": {"parsed": {"info": {}}}}},  # no tokenAmount
+                    _usdc_account(1.5),
+                ]
+            }
+        raise AssertionError(method)
+
+    wallet = NullaWallet(runtime_home=tmp_path / "runtime", derivation_key=b"n" * 32, rpc_call=fake_rpc)
+    wallet.generate_and_save()
+
+    assert wallet.get_usdc_balance() == pytest.approx(3.5)

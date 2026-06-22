@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -256,6 +257,11 @@ class ComputeRentalMarket:
         self._sessions: dict[str, RentalSession] = {}
         self._probe = HardwareProbe()
         self._x402_config = x402_config        # None → stub/local-only mode
+        # Guards the availability check+claim in rent() and the
+        # active→False transition in release() so concurrent callers can't
+        # double-book a single-tenant listing or double-settle a session.
+        # Reentrant so a lock-holder may call other guarded methods safely.
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Provider side
@@ -385,20 +391,35 @@ class ComputeRentalMarket:
         X402PaymentError  (from core.x402.client)
             If the x402 payment fails (devnet/mainnet modes only).
         """
-        if not listing.available:
-            raise ValueError(f"Listing {listing.node_id} is not available.")
         if duration_minutes < listing.min_rental_minutes:
             raise ValueError(
                 f"duration_minutes={duration_minutes} is below "
                 f"minimum {listing.min_rental_minutes} for this listing."
             )
 
+        # Atomically check availability and claim the listing. Doing the
+        # check-and-set under the lock means at most one of two concurrent
+        # renters wins the single-tenant listing; the loser sees
+        # available=False and raises below.
+        with self._lock:
+            if not listing.available:
+                raise ValueError(f"Listing {listing.node_id} is not available.")
+            listing.available = False  # mark as occupied (single-tenant)
+
         session_id = f"sess-{uuid.uuid4().hex[:12]}"
 
         # ── x402 payment (skipped when no config / stub mode) ────────────
+        # Done outside the lock — never hold the lock across a network/RPC
+        # call. If payment fails, release the claim so the listing is rentable
+        # again, then re-raise.
         receipt = None
         if self._x402_config is not None and listing.currency == "USDC":
-            receipt = self._pay_x402(listing, duration_minutes, session_id)
+            try:
+                receipt = self._pay_x402(listing, duration_minutes, session_id)
+            except Exception:
+                with self._lock:
+                    listing.available = True
+                raise
 
         session = RentalSession(
             session_id=session_id,
@@ -407,8 +428,8 @@ class ComputeRentalMarket:
             started_at=time.time(),
             x402_receipt=receipt,
         )
-        listing.available = False  # mark as occupied (single-tenant stub)
-        self._sessions[session.session_id] = session
+        with self._lock:
+            self._sessions[session.session_id] = session
         return session
 
     def _pay_x402(
@@ -463,11 +484,18 @@ class ComputeRentalMarket:
         -------
         WorkProof
         """
-        if not session.active:
-            raise ValueError(f"Session {session.session_id} is already closed.")
-
-        session.active = False
-        session.listing.available = True
+        # Atomically check-and-flip active so two concurrent release() calls
+        # can't both pass the guard and emit duplicate WorkProofs / re-mark the
+        # listing twice. Exactly one caller wins; the other sees active=False
+        # and raises. The lock is held only for the state transition — the
+        # WorkProof is computed below, outside the lock.
+        with self._lock:
+            if not session.active:
+                raise ValueError(
+                    f"Session {session.session_id} is already closed."
+                )
+            session.active = False
+            session.listing.available = True
 
         ended_at = time.time()
         elapsed_minutes = (ended_at - session.started_at) / 60

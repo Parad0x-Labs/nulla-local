@@ -360,7 +360,20 @@ def spawn_limited_worker(
         finally:
             daemon._local_worker_sem.release()
 
-    threading.Thread(target=_runner, name=name, daemon=True).start()
+    try:
+        threading.Thread(target=_runner, name=name, daemon=True).start()
+    except Exception as exc:
+        # Thread.start() failed before _runner could run, so its finally-block
+        # release will never fire. Release the permit here or capacity leaks
+        # permanently (bleeds toward 0 on repeated spawn failures).
+        daemon._local_worker_sem.release()
+        audit_logger.log(
+            "local_worker_spawn_failed",
+            target_id=target_id,
+            target_type="daemon",
+            details={"worker_name": name, "error": str(exc)},
+        )
+        return False
     return True
 
 

@@ -51,6 +51,18 @@ USDC_DECIMALS = 6                                     # USDC has 6 decimal place
 USDC_MINT_MAINNET = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 USDC_MINT_DEVNET  = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
 
+def usdc_to_atomic(amount_usdc: float) -> int:
+    """Convert a USDC amount to atomic units (6 decimals), rounding to nearest.
+
+    Truncating (``int(amount_usdc * 10**6)``) undercounts: 0.0000019 USDC would
+    floor to 1 atomic unit instead of 2, and float artefacts like
+    1.999999... * 10**6 would drop a whole unit. Rounding keeps the on-chain
+    transfer amount consistent with the rounded values sent to the facilitator
+    /quote and /receipt endpoints (both ``round(amount_usdc, 6)``).
+    """
+    return round(amount_usdc * (10 ** USDC_DECIMALS))
+
+
 # PayAI facilitator — primary Solana x402 facilitator (public beta)
 PAYAI_FACILITATOR_MAINNET = "https://facilitator.payai.network"
 PAYAI_FACILITATOR_DEVNET  = "https://devnet.facilitator.payai.network"
@@ -338,6 +350,32 @@ class X402Client:
                 f"x402 live payment failed: {exc}"
             ) from exc
 
+    def _load_payer_keypair(self):
+        """Load the payer's solders Keypair from the configured JSON keypair.
+
+        A Solana CLI JSON keypair is the 64-byte secret = 32-byte Ed25519 seed
+        || 32-byte pubkey. solders' ``Keypair.from_bytes`` expects all 64 bytes;
+        the first 32 are the seed. We build from the seed (the source of truth)
+        via ``from_seed`` so solders derives the matching pubkey. Slicing to
+        ``[:32]`` and feeding it to ``from_bytes`` raises "expected a sequence of
+        length 64" and breaks signing on the live (devnet/mainnet) path.
+
+        Returns the solders ``Keypair``. Imports only solders so the keypair
+        path can be exercised without the heavier ``solana`` / ``spl`` packages.
+        """
+        import json as _json
+
+        if not self.config.keypair_path:
+            raise X402PaymentError(
+                "keypair_path is required for DEVNET/MAINNET mode"
+            )
+
+        from solders.keypair import Keypair as SoldersKeypair  # type: ignore
+
+        with open(self.config.keypair_path) as f:
+            kp_data = _json.load(f)
+        return SoldersKeypair.from_seed(bytes(kp_data[:32]))
+
     def _solana_pay(
         self,
         amount_usdc: float,
@@ -345,19 +383,15 @@ class X402Client:
         session_id: str,
     ) -> X402Receipt:
         """Inner Solana payment implementation."""
-        import json as _json
+        # ── 1. Load keypair (validates keypair_path before heavier imports) ──
+        payer = self._load_payer_keypair()
+        payer_pubkey = payer.pubkey()
 
-        # ── 1. Load keypair ──────────────────────────────────────────────
-        if not self.config.keypair_path:
-            raise X402PaymentError(
-                "keypair_path is required for DEVNET/MAINNET mode"
-            )
-
+        import requests as _req
         from solana.rpc.api import Client as SolanaClient  # type: ignore
         from solana.transaction import Transaction  # type: ignore
-        from solders.keypair import Keypair as SoldersKeypair  # type: ignore
         from solders.pubkey import Pubkey  # type: ignore
-        from spl.token.instructions import (
+        from spl.token.instructions import (  # type: ignore
             TransferParams,
             get_associated_token_address,
         )
@@ -365,13 +399,7 @@ class X402Client:
             transfer as spl_transfer,
         )
 
-        with open(self.config.keypair_path) as f:
-            kp_data = _json.load(f)
-        payer = SoldersKeypair.from_bytes(bytes(kp_data[:32]))
-        payer_pubkey = payer.pubkey()
-
         # ── 2. Get facilitator quote (escrow ATA + fee breakdown) ────────
-        import requests as _req
         resp = _req.post(
             f"{self.config.effective_facilitator}/quote",
             json={
@@ -389,7 +417,7 @@ class X402Client:
             )
         quote_data = resp.json()
         escrow_ata: str = quote_data["escrow_ata"]
-        lamports_atomic: int = int(amount_usdc * (10 ** USDC_DECIMALS))
+        lamports_atomic: int = usdc_to_atomic(amount_usdc)
 
         # ── 3. Build SPL token transfer ──────────────────────────────────
         usdc_mint_pk   = Pubkey.from_string(self.config.effective_usdc_mint)

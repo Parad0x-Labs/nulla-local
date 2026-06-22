@@ -495,6 +495,7 @@ CREATE TABLE IF NOT EXISTS agent_capabilities (
     supported_models_json TEXT NOT NULL DEFAULT '[]',
     capacity INTEGER NOT NULL DEFAULT 0,
     trust_score REAL NOT NULL DEFAULT 0.5,
+    self_reported_trust REAL NOT NULL DEFAULT 0.5,
     assist_filters_json TEXT NOT NULL DEFAULT '{}',
     host_group_hint_hash TEXT,
     last_seen_at TEXT NOT NULL,
@@ -696,6 +697,7 @@ CREATE TABLE IF NOT EXISTS finalized_responses (
     rendered_persona_text TEXT,
     status_marker TEXT,
     confidence_score REAL,
+    anchored_signature TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1271,6 +1273,8 @@ def run_migrations(db_path=None) -> None:
         _add_column_if_missing(conn, "agent_capabilities", "host_group_hint_hash", "TEXT")
         _add_column_if_missing(conn, "agent_capabilities", "compute_class", "TEXT NOT NULL DEFAULT 'cpu_basic'")
         _add_column_if_missing(conn, "agent_capabilities", "supported_models_json", "TEXT NOT NULL DEFAULT '[]'")
+        _add_column_if_missing(conn, "agent_capabilities", "self_reported_trust", "REAL NOT NULL DEFAULT 0.5")
+        _add_column_if_missing(conn, "task_offers", "claimed_by", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "task_claims", "host_group_hint_hash", "TEXT")
         _add_column_if_missing(conn, "task_results", "result_hash", "TEXT")
         _add_column_if_missing(conn, "capability_tokens", "granted_to", "TEXT NOT NULL DEFAULT ''")
@@ -1292,6 +1296,7 @@ def run_migrations(db_path=None) -> None:
         _add_column_if_missing(conn, "compute_credit_ledger", "receipt_hash", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "task_capsules", "parent_task_ref", "TEXT")
         _add_column_if_missing(conn, "task_capsules", "verification_of_task_id", "TEXT")
+        _add_column_if_missing(conn, "finalized_responses", "anchored_signature", "TEXT")
         _add_column_if_missing(conn, "task_assignments", "capability_token_id", "TEXT")
         _add_column_if_missing(conn, "task_assignments", "lease_expires_at", "TEXT")
         _add_column_if_missing(conn, "task_assignments", "last_progress_state", "TEXT NOT NULL DEFAULT ''")
