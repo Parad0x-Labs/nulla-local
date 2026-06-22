@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -154,6 +155,18 @@ def _init_dispatch_budget_table() -> None:
 
 def _utcnow_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _unique_receipt_id(prefix: str) -> str:
+    """Build a collision-proof auto-generated receipt/escrow id.
+
+    ``_utcnow_iso`` only has second granularity, so two distinct ops in the same
+    wall-clock second that fall back to a timestamped default would share an id
+    and the second one would be mis-detected as a replay. We append a uuid4 hex
+    so every auto-generated id is unique. Callers that pass an explicit
+    ``receipt_id`` keep their exact value (idempotency is preserved).
+    """
+    return f"{prefix}:{uuid.uuid4().hex}"
 
 
 def _utc_day_bucket(now: datetime | None = None) -> str:
@@ -521,7 +534,7 @@ def reserve_swarm_dispatch_budget(
 
         balance = _credit_balance_in_tx(conn, peer_id)
         if balance >= charge_amount:
-            escrow_id = receipt_id or f"escrow:{reason}"
+            escrow_id = receipt_id or _unique_receipt_id(f"escrow:{reason}")
             conn.execute(
                 """
                 INSERT INTO compute_credit_ledger (
@@ -630,7 +643,13 @@ def escrow_credits_for_task(
     if amount <= 0:
         return True
     _init_ledger_table()
-    escrow_id = receipt_id or f"escrow:{parent_task_id}"
+    # An explicit receipt_id is an idempotency key: a re-run that finds the same
+    # row already present is a genuine no-op success. An auto-generated id is made
+    # unique per call (second-granularity timestamps alone collide), so a match on
+    # one would be an id clash that moved no funds — report that as failure rather
+    # than a value-losing false 'success'.
+    explicit_receipt = bool(receipt_id)
+    escrow_id = receipt_id or _unique_receipt_id(f"escrow:{parent_task_id}")
     now_iso = _utcnow_iso()
     conn = get_connection()
     try:
@@ -639,7 +658,7 @@ def escrow_credits_for_task(
         conn.execute("BEGIN IMMEDIATE")
         if _receipt_exists(conn, escrow_id):
             conn.rollback()
-            return True
+            return explicit_receipt
         balance = _credit_balance_in_tx(conn, poster_peer_id)
         if balance < amount:
             conn.rollback()
@@ -1012,7 +1031,7 @@ def transfer_credits(
         return False
     _init_ledger_table()
     now_iso = _utcnow_iso()
-    send_receipt = receipt_id or f"transfer:{from_peer_id}:{to_peer_id}:{now_iso}"
+    send_receipt = receipt_id or _unique_receipt_id(f"transfer:{from_peer_id}:{to_peer_id}:{now_iso}")
     recv_receipt = f"{send_receipt}:recv"
     conn = get_connection()
     try:

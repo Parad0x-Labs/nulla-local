@@ -26,6 +26,25 @@ class NetworkGuardTests(unittest.TestCase):
     def test_non_network_command_passes(self) -> None:
         self.assertFalse(command_uses_network(["python3", "-c", "print('ok')"]))
 
+    def test_global_flag_before_subcommand_does_not_evade_detection(self) -> None:
+        # Regression: a global option that consumes a value (e.g. "-C <dir>",
+        # "--prefix <dir>", "--cwd <dir>") used to push the real network
+        # subcommand past the inspected window, letting it slip through.
+        self.assertTrue(command_uses_network(parse_command("npm --prefix /tmp install left-pad")))
+        self.assertTrue(command_uses_network(parse_command("yarn --cwd /tmp add vite")))
+        self.assertTrue(command_uses_network(parse_command("git -C /tmp pull")))
+        self.assertTrue(command_uses_network(parse_command("pnpm --dir /tmp install")))
+        self.assertTrue(command_uses_network(parse_command("cargo -Z unstable install ripgrep")))
+
+    def test_global_flag_with_equals_value_does_not_evade_detection(self) -> None:
+        self.assertTrue(command_uses_network(parse_command("git --git-dir=/tmp/.git fetch")))
+
+    def test_global_flag_before_non_network_subcommand_still_passes(self) -> None:
+        # Stripping the flags must not turn a local subcommand into a network one.
+        self.assertFalse(command_uses_network(parse_command("git -C /tmp status")))
+        self.assertFalse(command_uses_network(parse_command("npm --prefix /tmp run build")))
+        self.assertFalse(command_uses_network(parse_command("yarn --cwd /tmp build")))
+
 
 if __name__ == "__main__":
     unittest.main()

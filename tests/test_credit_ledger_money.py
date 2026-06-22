@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import unittest
 import uuid
+from unittest import mock
 
+from core import credit_ledger
 from core.credit_ledger import (
     USDC_ATOMIC_PER_UNIT,
     _allocate_pool_atomic,
@@ -26,6 +28,7 @@ from core.credit_ledger import (
     get_credit_balance,
     get_escrow_for_task,
     settle_hive_task_escrow,
+    transfer_credits,
     usdc_to_atomic,
 )
 from storage.db import get_connection
@@ -192,6 +195,74 @@ class CreditLedgerMoneyTests(unittest.TestCase):
             )
         finally:
             conn.close()
+
+    # ---- (4) same-second auto-generated ids do not collide ---------------------
+
+    def test_two_same_second_transfers_both_move_funds(self) -> None:
+        # ``_utcnow_iso`` only has second granularity. Two transfers between the
+        # same pair in the same wall-clock second fall back to the same default
+        # receipt id; pre-fix the second was mis-detected as a replay and dropped
+        # (returned False, no funds moved). The auto-generated id must be unique
+        # so both succeed and both move funds.
+        sender = f"sender-{uuid.uuid4().hex}"
+        receiver = f"receiver-{uuid.uuid4().hex}"
+        _seed(sender, 10.0)
+
+        frozen_second = "2026-06-22T12:00:00Z"
+        with mock.patch.object(credit_ledger, "_utcnow_iso", return_value=frozen_second):
+            first = transfer_credits(sender, receiver, 3.0, reason="peer_transfer")
+            second = transfer_credits(sender, receiver, 4.0, reason="peer_transfer")
+
+        self.assertTrue(first)
+        self.assertTrue(second)
+        # Both debits and both credits landed: sender 10 - 3 - 4, receiver 3 + 4.
+        self.assertAlmostEqual(get_credit_balance(sender), 3.0, places=4)
+        self.assertAlmostEqual(get_credit_balance(receiver), 7.0, places=4)
+
+    def test_explicit_transfer_receipt_id_is_still_idempotent(self) -> None:
+        # A caller-supplied receipt_id remains an idempotency key: the same id
+        # replayed moves funds exactly once.
+        sender = f"sender-{uuid.uuid4().hex}"
+        receiver = f"receiver-{uuid.uuid4().hex}"
+        _seed(sender, 10.0)
+        explicit = f"transfer-{uuid.uuid4().hex}"
+
+        self.assertTrue(transfer_credits(sender, receiver, 3.0, receipt_id=explicit))
+        self.assertFalse(transfer_credits(sender, receiver, 3.0, receipt_id=explicit))
+        self.assertAlmostEqual(get_credit_balance(sender), 7.0, places=4)
+        self.assertAlmostEqual(get_credit_balance(receiver), 3.0, places=4)
+
+    def test_two_same_second_escrows_same_task_both_move_funds(self) -> None:
+        # Two escrow reservations for the same parent_task_id in the same second
+        # fell back to the same ``escrow:{task}`` id. Pre-fix the second matched
+        # ``_receipt_exists`` and returned True WITHOUT moving funds (a value-
+        # losing false success). The auto-generated id must be unique so each
+        # reservation actually debits the poster.
+        poster = f"poster-{uuid.uuid4().hex}"
+        task_id = f"task-{uuid.uuid4().hex}"
+        _seed(poster, 10.0)
+
+        frozen_second = "2026-06-22T12:00:00Z"
+        with mock.patch.object(credit_ledger, "_utcnow_iso", return_value=frozen_second):
+            first = escrow_credits_for_task(poster, task_id, 3.0)
+            second = escrow_credits_for_task(poster, task_id, 4.0)
+
+        self.assertTrue(first)
+        self.assertTrue(second)
+        # Both holds debited the poster: 10 - 3 - 4 == 3.
+        self.assertAlmostEqual(get_credit_balance(poster), 3.0, places=4)
+
+    def test_explicit_escrow_receipt_id_replay_is_idempotent_success(self) -> None:
+        # An explicit receipt_id replay is a genuine no-op success (True) and
+        # debits the poster exactly once.
+        poster = f"poster-{uuid.uuid4().hex}"
+        task_id = f"task-{uuid.uuid4().hex}"
+        _seed(poster, 10.0)
+        explicit = f"escrow-{uuid.uuid4().hex}"
+
+        self.assertTrue(escrow_credits_for_task(poster, task_id, 3.0, receipt_id=explicit))
+        self.assertTrue(escrow_credits_for_task(poster, task_id, 3.0, receipt_id=explicit))
+        self.assertAlmostEqual(get_credit_balance(poster), 7.0, places=4)
 
 
 if __name__ == "__main__":

@@ -488,7 +488,12 @@ def dispatch_request(
                 from network.signer import get_local_peer_id
                 from storage.task_offer_store import claim_task_offer
 
-                helper_id = str(payload.get("helper_peer_id") or get_local_peer_id())
+                # The claimant is the SIGNED identity (request_meta), never the
+                # caller-supplied helper_peer_id — recording an attacker-named
+                # wallet here would let it later collect the escrow. Fall back to
+                # the local peer id only for unsigned/local dispatch.
+                signed_peer_id = _signed_peer_id(request_meta)
+                helper_id = signed_peer_id or get_local_peer_id()
                 if not claim_task_offer(task_id, helper_id):
                     return _error(409, "Task already claimed or not found")
                 return _ok({"task_id": task_id, "status": "claimed", "helper_peer_id": helper_id})
@@ -497,18 +502,36 @@ def dispatch_request(
                 result_hash = str(payload.get("result_hash") or "")
                 from core.credit_ledger import get_escrow_for_task, release_escrow_to_helper
                 from network.signer import get_local_peer_id
-                from storage.task_offer_store import complete_task_offer
+                from storage.task_offer_store import complete_task_offer, get_task_offer_claimed_by
 
-                helper_id = str(payload.get("helper_peer_id") or get_local_peer_id())
+                # The payout recipient is derived from the SIGNED identity, never
+                # from the attacker-controlled request body (helper_peer_id). A
+                # caller-named wallet must never receive the escrow remainder.
+                signed_peer_id = _signed_peer_id(request_meta)
+                completer_id = signed_peer_id or get_local_peer_id()
+                if not completer_id:
+                    return _error(403, "Signed identity required to complete a task.")
+                claimed_by = get_task_offer_claimed_by(task_id)
+                if claimed_by and completer_id != claimed_by:
+                    return _error(403, "Only the peer that claimed this task may complete it.")
+                # Pay the recorded claimer when known, otherwise the verified
+                # completer (legacy rows that never stored claimed_by). Either
+                # way the recipient is an authenticated identity, not the body.
+                payout_recipient = claimed_by or completer_id
                 complete_task_offer(task_id, result_hash)
                 escrow = get_escrow_for_task(task_id)
                 released = 0.0
                 if escrow and escrow.get("status") == "active":
                     payout = float(escrow.get("total_escrowed") or 0) - float(escrow.get("total_released") or 0)
                     if payout > 0:
-                        release_escrow_to_helper(task_id, helper_id, payout)
+                        release_escrow_to_helper(task_id, payout_recipient, payout)
                         released = payout
-                return _ok({"task_id": task_id, "status": "complete", "credits_released": released})
+                return _ok({
+                    "task_id": task_id,
+                    "status": "complete",
+                    "credits_released": released,
+                    "helper_peer_id": payout_recipient,
+                })
             if clean_path == "/v1/credits/settle":
                 from core.credit_ledger import reconcile_ledger
                 from network.signer import get_local_peer_id
@@ -1164,6 +1187,16 @@ def _resolve_write_rate_limit(
     if _requires_public_hive_quota(host, clean_path):
         return f"hive:{signer_peer_id}:{clean_path}", signed_limit
     return f"signed:{signer_peer_id}", signed_limit
+
+
+def _signed_peer_id(request_meta: dict[str, Any] | None) -> str:
+    """Return the verified Ed25519 signer for this request, or '' when unsigned.
+
+    ``request_meta`` is populated by :func:`unwrap_signed_write_with_meta` after
+    the signature has been verified, so ``signer_peer_id`` is a trustworthy
+    identity — unlike anything in the request body.
+    """
+    return str(dict(request_meta or {}).get("signer_peer_id") or "").strip()
 
 
 def _ok(result: Any) -> tuple[int, dict[str, Any]]:

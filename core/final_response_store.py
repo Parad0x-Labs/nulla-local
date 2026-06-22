@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import sqlite3
+import threading
 from typing import Any
 
 from storage.db import get_connection
+
+# Serializes the defensive column-ensure across threads so two concurrent
+# background anchor writers can never both issue the ADD COLUMN at once.
+_ENSURE_COLUMN_LOCK = threading.Lock()
 
 
 def _table_columns(conn: Any, table_name: str) -> set[str]:
@@ -11,14 +17,30 @@ def _table_columns(conn: Any, table_name: str) -> set[str]:
 
 
 def _ensure_anchored_signature_column(conn: Any) -> None:
-    """Additive, idempotent migration for the on-chain anchor tx signature.
+    """Additive, idempotent + thread-safe ensure for the anchor tx signature column.
 
-    The base schema (storage/migrations.py) predates anchor capture, so older
-    databases lack this column. We add it lazily and only when missing, leaving
-    every existing row + value untouched (nullable, no default).
+    The current schema (storage/migrations.py) creates ``anchored_signature`` in
+    the ``finalized_responses`` DDL and via the additive migration block, so on a
+    migrated database this ensure finds the column already present and does
+    nothing. It survives only as a defensive fallback for a connection that
+    somehow predates that migration.
+
+    Two background anchor threads can call this concurrently. Without coordination
+    both could see the column missing and both run ``ALTER TABLE ADD COLUMN`` —
+    the second raising ``duplicate column name``. We take a process-wide lock and
+    treat that specific OperationalError as success so the add is effectively
+    idempotent and never propagates as an error that would lose the signature.
     """
-    if "anchored_signature" not in _table_columns(conn, "finalized_responses"):
-        conn.execute("ALTER TABLE finalized_responses ADD COLUMN anchored_signature TEXT")
+    with _ENSURE_COLUMN_LOCK:
+        if "anchored_signature" in _table_columns(conn, "finalized_responses"):
+            return
+        try:
+            conn.execute("ALTER TABLE finalized_responses ADD COLUMN anchored_signature TEXT")
+        except sqlite3.OperationalError as exc:
+            # A racing writer (another process, or a connection that bypassed the
+            # lock) already added the column. Anything else is a real failure.
+            if "duplicate column name" not in str(exc).lower():
+                raise
 
 
 def store_final_response(parent_task_id: str, raw: str, rendered: str, status: str, confidence: float) -> None:

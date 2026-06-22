@@ -6,15 +6,64 @@ import subprocess
 import sys
 from pathlib import Path
 
-# macOS Seatbelt profile: allow everything the job needs locally, deny all
-# network (inbound, outbound, bind, system sockets). Gives the same "no network
-# egress" guarantee as Linux `unshare -n` / `bwrap --unshare-net`, enforced by
-# the kernel rather than by the static command heuristic.
-_MACOS_DENY_NETWORK_PROFILE = "(version 1)(allow default)(deny network*)"
-
 from sandbox.container_adapter import ExecutionResult
 from sandbox.network_guard import command_uses_network
-from sandbox.resource_limits import ExecutionPolicy, normalize_policy, path_within_roots
+from sandbox.resource_limits import (
+    ExecutionPolicy,
+    normalize_policy,
+    path_args_within_roots,
+    path_within_roots,
+)
+
+
+def _seatbelt_subpath_literal(path: Path) -> str:
+    # Seatbelt string literals are double-quoted; escape embedded quotes/backslashes.
+    escaped = str(path).replace("\\", "\\\\").replace('"', '\\"')
+    return f'(subpath "{escaped}")'
+
+
+def _macos_confined_profile(allowed_roots: tuple[Path, ...]) -> str:
+    """Build a Seatbelt profile that denies all network egress AND confines
+    file *writes* to the allowed workspace roots.
+
+    Reads stay permitted so interpreters/tooling can load their stdlib and
+    dylibs without bespoke allow-lists; the OS-independent path-argument guard
+    in :meth:`JobRunner.run` is what blocks reads of absolute paths outside the
+    workspace. Writes are denied by the kernel so a job cannot tamper with or
+    persist outside its workspace even if the static guard is bypassed.
+    """
+    write_roots: list[Path] = []
+    seen: set[str] = set()
+    for root in allowed_roots:
+        for variant in _path_variants(root):
+            key = str(variant)
+            if key not in seen:
+                seen.add(key)
+                write_roots.append(variant)
+    allow_clauses = "".join(_seatbelt_subpath_literal(p) for p in write_roots)
+    # /dev is needed for normal stdio (e.g. /dev/null, /dev/urandom).
+    allow_clauses += '(subpath "/dev")'
+    return (
+        "(version 1)"
+        "(allow default)"
+        "(deny network*)"
+        "(deny file-write*)"
+        f"(allow file-write* {allow_clauses})"
+    )
+
+
+def _path_variants(path: Path) -> tuple[Path, ...]:
+    # macOS aliases /tmp -> /private/tmp and /var -> /private/var. The policy
+    # stores the resolved path; include the unresolved alias too so a job
+    # launched with the /tmp form is still allowed by the kernel profile.
+    resolved = path.resolve()
+    variants = [resolved]
+    text = str(resolved)
+    if text.startswith("/private/tmp"):
+        variants.append(Path(text.replace("/private/tmp", "/tmp", 1)))
+    elif text.startswith("/private/var"):
+        variants.append(Path(text.replace("/private/var", "/var", 1)))
+    return tuple(variants)
 
 
 def _truncate(text: str, limit_kb: int) -> str:
@@ -48,9 +97,12 @@ class JobRunner:
         allowed_roots = (self.policy.workspace_root, *tuple(self.policy.writable_roots))
         if not path_within_roots(cwd_path, allowed_roots):
             raise ValueError("Execution cwd escapes allowed workspace roots.")
+        escaping = path_args_within_roots(argv, allowed_roots, cwd=cwd_path)
+        if escaping is not None:
+            raise ValueError(f"Path argument '{escaping}' escapes allowed workspace roots.")
         if command_uses_network(argv) and not self.policy.allow_network_egress:
             raise ValueError("Network egress is disabled by execution policy.")
-        argv = self._with_network_isolation(argv)
+        argv = self._with_network_isolation(argv, allowed_roots)
 
         env = os.environ.copy()
         env["NULLA_EXECUTION_BACKEND"] = self.policy.backend
@@ -87,15 +139,19 @@ class JobRunner:
             stderr=_truncate(completed.stderr, self.policy.max_output_kb),
         )
 
-    def _with_network_isolation(self, argv: list[str]) -> list[str]:
+    def _with_network_isolation(
+        self, argv: list[str], allowed_roots: tuple[Path, ...] = ()
+    ) -> list[str]:
         if self.policy.allow_network_egress:
             return argv
+        if not allowed_roots:
+            allowed_roots = (self.policy.workspace_root, *tuple(self.policy.writable_roots))
         mode = (self.policy.network_isolation_mode or "auto").strip().lower()
         if mode not in {"auto", "os_enforced", "heuristic_only"}:
             mode = "auto"
         if mode == "heuristic_only":
             return argv
-        isolated = self._kernel_network_isolation_prefix(argv)
+        isolated = self._kernel_network_isolation_prefix(argv, allowed_roots)
         if isolated is not None:
             return isolated
         # No OS-enforced backend available on this host. Fail closed by default
@@ -127,9 +183,11 @@ class JobRunner:
             "override (static command guard only, no kernel isolation)."
         )
 
-    def _kernel_network_isolation_prefix(self, argv: list[str]) -> list[str] | None:
+    def _kernel_network_isolation_prefix(
+        self, argv: list[str], allowed_roots: tuple[Path, ...]
+    ) -> list[str] | None:
         # Prefer hardened Linux isolation backends when present.
-        isolated = self._linux_bwrap_prefix(argv)
+        isolated = self._linux_bwrap_prefix(argv, allowed_roots)
         if isolated is not None:
             return isolated
         isolated = self._linux_unshare_prefix(argv)
@@ -139,17 +197,22 @@ class JobRunner:
         if isolated is not None:
             return isolated
         # macOS: real kernel-enforced network denial via Seatbelt (sandbox-exec).
-        return self._macos_sandbox_exec_prefix(argv)
+        return self._macos_sandbox_exec_prefix(argv, allowed_roots)
 
-    def _macos_sandbox_exec_prefix(self, argv: list[str]) -> list[str] | None:
+    def _macos_sandbox_exec_prefix(
+        self, argv: list[str], allowed_roots: tuple[Path, ...]
+    ) -> list[str] | None:
         if sys.platform != "darwin":
             return None
         sandbox_exec = shutil.which("sandbox-exec")
         if not sandbox_exec:
             return None
-        return [sandbox_exec, "-p", _MACOS_DENY_NETWORK_PROFILE, "--", *list(argv)]
+        profile = _macos_confined_profile(allowed_roots)
+        return [sandbox_exec, "-p", profile, "--", *list(argv)]
 
-    def _linux_bwrap_prefix(self, argv: list[str]) -> list[str] | None:
+    def _linux_bwrap_prefix(
+        self, argv: list[str], allowed_roots: tuple[Path, ...]
+    ) -> list[str] | None:
         if os.name != "posix":
             return None
         if not sys.platform.startswith("linux"):
@@ -157,7 +220,16 @@ class JobRunner:
         bwrap = shutil.which("bwrap")
         if not bwrap:
             return None
-        return [bwrap, "--unshare-net", "--", *list(argv)]
+        # FS isolation in addition to the network namespace: mount the whole
+        # host read-only, then re-bind only the allowed workspace roots writable,
+        # plus a private tmpfs for /tmp. 'unshare -n' alone gives NO filesystem
+        # isolation, so bwrap is the preferred backend when present.
+        cmd: list[str] = [bwrap, "--unshare-net", "--ro-bind", "/", "/", "--tmpfs", "/tmp"]
+        for root in allowed_roots:
+            resolved = str(Path(root).resolve())
+            cmd += ["--bind", resolved, resolved]
+        cmd += ["--", *list(argv)]
+        return cmd
 
     def _linux_unshare_prefix(self, argv: list[str]) -> list[str] | None:
         if os.name != "posix":

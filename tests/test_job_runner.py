@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sandbox.job_runner import JobRunner
+from sandbox.job_runner import JobRunner, _macos_confined_profile
 from sandbox.resource_limits import ExecutionPolicy
 
 
@@ -161,7 +161,85 @@ class JobRunnerTests(unittest.TestCase):
                 "sandbox.job_runner.shutil.which", side_effect=_which
             ):
                 argv = runner._with_network_isolation(["python3", "-c", "print('x')"])
-                self.assertEqual(argv[:3], ["/usr/bin/bwrap", "--unshare-net", "--"])
+                # Network namespace plus filesystem confinement: host mounted
+                # read-only, workspace re-bound writable, private /tmp.
+                self.assertEqual(argv[0], "/usr/bin/bwrap")
+                self.assertIn("--unshare-net", argv)
+                self.assertIn("--ro-bind", argv)
+                self.assertIn("--tmpfs", argv)
+                resolved = str(Path(tmpdir).resolve())
+                self.assertIn("--bind", argv)
+                self.assertIn(resolved, argv)
+                self.assertEqual(argv[-3:], ["python3", "-c", "print('x')"])
+
+    def test_absolute_path_arg_outside_workspace_is_rejected(self) -> None:
+        # Regression: the proven exploit was a command reading an absolute path
+        # OUTSIDE the workspace (e.g. 'cat /abs/secret'). Pre-fix this ran and
+        # returned the secret; it must now be rejected before exec, on any OS.
+        with tempfile.TemporaryDirectory() as ws, tempfile.TemporaryDirectory() as outside:
+            secret = Path(outside) / "secret.txt"
+            secret.write_text("TOP_SECRET")
+            runner = JobRunner(ExecutionPolicy(workspace_root=Path(ws)))
+            with self.assertRaises(ValueError) as ctx:
+                runner.run(["cat", str(secret)])
+            self.assertIn("escapes allowed workspace", str(ctx.exception))
+
+    def test_relative_dotdot_path_arg_escape_is_rejected(self) -> None:
+        # A relative path that climbs out of the (validated) cwd must also be
+        # rejected, not just absolute paths.
+        with tempfile.TemporaryDirectory() as ws:
+            runner = JobRunner(ExecutionPolicy(workspace_root=Path(ws)))
+            with self.assertRaises(ValueError) as ctx:
+                runner.run(["cat", "../../etc/passwd"])
+            self.assertIn("escapes allowed workspace", str(ctx.exception))
+
+    def test_in_workspace_path_arg_is_allowed(self) -> None:
+        # The guard must not reject legitimate in-workspace path arguments.
+        with tempfile.TemporaryDirectory() as ws:
+            inside = Path(ws) / "inside.txt"
+            allowed_roots = (Path(ws).resolve(),)
+            from sandbox.resource_limits import path_args_within_roots
+
+            self.assertIsNone(
+                path_args_within_roots(["cat", str(inside)], allowed_roots, cwd=Path(ws).resolve())
+            )
+            # A bare relative name and a non-path flag must not be flagged.
+            self.assertIsNone(
+                path_args_within_roots(["python3", "-c", "print('hi')"], allowed_roots, cwd=Path(ws).resolve())
+            )
+
+    @unittest.skipIf(sys.platform == "win32", "PosixPath cannot be instantiated on Windows")
+    def test_macos_profile_confines_writes_to_workspace(self) -> None:
+        # The Seatbelt profile must deny file writes by default and allow them
+        # only under the workspace roots (in addition to denying network).
+        with tempfile.TemporaryDirectory() as ws:
+            ws_resolved = str(Path(ws).resolve())
+            profile = _macos_confined_profile((Path(ws).resolve(),))
+            self.assertIn("(deny network*)", profile)
+            self.assertIn("(deny file-write*)", profile)
+            self.assertIn("(allow file-write*", profile)
+            self.assertIn(ws_resolved, profile)
+
+    @unittest.skipUnless(sys.platform == "darwin", "sandbox-exec is macOS-only")
+    def test_macos_seatbelt_denies_out_of_workspace_write(self) -> None:
+        # End-to-end on macOS: a write to an absolute path OUTSIDE the workspace
+        # whose target is hidden inside a code string (so the path-arg guard
+        # cannot see it) must be denied by the kernel Seatbelt layer.
+        with tempfile.TemporaryDirectory() as ws, tempfile.TemporaryDirectory() as outside:
+            target = Path(outside) / "pwned.txt"
+            runner = JobRunner(
+                ExecutionPolicy(workspace_root=Path(ws), network_isolation_mode="auto")
+            )
+            result = runner.run(
+                [sys.executable, "-c", f"open({str(target)!r}, 'w').write('x')"]
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(target.exists())
+            # And an in-workspace write under the same profile still succeeds.
+            ok = runner.run(
+                [sys.executable, "-c", f"open({str(Path(ws) / 'ok.txt')!r}, 'w').write('x'); print('done')"]
+            )
+            self.assertEqual(ok.returncode, 0)
 
 
 if __name__ == "__main__":

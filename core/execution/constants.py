@@ -126,12 +126,29 @@ _INTO_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 _WORKSPACE_FILE_RE = r"[A-Za-z0-9_./-]+\.[A-Za-z0-9_+-]+"
+# Where a file-content capture must stop: a conjunction or newline that begins a
+# *new* instruction (run the tests, create another file, ...) rather than more
+# body text. Used as a non-consuming lookahead so a conjoined request like
+# "create a file x.txt with A and create a file y.txt with B" splits into two
+# writes instead of baking the second clause into the first file. Kept narrow on
+# purpose: a bare " and " between words (e.g. "hello and world") is NOT a stop,
+# only " and " immediately followed by an imperative / "then" / "also".
+_CREATE_FILE_CONTENT_STOP = (
+    r"(?="
+    r"(?:\.\s*(?:Then|Now|Inside it|Do not)\b)"
+    r"|(?:\s+and\s+(?:then|also|finally|next)\b)"
+    r"|(?:\s+and\s+(?:create|write|make|save|add|append|run|execute|open|read|delete|remove|list|commit|test)\b)"
+    r"|(?:\s+then\s+(?:create|write|make|save|add|append|run|execute|open|read|delete|remove|list|commit|test)\b)"
+    r"|(?:\s*\n\s*(?:create|write|make|save|add|append|run|execute|open|read|delete|remove|list|commit|test|then|now|also|finally|next)\b)"
+    r"|$"
+    r")"
+)
 _CREATE_NAMED_FILE_WITH_CONTENT_RE = re.compile(
-    rf"\bcreate\s+(?:a\s+)?file(?:\s+named)?\s+[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?(?:\s+in\s+[^:]+?)?\s+with(?:\s+exactly)?(?:\s+(?:this|the))?\s+(?:line|content|code)(?:(?:\s*,?\s*[^:\n.]+?)\s*:|:\s*|\s+)(?P<content>.+)$",
+    rf"\bcreate\s+(?:a\s+)?file(?:\s+named)?\s+[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?(?:\s+in\s+[^:]+?)?\s+with(?:\s+exactly)?(?:\s+(?:this|the))?\s+(?:line|content|code)(?:(?:\s*,?\s*[^:\n.]+?)\s*:|:\s*|\s+)(?P<content>.+?){_CREATE_FILE_CONTENT_STOP}",
     re.IGNORECASE | re.DOTALL,
 )
 _INLINE_CREATE_FILE_RE = re.compile(
-    rf"\bcreate\s+(?:a\s+file(?:\s+named)?\s+)?[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?\s+(?:with(?:\s+exactly)?(?:\s+(?:this|the))?(?:\s+(?:line|content|code))(?:(?:\s*,?\s*[^:\n.]+?)\s*:|:\s*|\s+)|that\s+says:)\s*(?P<content>.+?)(?=(?:\.\s*(?:Then|Now|Inside it|Do not)\b)|$)",
+    rf"\bcreate\s+(?:a\s+file(?:\s+named)?\s+)?[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?\s+(?:with(?:\s+exactly)?(?:\s+(?:this|the))?(?:\s+(?:line|content|code))(?:(?:\s*,?\s*[^:\n.]+?)\s*:|:\s*|\s+)|that\s+says:)\s*(?P<content>.+?){_CREATE_FILE_CONTENT_STOP}",
     re.IGNORECASE | re.DOTALL,
 )
 # Plain natural phrasing the chat/API surface gets most often, e.g.
@@ -142,7 +159,7 @@ _PLAIN_CREATE_FILE_WITH_CONTENT_RE = re.compile(
     rf"\b(?:create|write|make|save|add)\s+(?:a\s+|the\s+|new\s+)*file(?:\s+(?:named|called))?\s+"
     rf"[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?"
     r"\s+(?:with(?:\s+(?:the\s+)?(?:text|content|contents|line|body))?|saying|containing|that\s+says|holding)\s*:?\s*"
-    r"(?P<content>.+?)(?=(?:\.\s*(?:Then|Now|Inside it|Do not)\b)|$)",
+    rf"(?P<content>.+?){_CREATE_FILE_CONTENT_STOP}",
     re.IGNORECASE | re.DOTALL,
 )
 _FOLDER_FIRST_CREATE_FILE_RE = re.compile(

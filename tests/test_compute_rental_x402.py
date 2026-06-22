@@ -28,12 +28,14 @@ from core.compute.rental_market import (
     ComputeRentalMarket,
 )
 from core.x402.client import (
+    USDC_DECIMALS,
     X402Client,
     X402Config,
     X402Mode,
     X402PaymentError,
     X402Quote,
     X402Receipt,
+    usdc_to_atomic,
 )
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -313,3 +315,81 @@ class TestCostEstimation:
         client = X402Client(cfg)
         with pytest.raises(X402PaymentError, match="keypair_path"):
             client.pay(0.001, "SomeWallet", "sess-no-key")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 5. USDC → atomic conversion (must round, not truncate)
+# ────────────────────────────────────────────────────────────────────────────
+
+class TestUsdcToAtomic:
+    def test_exact_amounts_unchanged(self):
+        assert usdc_to_atomic(1.0) == 1_000_000
+        assert usdc_to_atomic(0.001) == 1_000
+        assert usdc_to_atomic(0.000001) == 1
+
+    def test_sub_micro_rounds_up_not_down(self):
+        # 0.0000019 USDC = 1.9 atomic units → rounds to 2 (truncation gave 1).
+        assert usdc_to_atomic(0.0000019) == 2
+
+    def test_rounds_to_nearest_not_floor(self):
+        # 1.5 atomic units rounds to nearest-even (2) under banker's rounding.
+        assert usdc_to_atomic(0.0000025) == 2
+        # 2.5 atomic units → 2 (nearest-even); the point is it is not floored to 2 by truncation of 2.4999.
+        assert usdc_to_atomic(0.0000024) == 2
+
+    def test_float_artifact_does_not_drop_a_unit(self):
+        # 2.0 USDC may store as 1.9999999...; truncating int() would yield
+        # 1_999_999. Rounding restores the intended 2_000_000 atomic units.
+        amount = 2.0
+        assert amount * (10 ** USDC_DECIMALS) <= 2_000_000  # float may be just under
+        assert usdc_to_atomic(amount) == 2_000_000
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 6. Live-path keypair construction (solders) — seed must yield matching pubkey
+# ────────────────────────────────────────────────────────────────────────────
+
+class TestLiveKeypairConstruction:
+    """The live (devnet/mainnet) signing path loads a 64-byte Solana JSON
+    keypair and must construct a solders Keypair whose pubkey matches the
+    wallet. The previous code sliced to the first 32 bytes and fed them to
+    Keypair.from_bytes, which expects 64 bytes and raises — breaking signing.
+
+    These drive the client's own ``_load_payer_keypair`` so a regression in the
+    source (e.g. reverting to ``from_bytes`` on the 32-byte slice) fails loudly.
+    The helper imports only solders, so it runs without the optional ``solana``
+    / ``spl`` packages that the rest of ``_solana_pay`` needs.
+    """
+
+    def _write_keypair_file(self, tmp_path):
+        SoldersKeypair = pytest.importorskip("solders.keypair").Keypair
+        # Known reference: a deterministic 32-byte seed → its full 64-byte
+        # secret (seed || pubkey), the Solana CLI JSON keypair byte layout.
+        reference = SoldersKeypair.from_seed(bytes(range(32)))
+        secret_64 = list(bytes(reference))
+        assert len(secret_64) == 64
+        kp_file = tmp_path / "id.json"
+        import json as _json
+        kp_file.write_text(_json.dumps(secret_64))
+        return kp_file, str(reference.pubkey())
+
+    def test_loaded_keypair_yields_expected_pubkey_and_valid_signature(self, tmp_path):
+        kp_file, expected_pubkey = self._write_keypair_file(tmp_path)
+
+        cfg = X402Config(mode=X402Mode.DEVNET, keypair_path=str(kp_file))
+        client = X402Client(cfg)
+
+        # Client must recover the same wallet pubkey from the 32-byte seed.
+        # The old `from_bytes(kp_data[:32])` raises ValueError here.
+        payer = client._load_payer_keypair()
+        assert str(payer.pubkey()) == expected_pubkey
+
+        # And the loaded keypair must produce a verifiable signature.
+        sig = payer.sign_message(b"x402-regression")
+        assert len(bytes(sig)) == 64
+
+    def test_missing_keypair_path_raises(self):
+        cfg = X402Config(mode=X402Mode.DEVNET, keypair_path=None)
+        client = X402Client(cfg)
+        with pytest.raises(X402PaymentError, match="keypair_path"):
+            client._load_payer_keypair()

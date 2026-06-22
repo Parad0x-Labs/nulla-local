@@ -15,6 +15,7 @@ from core.capability_tokens import (
 )
 from core.discovery_index import (
     delivery_targets_for_peer,
+    peer_trust,
     record_bootstrap_presence,
     record_signed_peer_endpoint_observation,
     register_capability_ad,
@@ -958,6 +959,17 @@ def handle_incoming_assist_message(
     if msg_type == "CAPABILITY_AD":
         ad = payload_model
 
+        # Identity binding: a peer may only advertise capabilities for itself.
+        # Without this a peer could publish an ad on behalf of any agent_id and
+        # (via the trust fields) self-promote or defame a third party.
+        if ad.agent_id != sender:
+            note_peer_violation(sender, "capability_ad_agent_id_mismatch")
+            return RouteResult(
+                False,
+                "CAPABILITY_AD rejected: agent_id does not match envelope sender.",
+                generated,
+            )
+
         # Phase 30: Sybil Resistance at Genesis
         required_difficulty = required_pow_difficulty(default=4)
         if not verify_pow(ad.agent_id, ad.genesis_nonce, target_difficulty=required_difficulty):
@@ -965,12 +977,15 @@ def handle_incoming_assist_message(
             return RouteResult(False, "CAPABILITY_AD rejected: Invalid Proof-of-Work nonce.", generated)
 
         register_capability_ad(ad)
+        # Trust is owned by the local reputation engine. Seed the routing-read
+        # trust column from our locally-held trust for this peer, never from the
+        # peer's self-declared ad.trust_score.
         record_bootstrap_presence(
             peer_id=ad.agent_id,
             status=ad.status,
             capabilities=ad.capabilities,
             capacity=ad.capacity,
-            trust_score=ad.trust_score,
+            trust_score=peer_trust(ad.agent_id),
             host_group_hint_hash=ad.assist_filters.host_group_hint_hash,
         )
         return RouteResult(True, "Capability ad stored.", generated)

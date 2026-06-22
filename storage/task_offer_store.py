@@ -56,19 +56,23 @@ def list_open_task_offers(*, limit: int = 50) -> list[dict[str, Any]]:
 def claim_task_offer(task_id: str, helper_peer_id: str) -> bool:
     """
     Atomically mark an open offer as claimed by helper_peer_id.
+    The claimant identity is persisted in ``claimed_by`` so that only the
+    actual claimer can later collect the escrow payout (see
+    :func:`get_task_offer_claimed_by`).
     Returns True if the offer was successfully claimed (was 'open').
     Returns False if already claimed/completed or not found.
     """
     now = _utcnow_iso()
+    claimant = str(helper_peer_id or "")
     conn = get_connection()
     try:
         cursor = conn.execute(
             """
             UPDATE task_offers
-            SET status = 'claimed', updated_at = ?
+            SET status = 'claimed', claimed_by = ?, updated_at = ?
             WHERE task_id = ? AND status = 'open'
             """,
-            (now, task_id),
+            (claimant, now, task_id),
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -77,6 +81,30 @@ def claim_task_offer(task_id: str, helper_peer_id: str) -> bool:
         return False
     finally:
         conn.close()
+
+
+def get_task_offer_claimed_by(task_id: str) -> str | None:
+    """
+    Return the peer id recorded as the claimant for ``task_id``.
+
+    Returns ``None`` when the offer does not exist or predates the
+    ``claimed_by`` column (legacy rows store an empty string); the empty
+    string is also normalized to ``None`` so callers can treat "unknown
+    claimant" uniformly.
+    """
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT claimed_by FROM task_offers WHERE task_id = ?", (task_id,)
+        ).fetchone()
+    except Exception:
+        return None
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    claimed_by = str(row["claimed_by"] or "").strip()
+    return claimed_by or None
 
 
 def complete_task_offer(task_id: str, result_hash: str) -> bool:
@@ -126,5 +154,6 @@ __all__ = [
     "claim_task_offer",
     "complete_task_offer",
     "get_task_offer",
+    "get_task_offer_claimed_by",
     "list_open_task_offers",
 ]

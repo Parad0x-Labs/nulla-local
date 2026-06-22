@@ -11,17 +11,31 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.x402.receipt_verifier import USDC_MINT_MAINNET, verify_payment_receipt
+from core.x402.receipt_verifier import (
+    USDC_MINT_DEVNET,
+    USDC_MINT_MAINNET,
+    verify_payment_receipt,
+)
 
 RECIPIENT = "9M949AfyYCHp9hUk7crZZx3N6Y8sigyWBN6RM6tFq1q5"
 OTHER_MINT = "So11111111111111111111111111111111111111112"
 TX_SIG = "5xPaymentTxSignatureBase58Fixture0000000000000000000000000000000"
 
+# A facilitator escrow ATA (an SPL token ACCOUNT address) owned by the
+# facilitator, plus the facilitator owner. This mirrors core.x402.client, which
+# transfers the USDC into the escrow ATA (dest=escrow_ata), NOT the recipient
+# wallet's own account — so the recipient WALLET's balance is unchanged.
+ESCROW_ATA = "Escrow1111111111111111111111111111111111111"
+FACILITATOR_OWNER = "Fac11111111111111111111111111111111111111111"
+PAYER_ATA = "Payer111111111111111111111111111111111111111"
 
-def _token_balance(owner: str, mint: str, atomic: int) -> dict[str, Any]:
+
+def _token_balance(
+    owner: str, mint: str, atomic: int, *, account_index: int = 1
+) -> dict[str, Any]:
     """A single jsonParsed pre/postTokenBalances entry."""
     return {
-        "accountIndex": 1,
+        "accountIndex": account_index,
         "mint": mint,
         "owner": owner,
         "uiTokenAmount": {
@@ -38,8 +52,15 @@ def _get_transaction_result(
     err: Any = None,
     pre: list[dict[str, Any]] | None = None,
     post: list[dict[str, Any]] | None = None,
+    account_keys: list[str] | None = None,
 ) -> dict[str, Any]:
-    """A minimal jsonParsed getTransaction result with the meta we inspect."""
+    """A minimal jsonParsed getTransaction result with the meta we inspect.
+
+    ``account_keys`` populates ``transaction.message.accountKeys`` (jsonParsed
+    object form) so token-balance ``accountIndex`` values resolve to real token
+    account addresses, the way the credited-account check needs.
+    """
+    keys = account_keys or []
     return {
         "slot": 123456789,
         "blockTime": 1_700_000_000,
@@ -48,7 +69,15 @@ def _get_transaction_result(
             "preTokenBalances": pre or [],
             "postTokenBalances": post or [],
         },
-        "transaction": {"signatures": [TX_SIG]},
+        "transaction": {
+            "signatures": [TX_SIG],
+            "message": {
+                "accountKeys": [
+                    {"pubkey": k, "signer": False, "writable": True, "source": "transaction"}
+                    for k in keys
+                ],
+            },
+        },
     }
 
 
@@ -95,10 +124,11 @@ def test_confirms_matching_usdc_transfer() -> None:
 
 def test_confirms_when_recipient_token_account_created_by_transfer() -> None:
     # No pre-balance entry (ATA created by this tx); post shows the full amount.
+    # mode="devnet" selects the devnet USDC mint, which the entry must carry.
     rpc = _rpc_returning(
         _get_transaction_result(
             pre=[],
-            post=[_token_balance(RECIPIENT, USDC_MINT_MAINNET, 500_000)],
+            post=[_token_balance(RECIPIENT, USDC_MINT_DEVNET, 500_000)],
         )
     )
 
@@ -343,6 +373,170 @@ def test_default_rpc_is_publicnode_only() -> None:
 
     assert all("api.mainnet-beta.solana.com" not in url for url in _RPC_ENDPOINTS)
     assert any("publicnode.com" in url for url in _RPC_ENDPOINTS)
+
+
+# ---------------------------------------------------------------------------
+# Regression: the x402 client (core/x402/client.py) transfers USDC into the
+# facilitator ESCROW ATA (dest=escrow_ata), NOT the recipient wallet's ATA. A
+# genuine settlement therefore leaves the recipient WALLET's balance unchanged.
+# The fixed verifier confirms the credit to the credited token account; the old
+# recipient-wallet-owner check returned False on this same fixture.
+# ---------------------------------------------------------------------------
+
+
+def test_confirms_credit_to_escrow_ata_when_recipient_wallet_unchanged() -> None:
+    # The +1 USDC lands in the facilitator escrow ATA (owned by the facilitator,
+    # NOT the recipient wallet). accountIndex 0 -> escrow ATA, 1 -> payer ATA.
+    keys = [ESCROW_ATA, PAYER_ATA]
+    result = _get_transaction_result(
+        account_keys=keys,
+        pre=[
+            _token_balance(FACILITATOR_OWNER, USDC_MINT_MAINNET, 1_000_000, account_index=0),
+            _token_balance(RECIPIENT, USDC_MINT_MAINNET, 5_000_000, account_index=1),
+        ],
+        post=[
+            _token_balance(FACILITATOR_OWNER, USDC_MINT_MAINNET, 2_000_000, account_index=0),
+            _token_balance(RECIPIENT, USDC_MINT_MAINNET, 4_000_000, account_index=1),
+        ],
+    )
+
+    # FIXED behavior: checking the credited escrow ATA confirms the +1 USDC.
+    assert (
+        verify_payment_receipt(
+            TX_SIG,
+            recipient_wallet=RECIPIENT,
+            amount_usdc=1.0,
+            mode="mainnet",
+            credited_account=ESCROW_ATA,
+            rpc_call=_rpc_returning(result),
+        )
+        is True
+    )
+
+    # PRE-FIX behavior would have failed: the recipient WALLET's own balance does
+    # not increase on this tx (it actually drops, since RECIPIENT is the payer
+    # side here), so the old owner-match returned False. The fallback path (no
+    # credited_account) still returns False on the very same fixture — proving the
+    # fix is what flips it to True.
+    assert (
+        verify_payment_receipt(
+            TX_SIG,
+            recipient_wallet=RECIPIENT,
+            amount_usdc=1.0,
+            mode="mainnet",
+            rpc_call=_rpc_returning(result),
+        )
+        is False
+    )
+
+
+def test_rejects_credited_account_not_in_account_keys() -> None:
+    # The escrow ATA was credited, but the caller asks about an account the tx
+    # never touched → fail closed (cannot resolve it in accountKeys).
+    keys = [ESCROW_ATA, PAYER_ATA]
+    result = _get_transaction_result(
+        account_keys=keys,
+        pre=[_token_balance(FACILITATOR_OWNER, USDC_MINT_MAINNET, 0, account_index=0)],
+        post=[_token_balance(FACILITATOR_OWNER, USDC_MINT_MAINNET, 1_000_000, account_index=0)],
+    )
+
+    assert (
+        verify_payment_receipt(
+            TX_SIG,
+            recipient_wallet=RECIPIENT,
+            amount_usdc=1.0,
+            mode="mainnet",
+            credited_account="Unrelated11111111111111111111111111111111111",
+            rpc_call=_rpc_returning(result),
+        )
+        is False
+    )
+
+
+def test_rejects_escrow_credit_with_wrong_mint_for_credited_account() -> None:
+    # The credited escrow ATA increased, but in a non-USDC mint → fail closed.
+    keys = [ESCROW_ATA]
+    result = _get_transaction_result(
+        account_keys=keys,
+        pre=[_token_balance(FACILITATOR_OWNER, OTHER_MINT, 1_000_000, account_index=0)],
+        post=[_token_balance(FACILITATOR_OWNER, OTHER_MINT, 2_000_000, account_index=0)],
+    )
+
+    assert (
+        verify_payment_receipt(
+            TX_SIG,
+            recipient_wallet=RECIPIENT,
+            amount_usdc=1.0,
+            mode="mainnet",
+            credited_account=ESCROW_ATA,
+            rpc_call=_rpc_returning(result),
+        )
+        is False
+    )
+
+
+def test_devnet_mode_checks_devnet_mint_not_mainnet() -> None:
+    # A genuine devnet settlement credits the escrow ATA in the DEVNET USDC mint.
+    # The verifier must select the devnet mint for mode="devnet"; checking the
+    # mainnet mint (the prior hardcoded behavior) would see no matching entry.
+    keys = [ESCROW_ATA]
+    result = _get_transaction_result(
+        account_keys=keys,
+        pre=[_token_balance(FACILITATOR_OWNER, USDC_MINT_DEVNET, 0, account_index=0)],
+        post=[_token_balance(FACILITATOR_OWNER, USDC_MINT_DEVNET, 1_000_000, account_index=0)],
+    )
+
+    # Devnet mint entry confirms under mode="devnet".
+    assert (
+        verify_payment_receipt(
+            TX_SIG,
+            recipient_wallet=RECIPIENT,
+            amount_usdc=1.0,
+            mode="devnet",
+            credited_account=ESCROW_ATA,
+            rpc_call=_rpc_returning(result),
+        )
+        is True
+    )
+
+    # The SAME devnet-mint fixture must NOT confirm under mode="mainnet": the
+    # mainnet mint does not match the devnet entry. (Pre-fix the verifier always
+    # matched the mainnet mint regardless of mode, so a devnet settlement could
+    # never confirm at all.)
+    assert (
+        verify_payment_receipt(
+            TX_SIG,
+            recipient_wallet=RECIPIENT,
+            amount_usdc=1.0,
+            mode="mainnet",
+            credited_account=ESCROW_ATA,
+            rpc_call=_rpc_returning(result),
+        )
+        is False
+    )
+
+
+def test_devnet_direct_transfer_to_recipient_owner_uses_devnet_mint() -> None:
+    # Owner-match fallback path (no credited_account) must also select the devnet
+    # mint under mode="devnet" — a direct devnet USDC transfer into the
+    # recipient's own ATA confirms; the mainnet mint never would.
+    rpc = _rpc_returning(
+        _get_transaction_result(
+            pre=[_token_balance(RECIPIENT, USDC_MINT_DEVNET, 0)],
+            post=[_token_balance(RECIPIENT, USDC_MINT_DEVNET, 750_000)],
+        )
+    )
+
+    assert (
+        verify_payment_receipt(
+            TX_SIG,
+            recipient_wallet=RECIPIENT,
+            amount_usdc=0.75,
+            mode="devnet",
+            rpc_call=rpc,
+        )
+        is True
+    )
 
 
 # ---------------------------------------------------------------------------

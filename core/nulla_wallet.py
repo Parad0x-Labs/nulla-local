@@ -276,17 +276,22 @@ class NullaWallet:
         )
         if not isinstance(result, dict):
             return 0.0
+        # A wallet can hold the same mint across multiple associated token
+        # accounts; the balance is the SUM over all of them. Returning only the
+        # first account's amount undercounts wallets with more than one USDC ATA.
+        total = 0.0
         for account in list(result.get("value") or []):
             if not isinstance(account, dict):
                 continue
             info = account.get("account", {}).get("data", {}).get("parsed", {}).get("info", {})
             amount = info.get("tokenAmount", {}).get("uiAmount")
-            if amount is not None:
-                try:
-                    return float(amount)
-                except Exception:
-                    return 0.0
-        return 0.0
+            if amount is None:
+                continue
+            try:
+                total += float(amount)
+            except Exception:
+                continue
+        return total
 
     def info(self) -> WalletInfo:
         return WalletInfo(
