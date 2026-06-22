@@ -125,6 +125,63 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertIn("not wired", result.response_text)
         self.assertEqual(result.details["observation"]["status"], "unsupported")
 
+    def test_chat_surface_natural_write_request_reaches_workspace_write_file(self) -> None:
+        # Regression for the chat/API router defect: a plain natural-language
+        # "create a file ... with ..." request from the OpenClaw chat/API surface
+        # must clear the entry gate, get planned into workspace.write_file, and
+        # actually execute the workspace write -- not bounce off as "cannot map".
+        user_text = "create a file test.txt with hello"
+        source_context = {"surface": "api", "platform": "api", "workspace_root": "/tmp/nulla-router-regression"}
+
+        # 1) Entry gate the chat/API loop checks before doing any tool work.
+        self.assertTrue(
+            should_attempt_tool_intent(
+                user_text,
+                task_class=classify(user_text).get("task_class", "unknown"),
+                source_context=source_context,
+            ),
+            "natural file-write request was rejected at the tool-intent entry gate",
+        )
+
+        # 2) The deterministic planner the loop runs first must map it to
+        #    workspace.write_file (no reliance on the model picking it).
+        decision = plan_tool_workflow(
+            user_text=user_text,
+            task_class="chat_conversation",
+            executed_steps=[],
+            source_context=source_context,
+        )
+        self.assertTrue(decision.handled)
+        self.assertIsNotNone(decision.next_payload)
+        self.assertEqual(decision.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(decision.next_payload["arguments"]["path"], "test.txt")
+        self.assertEqual(decision.next_payload["arguments"]["content"], "hello")
+
+        # 3) Dispatching that payload through the same execute_tool_intent entry
+        #    the loop uses must reach and run the real workspace.write_file branch
+        #    (FS write mocked so no file is actually created).
+        tracker = HiveActivityTracker(config=HiveActivityTrackerConfig(enabled=False, watcher_api_url=None))
+        with mock.patch("core.runtime_execution_tools.Path.write_text") as write_text:
+            result = execute_tool_intent(
+                decision.next_payload,
+                task_id="task-router",
+                session_id="session-router",
+                source_context=source_context,
+                hive_activity_tracker=tracker,
+            )
+
+        self.assertTrue(result.handled)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.tool_name, "workspace.write_file")
+        self.assertEqual(result.mode, "tool_executed")
+        self.assertEqual(result.details["observation"]["intent"], "workspace.write_file")
+        # The executor's real workspace.write_file branch wrote the requested
+        # content to disk (FS write mocked). The first write is the file body;
+        # later writes are the mutation ledger.
+        self.assertTrue(write_text.called)
+        self.assertEqual(write_text.call_args_list[0].args[0], "hello")
+        self.assertEqual(result.details["path"], "test.txt")
+
     def test_execute_hive_submit_result_uses_public_bridge(self) -> None:
         tracker = HiveActivityTracker(config=HiveActivityTrackerConfig(enabled=False, watcher_api_url=None))
         bridge = mock.Mock()
