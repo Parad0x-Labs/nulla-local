@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import os
+import threading
 
 from core import audit_logger
 
@@ -165,11 +167,74 @@ def anchor_vault_proof(parent_task_id: str, final_response_hash: str, confidence
         return None
 
 
+def _anchor_and_persist(parent_task_id: str, final_response_hash: str, confidence: float) -> None:
+    """Run the blocking anchor broadcast and persist its signature.
+
+    Designed to run inside a background worker thread. ``anchor_vault_proof``
+    already fails closed (returns None, never raises), but we wrap the whole
+    body so a stray error in the persistence step can never surface as an
+    unhandled-thread traceback. On a successful broadcast the real tx signature
+    is written onto the finalized row so the receipt links to its on-chain proof.
+    """
+    try:
+        # Import lazily so this module has no hard dependency on the store at
+        # import time (and to keep the dependency arrow one-directional).
+        from core.final_response_store import set_anchored_signature
+
+        signature = anchor_vault_proof(parent_task_id, final_response_hash, confidence)
+        if signature:
+            set_anchored_signature(parent_task_id, signature)
+    except Exception as exc:  # pragma: no cover - defensive; anchor already fails closed
+        with contextlib.suppress(Exception):
+            audit_logger.log(
+                "solana_anchor_async_error",
+                target_id=parent_task_id,
+                target_type="task",
+                details={"error": str(exc)},
+            )
+
+
+def dispatch_anchor_in_background(
+    parent_task_id: str, final_response_hash: str, confidence: float
+) -> threading.Thread | None:
+    """Fire the gated anchor broadcast off the caller's hot path.
+
+    Broadcasting does serial blocking RPC (getLatestBlockhash + sendTransaction
+    over several endpoints), so it must never run inline on the finalize turn.
+    When anchoring is opted in (NULLA_ANCHOR_RECEIPTS=1) this spawns a daemon
+    worker that does the broadcast and persists the resulting signature, then
+    returns immediately with the started thread (so callers/tests can join it).
+
+    A strict no-op when anchoring is disabled: returns None without touching the
+    network or spawning a thread.
+    """
+    if not anchor_enabled():
+        return None
+    try:
+        worker = threading.Thread(
+            target=_anchor_and_persist,
+            args=(parent_task_id, final_response_hash, confidence),
+            daemon=True,
+        )
+        worker.start()
+        return worker
+    except Exception as exc:  # pragma: no cover - thread spawn failure is rare
+        with contextlib.suppress(Exception):
+            audit_logger.log(
+                "solana_anchor_spawn_error",
+                target_id=parent_task_id,
+                target_type="task",
+                details={"error": str(exc)},
+            )
+        return None
+
+
 __all__ = [
     "anchor_enabled",
     "anchor_vault_proof",
     "build_memo_anchor_message",
     "confirm_signature",
+    "dispatch_anchor_in_background",
     "parse_signature_status",
     "submit_memo_anchor",
 ]
