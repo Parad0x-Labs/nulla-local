@@ -200,9 +200,11 @@ If you deliberately run NULLA from a custom runtime home, set `NULLA_HOME` befor
 
 ## Web Access (opt-in)
 
-NULLA is local-first. Live web lookup (`web.search`, `web.fetch`, `web.research`, browser render) is opt-in and off by default, so a fresh runtime never reaches out to the network for answers unless you deliberately turn it on.
+NULLA is local-first. Live web lookup (`web.search`, `web.fetch`, `web.research`, browser render) is opt-in and OFF by default, so a fresh runtime never reaches out to the network for answers unless you deliberately turn it on.
 
-Enable web for a session with either environment variable:
+**Local-only profile:** the local-only profile (`NULLA_INSTALL_PROFILE=local-only`) is a hard "nothing leaves the box" guarantee. It keeps live web lookup OFF and that guarantee **overrides** the opt-in — `NULLA_ENABLE_WEB=1` will not turn web on while local-only is active. To use live web lookup, run a **non-local-only profile** (and/or set `NULLA_ENABLE_WEB=1` when not local-only).
+
+On a non-local-only profile, enable web for a session with either environment variable:
 
 ```bash
 NULLA_ENABLE_WEB=1 .venv/bin/python -m apps.nulla_cli web "latest qwen release notes"

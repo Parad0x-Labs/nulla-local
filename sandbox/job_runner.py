@@ -104,12 +104,28 @@ class JobRunner:
         # possible. 'heuristic_only' remains the explicit, informed opt-in to the
         # weaker static-guard guarantee (e.g. on Windows).
         if mode in {"auto", "os_enforced"}:
-            raise ValueError(
-                "OS-level network isolation is required but unavailable "
-                "(expected one of: bwrap, unshare, firejail on Linux; sandbox-exec on macOS). "
-                "Set network_isolation_mode='heuristic_only' only for an explicit unsafe local override."
-            )
+            raise ValueError(self._no_kernel_isolation_message())
         return argv
+
+    def _no_kernel_isolation_message(self) -> str:
+        base = (
+            "OS-level network isolation is required but unavailable "
+            "(expected one of: bwrap, unshare, firejail on Linux; sandbox-exec on macOS)."
+        )
+        if os.name == "nt":
+            # Native Windows has no kernel network-namespace backend, so a
+            # no-network job fails closed here. Name the two real options so the
+            # operator can make an informed choice instead of guessing.
+            return (
+                f"{base} Windows has no kernel network-isolation backend. "
+                "Options: (1) run NULLA under WSL2/Linux (recommended) so bwrap/unshare/firejail "
+                "provide kernel-enforced no-egress; or (2) set network_isolation_mode='heuristic_only' "
+                "as an explicit, informed local override (static command guard only, no kernel isolation)."
+            )
+        return (
+            f"{base} Set network_isolation_mode='heuristic_only' only for an explicit, informed local "
+            "override (static command guard only, no kernel isolation)."
+        )
 
     def _kernel_network_isolation_prefix(self, argv: list[str]) -> list[str] | None:
         # Prefer hardened Linux isolation backends when present.

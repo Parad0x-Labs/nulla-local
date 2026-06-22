@@ -33,17 +33,21 @@ Nulla as an OpenClaw agent. Zero manual config.
 | Capability | Description | Status |
 |-----------|-------------|--------|
 | **Chat** | Conversational AI with persistent memory | Stable |
-| **Research** | Autonomous web research with evidence scoring | Stable |
 | **Brain Hive** | Distributed task queue — publish, claim, deliver, grade | Stable |
 | **Tool Execution** | Create folders, write files, scaffold projects | Stable |
-| **Sandbox** | Run code in restricted environment with network guard | Stable |
-| **Web Search** | Live web search via SearXNG or direct adapters | Stable |
-| **Entity Lookup** | Who-is/what-is queries with forced web verification | Stable |
-| **Weather/Price** | Real-time weather, crypto prices, commodity prices | Stable |
+| **Sandbox** | Run code in a restricted environment. Kernel-enforced no-network on macOS/Linux (and WSL2); native Windows uses the static command guard only | Stable (kernel sandbox needs macOS/Linux/WSL2) |
+| **Web Search** | Live web search via SearXNG or direct adapters | Opt-in, OFF in the local-only profile (enable on a non-local-only profile and/or `NULLA_ENABLE_WEB=1`) |
+| **Research** | Autonomous web research with evidence scoring | Opt-in (rides on Web Search above) |
+| **Entity Lookup** | Who-is/what-is queries with web verification | Opt-in (rides on Web Search above) |
+| **Weather/Price** | Real-time weather, crypto prices, commodity prices | Opt-in (rides on Web Search above) |
 | **Discord Relay** | Full bot integration with channel routing | Stable |
 | **Telegram Relay** | Bot API with group chat support | Stable |
 | **P2P Mesh** | NAT traversal, DHT discovery, encrypted streams | Stable |
 | **LoRA Training** | Fine-tuning adapter for local models | Experimental |
+
+`GET /api/runtime/capabilities` reports the live per-feature status for the running
+profile, including whether web lookup is enabled and whether the kernel job sandbox
+is available on this host.
 
 ## OpenClaw Integration
 
