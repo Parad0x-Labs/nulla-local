@@ -143,10 +143,15 @@ class ContextWindow:
             return 0
         try:
             q_vec = embed(query)
-            # Fetch extra candidates so filtering doesn't leave us empty
-            hits = self._memory.node_search(
-                q_vec, top_k=top_k * 3, min_score=RETRIEVAL_MIN_SCORE
-            )
+            # Fetch extra candidates so filtering doesn't leave us empty. Use the
+            # hybrid search (semantic + recency/temporal-collapse + BM25 keyword
+            # leg) so the latest value of a fact surfaces and exact terms/IDs are
+            # not missed when embeddings are weak; fall back to plain semantic.
+            search = getattr(self._memory, "node_search_hybrid", None)
+            if callable(search):
+                hits = search(query, q_vec, top_k=top_k * 3, min_score=RETRIEVAL_MIN_SCORE)
+            else:
+                hits = self._memory.node_search(q_vec, top_k=top_k * 3, min_score=RETRIEVAL_MIN_SCORE)
         except Exception:
             return 0
 
