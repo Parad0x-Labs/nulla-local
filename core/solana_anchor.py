@@ -1,49 +1,103 @@
 from __future__ import annotations
 
+import base64
+
 from core import audit_logger
 
-# Optional integrations
-try:
-    import solders
-except ImportError:
-    solders = None
+# Reuse the ONE compliant RPC path (publicnode only — never api.mainnet-beta,
+# which 403s with an Origin header) and the base58 codec + wallet loader.
+from core.nulla_wallet import _rpc_call, b58encode, get_or_create_wallet
 
+# solders builds the canonical transaction message; the wallet signs the exact
+# serialized bytes, so no raw keypair leaves the wallet abstraction.
 try:
-    from solana.rpc.api import Client as SolanaClient
-except ImportError:
-    SolanaClient = None
+    from solders.hash import Hash
+    from solders.instruction import AccountMeta, Instruction
+    from solders.message import Message
+    from solders.pubkey import Pubkey
+except ImportError:  # solders not installed -> anchoring degrades to no-op
+    Hash = Instruction = AccountMeta = Message = Pubkey = None  # type: ignore[assignment]
+
+# SPL Memo program — arbitrary on-chain note, the safe minimal anchor (no
+# program-specific account layout to get wrong). Every anchored receipt becomes
+# a clickable Solana transaction whose memo carries the work-receipt hash.
+_MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+_ANCHOR_TAG = b"nulla-receipt:"
+
+
+def build_memo_anchor_message(payer_pubkey: str, payload_hash: str, recent_blockhash: str) -> bytes:
+    """Serialize a single-signer SPL-Memo message carrying the receipt hash.
+
+    Pure + deterministic (no network, no signing). The fee payer is the only
+    signer; the memo data is ``nulla-receipt:<hash>``.
+    """
+    if Pubkey is None:
+        raise RuntimeError("solders is not installed")
+    payer = Pubkey.from_string(payer_pubkey)
+    memo = Pubkey.from_string(_MEMO_PROGRAM_ID)
+    ix = Instruction(
+        program_id=memo,
+        accounts=[AccountMeta(pubkey=payer, is_signer=True, is_writable=True)],
+        data=_ANCHOR_TAG + payload_hash.encode("utf-8"),
+    )
+    msg = Message.new_with_blockhash([ix], payer, Hash.from_string(recent_blockhash))
+    return bytes(msg)
+
+
+def _latest_blockhash() -> str | None:
+    result = _rpc_call("getLatestBlockhash", [{"commitment": "finalized"}])
+    if isinstance(result, dict):
+        value = result.get("value") or {}
+        bh = value.get("blockhash")
+        if bh:
+            return str(bh)
+    return None
+
+
+def submit_memo_anchor(payload_hash: str) -> str | None:
+    """Build, sign, and broadcast the memo anchor over the compliant RPC.
+
+    Returns the transaction signature (base58) on success, None on any failure
+    (missing libs, no blockhash, unfunded wallet, RPC error) — fail-closed, never
+    raises into the caller's hot path. Broadcasting spends a small SOL fee.
+    """
+    if Pubkey is None:
+        return None
+    try:
+        wallet = get_or_create_wallet()
+        blockhash = _latest_blockhash()
+        if not blockhash:
+            return None
+        message_bytes = build_memo_anchor_message(wallet.pubkey, payload_hash, blockhash)
+        signature = wallet.sign_transaction(message_bytes)  # ed25519 over the exact message
+        # Legacy wire tx: compact-array(1 signature) + message.
+        wire = bytes([1]) + signature + message_bytes
+        b64 = base64.b64encode(wire).decode("ascii")
+        result = _rpc_call("sendTransaction", [b64, {"encoding": "base64"}])
+        if isinstance(result, str) and result:
+            return result
+        # Fall back to the locally-computed signature id if the RPC echoed nothing.
+        return b58encode(signature) if result is not None else None
+    except Exception:
+        return None
 
 
 def anchor_vault_proof(parent_task_id: str, final_response_hash: str, confidence: float) -> str | None:
+    """Anchor a proof of the finalized parent task on Solana as an SPL-Memo.
+
+    Returns the real transaction signature, or None if anchoring is unavailable
+    (no solders, no funded wallet, or network down) — fails silently so the
+    finalize path is never blocked. Call sites gate this behind an env flag.
     """
-    Attempts to anchor a cryptographic proof of the finalized parent task to the Solana
-    blockchain as a sparse milestone snapshot.
-
-    If libraries are missing or network is unavailable, fails silently returning None.
-    """
-    if not solders or not SolanaClient:
-        return None
-
-    # In a full production scenario, this hooks into a real RPC and signs a structured Memo.
-    # For Phase 19 bridge bounds, we gracefully return a mock placeholder when tested locally
-    # without live Mainnet keys configured.
-
     try:
-        # Mock anchor success signature
-        # client = SolanaClient("https://api.mainnet-beta.solana.com")
-        # Ensure we don't accidentally block the hot path with HTTP timeouts.
-        # This function would be invoked asynchronously.
-
-        signature = f"mock_sig_{final_response_hash[:12]}"
-
+        signature = submit_memo_anchor(final_response_hash)
+        if not signature:
+            return None
         audit_logger.log(
             "solana_proof_anchored",
             target_id=parent_task_id,
             target_type="task",
-            details={
-                "signature": signature,
-                "confidence": confidence
-            }
+            details={"signature": signature, "confidence": confidence},
         )
         return signature
     except Exception as e:
@@ -51,6 +105,9 @@ def anchor_vault_proof(parent_task_id: str, final_response_hash: str, confidence
             "solana_proof_failed",
             target_id=parent_task_id,
             target_type="task",
-            details={"error": str(e)}
+            details={"error": str(e)},
         )
         return None
+
+
+__all__ = ["anchor_vault_proof", "build_memo_anchor_message", "submit_memo_anchor"]
