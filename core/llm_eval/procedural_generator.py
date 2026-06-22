@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -216,7 +217,7 @@ def generate_procedural_pack(
 
     local_fixture_dir = (Path.home() / "Desktop" / f"NULLAProcedural_{seed_tag}").resolve()
     download_path = (Path.home() / "Downloads" / f"example-{seed_tag}.html").resolve()
-    blocked_dir = (Path("/tmp") / f"nulla-procedural-blocked-{seed_tag}").resolve()
+    blocked_dir = (Path(tempfile.gettempdir()) / f"nulla-procedural-blocked-{seed_tag}").resolve()
 
     greeting_workspace = (workspace_root / f"opening_{seed_tag}").resolve()
     chain_workspace = (workspace_root / f"chain_{seed_tag}").resolve()
