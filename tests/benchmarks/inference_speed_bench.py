@@ -241,11 +241,11 @@ def main() -> int:
     print("\nGeneration throughput (warm):")
     print(f"  {'num_predict':>11} {'gen tok/s':>10} {'TTFT ms':>9} {'wall s':>8}")
     for r in result["throughput"]:
-        print(f"  {r['num_predict']:>11} {str(r['gen_tok_s']):>10} {str(r['ttft_ms']):>9} {str(r['wall_s']):>8}")
+        print(f"  {r['num_predict']:>11} {r['gen_tok_s']!s:>10} {r['ttft_ms']!s:>9} {r['wall_s']!s:>8}")
     print("\nPrefill scaling (cost that prefix-cache reuse avoids):")
     print(f"  {'prompt_chars':>12} {'prefill_tok':>11} {'prefill tok/s':>13} {'TTFT ms':>9}")
     for r in result["prefill_scaling"]:
-        print(f"  {r['prompt_chars']:>12} {str(r['prefill_tok']):>11} {str(r['prefill_tok_s']):>13} {str(r['ttft_ms']):>9}")
+        print(f"  {r['prompt_chars']:>12} {r['prefill_tok']!s:>11} {r['prefill_tok_s']!s:>13} {r['ttft_ms']!s:>9}")
     t = result["thinking_toggle"]
     print("\nThinking toggle (reasoning ON vs OFF, same task):")
     print(f"  think ON wall={t['think_on_wall_s']}s ({t['think_on_gen_tok']} tok)  "
