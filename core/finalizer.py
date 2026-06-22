@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from core import audit_logger
-from core.final_response_store import set_anchored_signature, store_final_response
+from core.final_response_store import store_final_response
 from core.identity_manager import load_active_persona, render_with_persona
 from core.liquefy_bridge import export_task_bundle
-from core.solana_anchor import anchor_enabled, anchor_vault_proof
+from core.solana_anchor import dispatch_anchor_in_background
 from core.task_reassembler import ReassembledPlan
 from core.task_reassembler import check_and_reassemble as reassemble_parent_task
 from storage.db import get_connection
@@ -183,16 +183,13 @@ def finalize_parent_response(parent_task_id: str, *, persona_id: str = "default"
     )
 
     export_task_bundle(parent_task_id)
-    # Gated: a real anchor broadcasts a SOL-spending tx, so only fire when opted in
-    # (shared helper keeps this in lockstep with the API service's gate).
-    if anchor_enabled():
-        # anchor_vault_proof returns the real tx signature (or None on any
-        # failure). Capture it and persist on the finalized row so the receipt
-        # links to its on-chain proof. Behavior is unchanged when anchoring is
-        # off (the gate above) or when the broadcast fails (signature is None).
-        signature = anchor_vault_proof(parent_task_id, plan.result_hash or parent_task_id, plan.confidence)
-        if signature:
-            set_anchored_signature(parent_task_id, signature)
+    # Gated + off-thread: a real anchor does serial blocking RPC (up to ~30s),
+    # so it must never run inline on the user's finalize turn. dispatch_anchor_in_background
+    # is a strict no-op unless anchoring is opted in (NULLA_ANCHOR_RECEIPTS=1), and
+    # when enabled it spawns a daemon worker that broadcasts and persists the real
+    # tx signature onto the finalized row (set_anchored_signature) once the tx lands.
+    # The shared gate keeps this in lockstep with the API service's anchor path.
+    dispatch_anchor_in_background(parent_task_id, plan.result_hash or parent_task_id, plan.confidence)
 
     return FinalizedResponse(
         parent_task_id=parent_task_id,

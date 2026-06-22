@@ -1,7 +1,9 @@
 system:
   advice_only_default: true
   local_only_mode: false
-  allow_web_fallback: true
+  # Web access is opt-in and off by default. Enable with NULLA_ENABLE_WEB=1
+  # (or NULLA_ALLOW_WEB=1), or set this to true here, to allow live web lookup.
+  allow_web_fallback: false
   allow_swarm_queries: true
   max_datagram_bytes: 32768
   max_message_bytes: 262144

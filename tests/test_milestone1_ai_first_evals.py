@@ -433,6 +433,7 @@ def test_eval_planner_leak_rejection(
 def test_eval_honest_degradation(
     make_agent,
     context_result_factory,
+    enable_web,
     label: str,
     prompt: str,
     decision: ModelExecutionDecision,

@@ -198,6 +198,29 @@ The launcher resolves the gateway token from the strongest available state sourc
 If you deliberately run OpenClaw from a custom home, set `OPENCLAW_STATE_DIR` or `OPENCLAW_HOME` before opening NULLA so the launcher does not guess the wrong gateway token.
 If you deliberately run NULLA from a custom runtime home, set `NULLA_HOME` before opening the launcher so the OpenClaw bridge points at the runtime you actually want to test.
 
+## Web Access (opt-in)
+
+NULLA is local-first. Live web lookup (`web.search`, `web.fetch`, `web.research`, browser render) is opt-in and off by default, so a fresh runtime never reaches out to the network for answers unless you deliberately turn it on.
+
+Enable web for a session with either environment variable:
+
+```bash
+NULLA_ENABLE_WEB=1 .venv/bin/python -m apps.nulla_cli web "latest qwen release notes"
+# NULLA_ALLOW_WEB=1 is accepted as an alias
+```
+
+To make it persistent, export the flag in your shell profile or set `system.allow_web_fallback: true` in `config/default_policy.yaml`.
+
+Drive web directly from the CLI or chat once it is enabled:
+
+```bash
+.venv/bin/python -m apps.nulla_cli web "telegram bot api docs"     # search
+.venv/bin/python -m apps.nulla_cli web --fetch https://example.com  # fetch one URL
+.venv/bin/python -m apps.nulla_cli web --browse https://example.com # render JS-heavy page
+```
+
+In chat, use `/web <query>`. While web is off, both surfaces print a clear note pointing you to `NULLA_ENABLE_WEB=1`, and `GET /api/runtime/capabilities` reports `web.live_lookup` and `browser_render` as unsupported with that same enable hint.
+
 ## Common Notes
 
 - NULLA is alpha. Read [STATUS.md](STATUS.md) before assuming a surface is production-ready.

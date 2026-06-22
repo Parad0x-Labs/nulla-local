@@ -184,6 +184,29 @@ def block_live_local_ollama_under_pytest(monkeypatch):
 
 
 @pytest.fixture
+def enable_web():
+    """Explicitly turn on the opt-in web lookup for a single test.
+
+    Web access is off by default; tests that exercise the live web tools must
+    deliberately enable it. This flips `system.allow_web_fallback` in the cached
+    policy and restores the prior cache afterwards.
+    """
+    from core import policy_engine
+
+    previous_cache = getattr(policy_engine, "_POLICY_CACHE", None)
+    base = dict(policy_engine.load())
+    system = dict(base.get("system") or {})
+    system["allow_web_fallback"] = True
+    system["local_only_mode"] = False
+    base["system"] = system
+    policy_engine._POLICY_CACHE = base
+    try:
+        yield
+    finally:
+        policy_engine._POLICY_CACHE = previous_cache
+
+
+@pytest.fixture
 def context_result_factory():
     return make_stub_context
 

@@ -600,6 +600,7 @@ def test_smoke_planner_leakage_is_absent_from_representative_outputs(make_agent,
 def test_smoke_fuzzy_entity_and_forced_lookup_cases(
     make_agent,
     context_result_factory,
+    enable_web,
     prompt,
     reply,
     planned_search_side_effect,
@@ -635,7 +636,7 @@ def test_smoke_fuzzy_entity_and_forced_lookup_cases(
     _assert_clean_surface_text(result["response"])
 
 
-def test_smoke_weak_fuzzy_entity_match_admits_uncertainty_instead_of_filler(make_agent, context_result_factory):
+def test_smoke_weak_fuzzy_entity_match_admits_uncertainty_instead_of_filler(make_agent, context_result_factory, enable_web):
     agent = make_agent()
     _configure_lookup_agent(
         agent,

@@ -747,7 +747,7 @@ def test_greeting_evaluative_and_help_emit_fast_path_metrics(
         assert event["template_renderer_hit"] is False
 
 
-def test_live_info_emits_model_wording_metrics_with_web_backing(make_agent, context_result_factory):
+def test_live_info_emits_model_wording_metrics_with_web_backing(make_agent, context_result_factory, enable_web):
     agent = make_agent()
     agent.context_loader.load = mock.Mock(return_value=context_result_factory())  # type: ignore[assignment]
     agent.memory_router.resolve = mock.Mock(  # type: ignore[assignment]

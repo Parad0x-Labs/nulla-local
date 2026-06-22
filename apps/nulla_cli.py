@@ -244,6 +244,79 @@ def cmd_resolve(name: str, *, json_mode: bool = False) -> int:
     return 0 if payload.get("resolved") else 1
 
 
+WEB_DISABLED_MESSAGE = "Web access is off. Enable it with NULLA_ENABLE_WEB=1 (web is opt-in and off by default)."
+
+
+def _run_web_intent(intent: str, arguments: dict[str, object]) -> object:
+    """Dispatch a single web tool intent through the canonical executor.
+
+    Only reached when web is enabled; the caller gates on the policy flag so no
+    network call happens while web is off.
+    """
+    from core.hive_activity_tracker import HiveActivityTracker
+    from core.tool_intent_executor import execute_tool_intent
+
+    return execute_tool_intent(
+        {"intent": intent, "arguments": dict(arguments)},
+        task_id="cli-web",
+        session_id="cli-web",
+        source_context={"surface": "cli", "platform": "nulla-cli"},
+        hive_activity_tracker=HiveActivityTracker(),
+    )
+
+
+def cmd_web(
+    *,
+    query: str = "",
+    fetch_url: str = "",
+    render_url: str = "",
+    limit: int = 5,
+    json_mode: bool = False,
+) -> int:
+    """Run a live web search/fetch/browse, only when web access is opted in."""
+    if fetch_url:
+        intent, arguments, requested = "web.fetch", {"url": fetch_url}, fetch_url
+    elif render_url:
+        intent, arguments, requested = "browser.render", {"url": render_url}, render_url
+    else:
+        clean_query = str(query or "").strip()
+        if not clean_query:
+            print("usage: nulla web <query> | --fetch <url> | --browse <url>")
+            return 2
+        intent, arguments, requested = (
+            "web.search",
+            {"query": clean_query, "limit": max(1, min(int(limit or 5), 5))},
+            clean_query,
+        )
+
+    if not policy_engine.allow_web_fallback():
+        if json_mode:
+            _emit_json({"intent": intent, "enabled": False, "message": WEB_DISABLED_MESSAGE})
+        else:
+            print(WEB_DISABLED_MESSAGE)
+        return 2
+
+    _bootstrap_cli_storage()
+    execution = _run_web_intent(intent, arguments)
+    response_text = str(getattr(execution, "response_text", "") or "").strip()
+    ok = bool(getattr(execution, "ok", False))
+    status = str(getattr(execution, "status", "") or "").strip()
+    if json_mode:
+        _emit_json(
+            {
+                "intent": intent,
+                "enabled": True,
+                "requested": requested,
+                "ok": ok,
+                "status": status,
+                "response_text": response_text,
+            }
+        )
+        return 0 if ok else 1
+    print(response_text or f"web {intent} returned no output (status={status or 'unknown'}).")
+    return 0 if ok else 1
+
+
 _RECEIPT_EVENT_TYPES = ("solana_proof_anchored", "parent_output_finalized")
 
 
@@ -1239,6 +1312,16 @@ def build_parser() -> argparse.ArgumentParser:
     resolve.add_argument("name", help="The .null name to resolve, e.g. web0.null")
     resolve.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
 
+    web = sub.add_parser(
+        "web",
+        help="Live web search/fetch/browse. Opt-in: off unless NULLA_ENABLE_WEB=1 is set.",
+    )
+    web.add_argument("query", nargs="*", help="Search query words.")
+    web.add_argument("--fetch", default="", metavar="URL", help="Fetch text from a specific URL instead of searching.")
+    web.add_argument("--browse", default="", metavar="URL", help="Render a JS-heavy URL instead of searching.")
+    web.add_argument("--limit", type=int, default=5, help="Max search results (1-5).")
+    web.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
+
     receipts = sub.add_parser("receipts", help="Show locally recorded anchored/finalized proofs with explorer links.")
     receipts.add_argument("--limit", type=int, default=20, help="Number of recent receipts to show.")
     receipts.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
@@ -1420,6 +1503,14 @@ def main() -> int:
         return cmd_summary(json_mode=bool(args.json), limit=int(args.limit))
     if args.command == "resolve":
         return cmd_resolve(str(args.name or ""), json_mode=bool(args.json))
+    if args.command == "web":
+        return cmd_web(
+            query=" ".join(list(args.query or [])),
+            fetch_url=str(args.fetch or ""),
+            render_url=str(args.browse or ""),
+            limit=int(args.limit),
+            json_mode=bool(args.json),
+        )
     if args.command == "receipts":
         return cmd_receipts(limit=int(args.limit), json_mode=bool(args.json))
     if args.command == "manifest":

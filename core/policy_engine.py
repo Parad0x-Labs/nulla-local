@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from threading import RLock
 from typing import Any
 
@@ -12,7 +13,7 @@ _DEFAULT_POLICY = {
     "system": {
         "advice_only_default": True,
         "local_only_mode": False,
-        "allow_web_fallback": True,
+        "allow_web_fallback": False,
         "allow_swarm_queries": True,
         "max_datagram_bytes": 32768,
         "max_message_bytes": 262144,
@@ -306,6 +307,25 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
             result[k] = v
     return result
 
+
+def _env_is_truthy(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _apply_env_overrides(config: dict[str, Any], env: dict[str, str] | None = None) -> dict[str, Any]:
+    """Apply explicit, documented environment opt-ins on top of file/default policy.
+
+    Web access is opt-in and off by default. Setting `NULLA_ENABLE_WEB=1`
+    (or its alias `NULLA_ALLOW_WEB=1`) deliberately enables live web lookup by
+    mapping to `system.allow_web_fallback=True` at load time.
+    """
+    env_map = os.environ if env is None else env
+    if _env_is_truthy(env_map.get("NULLA_ENABLE_WEB")) or _env_is_truthy(env_map.get("NULLA_ALLOW_WEB")):
+        system = dict(config.get("system") or {})
+        system["allow_web_fallback"] = True
+        config["system"] = system
+    return config
+
 def load(force_reload: bool = False) -> dict[str, Any]:
     global _POLICY_CACHE
 
@@ -321,6 +341,8 @@ def load(force_reload: bool = False) -> dict[str, Any]:
                 if not isinstance(user_policy, dict):
                     raise ValueError("Policy file must contain a YAML mapping/object.")
                 config = _deep_merge(config, user_policy)
+
+        config = _apply_env_overrides(config)
 
         _POLICY_CACHE = config
         return _POLICY_CACHE
@@ -340,7 +362,7 @@ def local_only_mode() -> bool:
     return bool(get("system.local_only_mode", False))
 
 def allow_web_fallback() -> bool:
-    return bool(get("system.allow_web_fallback", True)) and not local_only_mode()
+    return bool(get("system.allow_web_fallback", False)) and not local_only_mode()
 
 def allow_remote_only_without_backend() -> bool:
     return bool(get("system.allow_remote_only_without_backend", True)) and not local_only_mode()

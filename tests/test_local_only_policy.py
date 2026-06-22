@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from core import policy_engine
 from core.model_selection_policy import ModelSelectionRequest, select_provider
@@ -81,6 +82,47 @@ class LocalOnlyPolicyTests(unittest.TestCase):
             "risk_flags": [],
         }
         self.assertFalse(policy_engine.validate_outbound_shard(shard, share_scope="local_only"))
+
+
+class WebOptInPolicyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._old_cache = getattr(policy_engine, "_POLICY_CACHE", None)
+
+    def tearDown(self) -> None:
+        policy_engine._POLICY_CACHE = self._old_cache
+
+    def test_web_is_off_by_default(self) -> None:
+        # No opt-in env set: web stays off after a fresh policy load.
+        with mock.patch.dict("os.environ", {}, clear=False) as env:
+            env.pop("NULLA_ENABLE_WEB", None)
+            env.pop("NULLA_ALLOW_WEB", None)
+            policy_engine._POLICY_CACHE = None
+            policy_engine.load(force_reload=True)
+            self.assertFalse(policy_engine.allow_web_fallback())
+
+    def test_web_default_value_in_code_default_policy_is_off(self) -> None:
+        self.assertFalse(policy_engine._DEFAULT_POLICY["system"]["allow_web_fallback"])
+
+    def test_nulla_enable_web_env_turns_web_on(self) -> None:
+        with mock.patch.dict("os.environ", {"NULLA_ENABLE_WEB": "1"}, clear=False):
+            policy_engine._POLICY_CACHE = None
+            policy_engine.load(force_reload=True)
+            self.assertTrue(policy_engine.allow_web_fallback())
+
+    def test_nulla_allow_web_alias_turns_web_on(self) -> None:
+        with mock.patch.dict("os.environ", {"NULLA_ALLOW_WEB": "true"}, clear=False) as env:
+            env.pop("NULLA_ENABLE_WEB", None)
+            policy_engine._POLICY_CACHE = None
+            policy_engine.load(force_reload=True)
+            self.assertTrue(policy_engine.allow_web_fallback())
+
+    def test_opt_in_env_still_blocked_by_local_only_mode(self) -> None:
+        # Local-only mode is an even stronger guarantee than the web opt-in.
+        with mock.patch.dict("os.environ", {"NULLA_ENABLE_WEB": "1"}, clear=False):
+            policy_engine._POLICY_CACHE = {
+                "system": {"local_only_mode": True, "allow_web_fallback": True}
+            }
+            self.assertFalse(policy_engine.allow_web_fallback())
 
 
 if __name__ == "__main__":
