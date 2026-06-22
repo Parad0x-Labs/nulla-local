@@ -41,6 +41,37 @@ def circuit_is_open(provider_id: str) -> bool:
     return get_provider_health(provider_id).circuit_open
 
 
+# Default time-to-live for trusting a recent successful invocation as an
+# implicit health signal, in seconds. After a success the per-invocation probe
+# can be skipped until this window elapses.
+DEFAULT_HEALTH_PROBE_TTL_SECONDS: float = 30.0
+
+
+def should_probe_health(provider_id: str, *, ttl_seconds: float = DEFAULT_HEALTH_PROBE_TTL_SECONDS) -> bool:
+    """Return True when a per-invocation health probe is warranted.
+
+    The probe is skipped only when the provider's circuit is closed AND it
+    succeeded within ``ttl_seconds`` ago. The probe is always run on first use
+    (no recorded success), when the circuit is open, once the TTL elapses, and
+    after any failure (a failure clears the recent-success window because a
+    later failure updates ``last_failure_at`` without refreshing
+    ``last_success_at``).
+    """
+    state = get_provider_health(provider_id)
+    if state.circuit_open:
+        return True
+    last_success = state.last_success_at
+    if last_success is None:
+        return True
+    if ttl_seconds <= 0:
+        return True
+    last_failure = state.last_failure_at
+    if last_failure is not None and last_failure >= last_success:
+        # The most recent signal was a failure; re-probe before trusting it.
+        return True
+    return (time.time() - last_success) >= ttl_seconds
+
+
 def record_provider_success(provider_id: str) -> None:
     state = get_provider_health(provider_id)
     state.total_successes += 1

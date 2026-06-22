@@ -14,7 +14,7 @@ from core.compute_mode import get_active_compute_budget
 from core.local_inference_autopilot import build_local_inference_autopilot_plan
 from core.local_inference_evidence import hydrate_capability_truth_with_benchmarks
 from core.local_model_bundles import model_parameter_billions
-from core.model_health import circuit_is_open, record_provider_failure, record_provider_success
+from core.model_health import circuit_is_open, record_provider_failure, record_provider_success, should_probe_health
 from core.model_registry import ModelRegistry
 from core.model_selection_policy import provider_cost_class
 from core.model_trust import output_trust_score
@@ -242,17 +242,18 @@ class MemoryFirstRouter:
             return None, None, "circuit_open"
 
         adapter = self.registry.build_adapter(manifest)
-        health = adapter.health_check()
-        if not bool(health.get("ok")):
-            record_provider_failure(manifest.provider_id, error=str(health.get("error") or "health_check_failed"))
-            audit_logger.log(
-                "model_provider_unhealthy",
-                target_id=manifest.provider_id,
-                target_type="model_provider",
-                trace_id=getattr(task, "task_id", None),
-                details={"health": health},
-            )
-            return adapter, None, str(health.get("error") or "health_check_failed")
+        if should_probe_health(manifest.provider_id):
+            health = adapter.health_check()
+            if not bool(health.get("ok")):
+                record_provider_failure(manifest.provider_id, error=str(health.get("error") or "health_check_failed"))
+                audit_logger.log(
+                    "model_provider_unhealthy",
+                    target_id=manifest.provider_id,
+                    target_type="model_provider",
+                    trace_id=getattr(task, "task_id", None),
+                    details={"health": health},
+                )
+                return adapter, None, str(health.get("error") or "health_check_failed")
 
         try:
             if output_mode in _STRUCTURED_OUTPUT_MODES:

@@ -1,7 +1,7 @@
 # Public Launch Readiness
 
 **Last updated:** 2026-06-19  
-**Status:** Launch-ready. All Web0 gaps closed. CI green on `5d79c24`.
+**Status:** Alpha. Core runtime + memory working on `main`; payments are simulated (credit ledger), the Solana receipt anchor is opt-in / off by default, WAN mesh is experimental. Per-feature status: `GET /api/runtime/capabilities`. CI green.
 
 ## Research Quality
 
