@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import base64
+import hmac
 import html
 import json
 import os
 import secrets
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -15,6 +18,9 @@ from core.nulla_wallet import decode_solana_pubkey, verify_wallet_signature
 
 DEFAULT_GATE_URL = "http://127.0.0.1:11435/gate/unlock"
 GATE_MODE_SERVER_WHITELIST = "server_whitelist"
+# Default lifetime of a server-issued gate nonce. Short enough to close the
+# replay window, long enough for a human to approve a wallet signature.
+GATE_NONCE_TTL_SECONDS = 120.0
 _CONTENT_AAD_PREFIX = b"nulla-web0-gated-content:v1:"
 _KEY_STORE_AAD = b"nulla-web0-gate-key-store:v1"
 _GATE_CORS_HEADERS = {
@@ -158,6 +164,72 @@ def decrypt_content_block(block: GatedBlock, aes_key: bytes) -> str:
 
 def make_gate_challenge(block_id: str, wallet_pubkey: str) -> str:
     return f"nulla-gate-v1:{block_id}:{wallet_pubkey}"
+
+
+def make_gate_challenge_v2(block_id: str, wallet_pubkey: str, server_nonce: str) -> str:
+    """Replay-resistant challenge bound to a fresh, server-issued nonce.
+
+    Same block/wallet binding as v1 plus a server nonce that the gate hands out
+    per attempt and accepts exactly once, within a short TTL, closing the replay
+    window left open by the static v1 challenge.
+    """
+    return f"nulla-gate-v2:{block_id}:{wallet_pubkey}:{server_nonce}"
+
+
+class GateChallengeStore:
+    """Issues fresh, single-use, short-TTL server nonces for gate unlocks.
+
+    A challenge is bound to ``(block_id, wallet_pubkey)`` so a nonce issued for
+    one wallet/block cannot be replayed against another. Nonces are consumed on
+    first valid use and expire after ``ttl_seconds``. In-process only: a random
+    nonce per issue, no external dependency, no on-chain call.
+    """
+
+    def __init__(self, *, ttl_seconds: float = GATE_NONCE_TTL_SECONDS) -> None:
+        self._ttl = float(ttl_seconds)
+        self._lock = RLock()
+        # nonce -> (block_id, wallet_pubkey, expires_at)
+        self._issued: dict[str, tuple[str, str, float]] = {}
+
+    def _now(self) -> float:
+        return time.monotonic()
+
+    def _purge_expired(self, now: float) -> None:
+        expired = [nonce for nonce, (_, _, exp) in self._issued.items() if exp <= now]
+        for nonce in expired:
+            self._issued.pop(nonce, None)
+
+    def issue(self, block_id: str, wallet_pubkey: str) -> str:
+        """Mint a fresh server nonce for this block/wallet and return the full challenge."""
+        block_id = str(block_id)
+        wallet_pubkey = str(wallet_pubkey)
+        server_nonce = secrets.token_urlsafe(24)
+        now = self._now()
+        with self._lock:
+            self._purge_expired(now)
+            self._issued[server_nonce] = (block_id, wallet_pubkey, now + self._ttl)
+        return make_gate_challenge_v2(block_id, wallet_pubkey, server_nonce)
+
+    def consume(self, block_id: str, wallet_pubkey: str, challenge: str) -> bool:
+        """Validate and burn a v2 challenge. True only for a fresh, matching, unexpired one."""
+        block_id = str(block_id)
+        wallet_pubkey = str(wallet_pubkey)
+        parts = str(challenge or "").split(":", 3)
+        if len(parts) != 4 or parts[0] != "nulla-gate-v2":
+            return False
+        c_block, c_wallet, server_nonce = parts[1], parts[2], parts[3]
+        if not hmac.compare_digest(c_block, block_id) or not hmac.compare_digest(c_wallet, wallet_pubkey):
+            return False
+        now = self._now()
+        with self._lock:
+            self._purge_expired(now)
+            record = self._issued.pop(server_nonce, None)  # single use: pop unconditionally
+        if record is None:
+            return False
+        rec_block, rec_wallet, expires_at = record
+        if expires_at <= now:
+            return False
+        return hmac.compare_digest(rec_block, block_id) and hmac.compare_digest(rec_wallet, wallet_pubkey)
 
 
 def render_gated_block_html(block: GatedBlock) -> str:
@@ -383,8 +455,24 @@ class WalletKeyStore:
 
 
 class NullaGateHandler:
-    def __init__(self, wallet_store: WalletKeyStore) -> None:
+    def __init__(
+        self,
+        wallet_store: WalletKeyStore,
+        *,
+        challenge_store: GateChallengeStore | None = None,
+    ) -> None:
         self._store = wallet_store
+        # When a challenge store is supplied the gate requires a fresh,
+        # single-use, short-TTL server nonce (v2), closing the replay window of
+        # the static v1 challenge. When omitted, the static v1 path is kept for
+        # backward compatibility.
+        self._challenge_store = challenge_store
+
+    def issue_challenge(self, block_id: str, wallet_pubkey: str) -> str | None:
+        """Mint a fresh server-bound challenge, or None if no challenge store is configured."""
+        if self._challenge_store is None:
+            return None
+        return self._challenge_store.issue(block_id, wallet_pubkey)
 
     def handle(self, body: dict[str, Any]) -> dict[str, Any]:
         block_id = str(body.get("block_id") or "").strip()
@@ -397,7 +485,10 @@ class NullaGateHandler:
             decode_solana_pubkey(wallet_pubkey)
         except Exception:
             return {"error": "invalid_wallet_pubkey"}
-        if nonce != make_gate_challenge(block_id, wallet_pubkey):
+        if self._challenge_store is not None:
+            if not self._challenge_store.consume(block_id, wallet_pubkey, nonce):
+                return {"error": "invalid_nonce"}
+        elif nonce != make_gate_challenge(block_id, wallet_pubkey):
             return {"error": "invalid_nonce"}
         try:
             signature = base64.b64decode(signature_b64, validate=True)
@@ -413,7 +504,9 @@ class NullaGateHandler:
 
 __all__ = [
     "DEFAULT_GATE_URL",
+    "GATE_NONCE_TTL_SECONDS",
     "EncryptedGatedBlock",
+    "GateChallengeStore",
     "GatedBlock",
     "GatedBlockSecret",
     "NullaGateHandler",
@@ -422,6 +515,7 @@ __all__ = [
     "encrypt_content_block",
     "gate_cors_headers",
     "make_gate_challenge",
+    "make_gate_challenge_v2",
     "render_gated_block_css",
     "render_gated_block_html",
 ]

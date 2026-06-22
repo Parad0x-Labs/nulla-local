@@ -14,7 +14,9 @@ ed25519 curve dependency is needed).
 from __future__ import annotations
 
 import base64
+import re
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 # Reuse the ONE compliant RPC path (publicnode endpoints only — never the
 # Origin-403 api.mainnet-beta endpoint) and the base58 codec, so there is no
@@ -58,6 +60,46 @@ def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
+# --- x402 endpoint validation ----------------------------------------------
+# An on-chain x402 endpoint is attacker-controllable (anyone can register a
+# .null name and point its endpoint anywhere), and it flows straight into a
+# payment path / the agent surface. Before it leaves this module we require a
+# well-formed https:// URL (http:// only for an explicit localhost loopback,
+# for local dev) with a sane charset and length. Anything else (javascript:,
+# data:, file:, embedded control bytes, an over-long blob) is blanked.
+_ENDPOINT_MAX_LEN = _X402_ENDPOINT_LEN  # the on-chain field is 128 bytes
+# URL charset per RFC 3986 (no spaces / control chars / non-ASCII); printable
+# ASCII minus space and the delimiters that have no place in a stored URL.
+_ENDPOINT_CHARSET = re.compile(r"^[A-Za-z0-9._~:/?#@!$&'()*+,;=%\[\]-]+$")
+_LOCALHOST_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]", "::1"})
+
+
+def is_valid_x402_endpoint(endpoint: str) -> bool:
+    """True only for a payment-safe endpoint URL.
+
+    Accepts https:// with any host, and http:// only for a localhost loopback
+    (local dev). Rejects every other scheme (javascript:, data:, file:, ftp:,
+    bare http to a remote host), empty/over-long values, and any value carrying
+    a non-URL character (space, control byte, non-ASCII).
+    """
+    if not isinstance(endpoint, str) or not endpoint:
+        return False
+    if len(endpoint) > _ENDPOINT_MAX_LEN:
+        return False
+    if not _ENDPOINT_CHARSET.match(endpoint):
+        return False
+    try:
+        parsed = urlparse(endpoint)
+    except ValueError:
+        return False
+    scheme = parsed.scheme.lower()
+    if scheme == "https":
+        return bool(parsed.hostname)
+    if scheme == "http":
+        return (parsed.hostname or "").lower() in _LOCALHOST_HOSTS
+    return False
+
+
 def decode_null_domain(raw: bytes) -> NullDomainRecord | None:
     """Decode a raw NullDomain account blob. None if too short / wrong discriminator."""
     if len(raw) < NULL_DOMAIN_SIZE or raw[0] != NULL_DOMAIN_DISC:
@@ -69,6 +111,10 @@ def decode_null_domain(raw: bytes) -> NullDomainRecord | None:
     ep = raw[_OFF_X402_ENDPOINT : _OFF_X402_ENDPOINT + _X402_ENDPOINT_LEN]
     cut = ep.find(b"\x00")
     x402_endpoint = ep[: (cut if cut != -1 else len(ep))].decode("utf-8", "replace")
+    # Only surface a payment-safe endpoint; blank anything malformed/unsafe so it
+    # never reaches a payment path or the agent. "" already means "unset".
+    if x402_endpoint and not is_valid_x402_endpoint(x402_endpoint):
+        x402_endpoint = ""
     ph = raw[_OFF_PASSPORT_HASH : _OFF_PASSPORT_HASH + 32]
     passport_hash = ph.hex() if any(ph) else None
     return NullDomainRecord(
@@ -121,6 +167,10 @@ def resolve_x402_endpoint(name: str, **kwargs) -> str | None:
     rec = resolve_null_domain(name, **kwargs)
     if rec is None or not rec.x402_endpoint:
         return None
+    # Defensive re-validation: never hand a payment path an unsafe endpoint,
+    # even if the record was built outside decode_null_domain.
+    if not is_valid_x402_endpoint(rec.x402_endpoint):
+        return None
     return rec.x402_endpoint
 
 
@@ -129,6 +179,7 @@ __all__ = [
     "NullDomainRecord",
     "decode_null_domain",
     "domain_filters",
+    "is_valid_x402_endpoint",
     "pad_name64",
     "resolve_null_domain",
     "resolve_x402_endpoint",
