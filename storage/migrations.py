@@ -795,6 +795,7 @@ CREATE TABLE IF NOT EXISTS compute_credit_ledger (
     reason TEXT NOT NULL,
     receipt_id TEXT,
     settlement_mode TEXT NOT NULL DEFAULT 'simulated',
+    receipt_hash TEXT NOT NULL DEFAULT '',
     timestamp TEXT NOT NULL,
     UNIQUE(receipt_id)
 );
@@ -1288,6 +1289,7 @@ def run_migrations(db_path=None) -> None:
         _add_column_if_missing(conn, "contribution_ledger", "finality_target", "INTEGER NOT NULL DEFAULT 2")
         _add_column_if_missing(conn, "contribution_ledger", "confirmed_at", "TEXT")
         _add_column_if_missing(conn, "contribution_ledger", "finalized_at", "TEXT")
+        _add_column_if_missing(conn, "compute_credit_ledger", "receipt_hash", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "task_capsules", "parent_task_ref", "TEXT")
         _add_column_if_missing(conn, "task_capsules", "verification_of_task_id", "TEXT")
         _add_column_if_missing(conn, "task_assignments", "capability_token_id", "TEXT")

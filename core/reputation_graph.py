@@ -20,6 +20,13 @@ class PeerGraphMetrics:
     pair_concentration: float
     mean_helpfulness: float
     closed_loop_risk: float
+    # Proof-of-settlement aggregates (sourced from compute_credit_ledger).
+    # ``settled_amount`` = reward total backed by REAL on-chain receipts
+    # ('mainnet'/'devnet'); ``simulated_amount`` = reward total still 'simulated'.
+    # ``settled_reputation`` is DEFAULT-NEUTRAL (0.5) until real receipts exist.
+    settled_amount: float = 0.0
+    simulated_amount: float = 0.0
+    settled_reputation: float = 0.5
 
 
 @dataclass
@@ -46,6 +53,59 @@ def _clamp(v: float) -> float:
 
 def _window_start(days: int) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+# Settlement modes that denote a payout backed by a REAL on-chain receipt.
+_SETTLED_MODES = ("mainnet", "devnet")
+
+
+def settled_ratio(settled_amount: float, simulated_amount: float) -> float:
+    """Proof-of-settlement reputation in [0, 1], DEFAULT-NEUTRAL at 0.5.
+
+    The signal is the helper's REAL-settled standing. It is neutral (0.5)
+    whenever the helper has ZERO real (mainnet/devnet) settled rewards,
+    REGARDLESS of how many simulated rewards they hold — a simulated-only
+    helper and an idle helper both score 0.5 and are never reordered relative
+    to each other. We NEVER divide settled by total (that would sink a
+    simulated-only helper to 0.0 below an idle newcomer). Once real receipts
+    exist, the ratio rises with the share of reward value that is on-chain.
+    """
+    settled = max(0.0, float(settled_amount or 0.0))
+    if settled <= 0.0:
+        return 0.5
+    simulated = max(0.0, float(simulated_amount or 0.0))
+    denom = settled + simulated
+    if denom <= 0.0:
+        return 0.5
+    return _clamp(0.5 + 0.5 * (settled / denom))
+
+
+def _peer_settlement_totals(peer_id: str) -> tuple[float, float]:
+    """Return (settled_amount, simulated_amount) of positive credit rewards.
+
+    ``settled_amount`` sums payouts stamped with an on-chain settlement mode
+    ('mainnet'/'devnet'); ``simulated_amount`` sums payouts left 'simulated'.
+    Only positive amounts (rewards received) count; spends are ignored.
+    """
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN settlement_mode IN ('mainnet', 'devnet')
+                                  THEN amount ELSE 0 END), 0) AS settled,
+                COALESCE(SUM(CASE WHEN settlement_mode NOT IN ('mainnet', 'devnet')
+                                  THEN amount ELSE 0 END), 0) AS simulated
+            FROM compute_credit_ledger
+            WHERE peer_id = ? AND amount > 0
+            """,
+            (peer_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return 0.0, 0.0
+    return float(row["settled"] or 0.0), float(row["simulated"] or 0.0)
 
 
 def _record_signal(
@@ -147,6 +207,8 @@ def peer_graph_metrics(peer_id: str, *, days: int = 7) -> PeerGraphMetrics:
         + (0.20 * (1.0 if distinct <= 1 and total >= 4 else 0.0))
     )
 
+    settled_amount, simulated_amount = _peer_settlement_totals(peer_id)
+
     return PeerGraphMetrics(
         peer_id=peer_id,
         total_interactions=total,
@@ -156,6 +218,9 @@ def peer_graph_metrics(peer_id: str, *, days: int = 7) -> PeerGraphMetrics:
         pair_concentration=pair_concentration,
         mean_helpfulness=mean_helpfulness,
         closed_loop_risk=closed_loop_risk,
+        settled_amount=settled_amount,
+        simulated_amount=simulated_amount,
+        settled_reputation=settled_ratio(settled_amount, simulated_amount),
     )
 
 
@@ -240,6 +305,50 @@ def pair_graph_risk(parent_peer_id: str, helper_peer_id: str, *, days: int = 7) 
         hard_block=hard_block,
         reasons=reasons,
     )
+
+
+def peer_settlement_reputation(peer_id: str) -> float:
+    """Proof-of-settlement reputation for a peer, DEFAULT-NEUTRAL 0.5.
+
+    Returns 0.5 (a no-op) whenever the peer has no real-receipt-backed payouts —
+    the current state and CI — regardless of how many simulated rewards it holds.
+    """
+    settled, simulated = _peer_settlement_totals(peer_id)
+    return settled_ratio(settled, simulated)
+
+
+def settlement_reputation_for_pair(
+    parent_peer_id: str,
+    helper_peer_id: str,
+    *,
+    days: int = 7,
+) -> float:
+    """Wash-trade-discounted proof-of-settlement reputation for a helper.
+
+    The helper's settled reputation is discounted toward neutral (0.5) in
+    proportion to intra-pair wash-trading risk, reusing the existing
+    PairGraphRisk closed_loop / pair_concentration signals. With no real
+    receipts the helper's settled reputation is already 0.5, so the result
+    stays 0.5 (a no-op).
+    """
+    base = peer_settlement_reputation(helper_peer_id)
+    if base <= 0.5:
+        # Only a payout-backed *advantage* (reputation > 0.5) can be wash-traded
+        # up, so there is nothing to discount when the helper is at/below neutral.
+        return base
+
+    risk = pair_graph_risk(parent_peer_id, helper_peer_id, days=days)
+    # Blend the pair-level closed-loop concentration into a single discount in
+    # [0, 1]; 1.0 fully collapses the advantage back to neutral.
+    discount = _clamp(
+        max(
+            risk.risk_score if risk.hard_block else 0.0,
+            0.60 * risk.risk_score,
+            0.40 * risk.pair_share_of_helper,
+        )
+    )
+    advantage = base - 0.5
+    return _clamp(0.5 + advantage * (1.0 - discount))
 
 
 def record_pair_graph_signal(
