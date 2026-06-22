@@ -9,8 +9,24 @@ from typing import Any
 _ANNOUNCE_ENV_KEYS = ("NULLA_WEB0_ANNOUNCE", "WEB0_ANNOUNCE")
 _MESH_URL_ENV_KEYS = ("NULLA_WEB0_MESH_URL", "WEB0_MESH_URL")
 _WORKER_ID_ENV_KEYS = ("NULLA_WORKER_ID", "NULLA_AGENT_ID")
+_PRICE_ENV_KEYS = ("NULLA_WEB0_PRICE_PER_TOKEN", "WEB0_PRICE_PER_TOKEN")
+_PRIVACY_ENV_KEYS = ("NULLA_WEB0_PRIVACY_MODE", "WEB0_PRIVACY_MODE")
 
 DEFAULT_PRICE_PER_TOKEN = 0.000001  # 1 micro-USDC per output token
+VALID_PRIVACY_MODES = ("plain", "zk_ready", "zk_active")
+
+
+def resolve_announced_price_usdc(
+    env: Mapping[str, str], *, default: float = DEFAULT_PRICE_PER_TOKEN
+) -> float:
+    """Per-output-token price this node advertises, from env. Clamped >= 0."""
+    return max(0.0, _env_float(env, *_PRICE_ENV_KEYS, default=default))
+
+
+def resolve_privacy_mode(env: Mapping[str, str]) -> str:
+    """Advertised privacy posture from env; falls back to 'plain' if unset/invalid."""
+    mode = _env_first(env, *_PRIVACY_ENV_KEYS).lower()
+    return mode if mode in VALID_PRIVACY_MODES else "plain"
 
 
 @dataclass(frozen=True)
@@ -65,9 +81,8 @@ def build_manifest_from_env(
     return build_manifest(
         worker_id=worker_id,
         provider_ids=(),
-        price_per_token_usdc=_env_float(
-            env_map, "NULLA_WEB0_PRICE_PER_TOKEN", default=DEFAULT_PRICE_PER_TOKEN
-        ),
+        price_per_token_usdc=resolve_announced_price_usdc(env_map),
+        privacy_mode=resolve_privacy_mode(env_map),
     )
 
 
@@ -152,9 +167,12 @@ def _env_float(env: Mapping[str, str], *names: str, default: float) -> float:
 
 __all__ = [
     "DEFAULT_PRICE_PER_TOKEN",
+    "VALID_PRIVACY_MODES",
     "Web0CapabilityManifest",
     "announce",
     "announce_from_env",
     "build_manifest",
     "build_manifest_from_env",
+    "resolve_announced_price_usdc",
+    "resolve_privacy_mode",
 ]
