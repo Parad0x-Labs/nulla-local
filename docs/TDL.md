@@ -30,6 +30,7 @@ The rule is simple:
 - `null://` dial — resolve a `.null` name, reach the named agent's x402 endpoint, pay it (gated), return the result. Off by default; SSRF-guarded; pays through the canonical x402 engine.
   - Evidence: mainnet settlement [`37o7An4A…`](https://explorer.solana.com/tx/37o7An4AUJDQqyZK2LvdGARHFpEQK3ZJiZSJwwADoeqeMHYUtSv9uddMzCcueBLU5p1S3fWDBb2FoWAMBCMn7F5a); self-describing memo'd mainnet [`4JBYfRff…`](https://explorer.solana.com/tx/4JBYfRffsA3xh6gWDTi4ybuDxrKSf8U9Vvn8xipwxmESPJt8T26jsWnUYMR1SLJ2YCUyPzTw9gALUHurWExT3ets); full devnet round-trip [`WR2syULn…`](https://explorer.solana.com/tx/WR2syULnAAyfnbBjjvwXrAuexiGnDH88KLyKe5c2PogRidoHE7xs7MLWU1frs1Bzn5WAXCUZ6jvKdnhiAxs66hz?cluster=devnet) (`verified: true`). See `proofs/mainnet/2026-06-23/` + `proofs/devnet/2026-06-23/ROUNDTRIP.md`.
 - `.nullpass` — portable, offline-verifiable work credential (recompute proof + payment hashes, verify ed25519 signature, optional on-chain settlement confirm). 14-case forgery matrix green. Evidence: `proofs/devnet/2026-06-23/NULLPASS.md`.
+- **WorkProof-bound mesh reward** — the mesh helper reward now requires a verified commit/reveal WorkProof (`accept_bid` issues a secret per-task challenge; `commit_result` enforces commit-before-reveal; `submit_result` rewards only on a verified proof). The old self-computable `sha256(task_id+result+worker)` earns nothing. 9-case adversarial matrix: `tests/test_mesh_workproof_reward.py`.
 
 ## Next Feature Explorations (candidate builds — all local-buildable)
 
@@ -39,9 +40,8 @@ Each is its own branch, same discipline: grounded build → adversarial review �
 - Current truth: links are stored but recall does not traverse them.
 - Done when: recall optionally expands one hop along `linked_node_ids` (ranked), with a held-out recall delta measured.
 
-2. `P1` Bind WorkProof to reward paths — wire the commit/reveal verifier (`core/credits/proof_of_work.py`) into the reward paths that currently credit unverified work.
-- Current truth: the verifier exists but is not called on the forgeable reward paths.
-- Done when: reward credit requires a verified WorkProof; a forged or absent proof is rejected (adversarial test).
+2. `P1` Bind WorkProof to reward paths — **SHIPPED 2026-06-23 for the mesh reward (see Shipped above).** Remaining: the local `task_completion` self-award (`core/web/api/service.py`) and presence-credit path are not yet proof-gated — lower risk (local self-award), revisit if mesh-relayed.
+- Done when: every credit-granting path that rewards remote work requires a verified WorkProof; a forged or absent proof is rejected (adversarial test). Mesh path done; local self-award paths remain.
 
 3. `P2` Two-NULLA local handshake — compose `build_task_capsule` + `verify_task_capsule` into a signed-capsule-in → signed-receipt-out exchange between two local nodes.
 - Done when: node A sends a signed capsule, node B verifies and returns a signed receipt, A verifies it; tamper is rejected.
