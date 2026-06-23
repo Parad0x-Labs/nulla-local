@@ -30,10 +30,10 @@ from typing import Any
 from urllib.parse import urlparse
 
 from core.null_resolver import NullDomainRecord, is_valid_x402_endpoint
-from core.web0_tools import _http, dna_pay_and_unlock
+from core.web0_tools import _http
 
-# Hard ceiling on any single dial spend, mirroring dna_pay_and_unlock's own 1.0
-# USDC default. A caller cap is additionally clamped to this; never exceed it.
+# Hard ceiling on any single dial spend. A caller cap is additionally clamped to
+# this; never exceed it.
 _MAX_SPEND_CEILING_USDC = 1.0
 
 # HTTP status a paywalled x402 resource returns to demand payment first.
@@ -127,7 +127,22 @@ def _result_preview(record: NullDomainRecord, endpoint: str, amount_usdc: float)
     }
 
 
+def _requirements_from_402(response: dict[str, Any]) -> dict[str, Any] | None:
+    """The canonical x402 paymentRequirements from a 402 body (``accepts[0]``)."""
+    accepts = response.get("accepts")
+    if isinstance(accepts, list) and accepts and isinstance(accepts[0], dict):
+        return accepts[0]
+    return None
+
+
 def _amount_from_402(response: dict[str, Any]) -> float:
+    # Canonical x402: accepts[0].maxAmountRequired is in atomic units (6 dp USDC).
+    req = _requirements_from_402(response)
+    if req is not None and req.get("maxAmountRequired") is not None:
+        try:
+            return int(req["maxAmountRequired"]) / 1_000_000
+        except (TypeError, ValueError):
+            pass
     for key in ("amountUsdc", "amount_usdc", "amount"):
         value = response.get(key)
         if value is not None:
@@ -136,6 +151,63 @@ def _amount_from_402(response: dict[str, Any]) -> float:
             except (TypeError, ValueError):
                 continue
     return 0.0
+
+
+def _dial_pay_x402(
+    resource_url: str,
+    wallet: Any,
+    *,
+    max_spend_usdc: float = _MAX_SPEND_CEILING_USDC,
+    allow_spend: bool = False,
+    requirements: dict[str, Any] | None = None,
+    task_text: str = "",
+    http: Callable[..., dict[str, Any]] = _http,
+    **_: Any,
+) -> dict[str, Any]:
+    """Default dial pay: settle the endpoint's x402 402 via the canonical client.
+
+    Pays through ``X402Client.pay_requirements`` (the same engine proven on devnet
+    and mainnet), signing with the dial's wallet, then re-requests the resource
+    with the settlement proof to unlock it. The mode (devnet/mainnet) and asset
+    come from the receiver's own ``paymentRequirements``.
+    """
+    if not allow_spend or wallet is None or not requirements:
+        return {"error": "payment_not_attempted"}
+    from core.x402.client import (
+        X402Client,
+        X402Config,
+        X402Mode,
+        wallet_signer,
+    )
+
+    network = str(requirements.get("network") or "solana")
+    mode = X402Mode.DEVNET if "devnet" in network else X402Mode.MAINNET
+    cfg = X402Config(
+        mode=mode,
+        asset_mint=requirements.get("asset"),
+        max_fee_usdc=max(float(max_spend_usdc or 0.0), 0.0),
+    )
+    try:
+        receipt = X402Client(cfg, signer=wallet_signer(wallet)).pay_requirements(requirements)
+    except Exception as exc:
+        return {"error": "x402_settle_failed", "detail": str(exc)}
+
+    # Re-request the resource with the settlement proof so the endpoint unlocks it.
+    try:
+        unlocked = http(
+            "POST", resource_url,
+            body={"prompt": task_text, "task": task_text},
+            headers={"X-PAYMENT-RECEIPT": receipt.payment_tx},
+        )
+    except Exception as exc:
+        unlocked = {"error": "unlock_request_failed", "detail": str(exc)}
+    return {
+        "status":            "paid",
+        "payment_tx":        receipt.payment_tx,
+        "amount_paid_usdc":  receipt.amount_usdc,
+        "recipient_wallet":  receipt.recipient_wallet,
+        "resource_response": unlocked,
+    }
 
 
 def try_dial(
@@ -147,7 +219,7 @@ def try_dial(
     allow_spend: bool = False,
     max_spend_usdc: float = _MAX_SPEND_CEILING_USDC,
     http: Callable[..., dict[str, Any]] = _http,
-    pay: Callable[..., dict[str, Any]] = dna_pay_and_unlock,
+    pay: Callable[..., dict[str, Any]] = _dial_pay_x402,
 ) -> dict[str, Any] | None:
     """Reach a resolved .null agent's endpoint with a task; return its result, or None.
 
@@ -188,6 +260,7 @@ def try_dial(
         return response
 
     # Payment required.
+    requirements = _requirements_from_402(response)
     amount_usdc = _amount_from_402(response)
     if not allow_spend:
         return _result_preview(record, endpoint, amount_usdc)
@@ -196,7 +269,10 @@ def try_dial(
     if amount_usdc and amount_usdc > cap:
         return _result_preview(record, endpoint, amount_usdc)
 
-    paid = pay(endpoint, wallet, max_spend_usdc=cap, allow_spend=True)
+    paid = pay(
+        endpoint, wallet, max_spend_usdc=cap, allow_spend=True,
+        requirements=requirements, task_text=task_text, http=http,
+    )
     if not isinstance(paid, dict) or paid.get("error"):
         return None
     return paid

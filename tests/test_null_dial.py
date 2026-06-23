@@ -374,3 +374,58 @@ def test_service_keeps_stub_wallet_when_dial_off(monkeypatch) -> None:
     data = json.loads(resp.body)
     assert data["quote"]["recipient_wallet"] == "stub-wallet"
     assert calls == []  # resolver never invoked when dial is off
+
+
+# ── canonical x402 pay path (the re-pointed default) ────────────────────────
+
+def test_amount_and_requirements_from_canonical_402() -> None:
+    from core.null_dial import _amount_from_402, _requirements_from_402
+    resp = {"error": True, "status": 402, "accepts": [
+        {"network": "solana-devnet", "maxAmountRequired": "1500", "payTo": "R", "asset": "M"}]}
+    assert _amount_from_402(resp) == 0.0015          # atomic 1500 -> 0.0015 USDC
+    assert _requirements_from_402(resp)["payTo"] == "R"
+    assert _requirements_from_402({"status": 402}) is None
+
+
+def test_dial_pay_x402_settles_then_unlocks(monkeypatch) -> None:
+    from core import null_dial
+
+    class _Receipt:
+        payment_tx = "SIG_DIAL_123"
+        amount_usdc = 0.001
+        recipient_wallet = "R"
+
+    class _FakeClient:
+        def __init__(self, cfg, signer=None):
+            self.cfg = cfg
+
+        def pay_requirements(self, req, session_id=None):
+            return _Receipt()
+
+    monkeypatch.setattr("core.x402.client.X402Client", _FakeClient)
+    monkeypatch.setattr("core.x402.client.wallet_signer", lambda w: w)
+
+    calls = []
+
+    def fake_http(method, url, *, body=None, headers=None, timeout=15):
+        calls.append({"url": url, "headers": headers or {}})
+        return {"result": "unlocked-resource"}
+
+    req = {"network": "solana-devnet", "asset": "MINT", "maxAmountRequired": "1000",
+           "payTo": "R", "extra": {"feePayer": "F"}}
+    out = null_dial._dial_pay_x402(
+        "https://agent.example/x402", object(), max_spend_usdc=1.0, allow_spend=True,
+        requirements=req, task_text="do-it", http=fake_http,
+    )
+    assert out["status"] == "paid"
+    assert out["payment_tx"] == "SIG_DIAL_123"
+    assert out["resource_response"] == {"result": "unlocked-resource"}
+    # the unlock re-request carries the settlement proof
+    assert calls[0]["headers"]["X-PAYMENT-RECEIPT"] == "SIG_DIAL_123"
+
+
+def test_dial_pay_x402_not_attempted_guards() -> None:
+    from core.null_dial import _dial_pay_x402
+    assert _dial_pay_x402("u", object(), allow_spend=False, requirements={"a": 1}).get("error")
+    assert _dial_pay_x402("u", object(), allow_spend=True, requirements=None).get("error")
+    assert _dial_pay_x402("u", None, allow_spend=True, requirements={"a": 1}).get("error")

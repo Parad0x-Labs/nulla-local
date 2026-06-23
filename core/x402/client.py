@@ -460,35 +460,33 @@ class X402Client:
             "extra":             {"feePayer": self._facilitator_fee_payer()},
         }
 
-    def _solana_pay(
-        self,
-        amount_usdc: float,
-        recipient_wallet: str,
-        session_id: str,
+    def pay_requirements(
+        self, payment_requirements: dict, session_id: Optional[str] = None,
     ) -> X402Receipt:
-        """Canonical x402 "exact" settle on Solana via the PayAI facilitator."""
+        """Settle payment for x402 requirements a resource server issued (in its 402).
+
+        Builds + partially-signs the v0 transaction for ``payment_requirements``,
+        runs the facilitator /verify then /settle, and returns a receipt carrying
+        the on-chain signature. This is what the null:// dial calls to pay a named
+        agent's endpoint — the requirements come from that endpoint's 402.
+        """
         import requests as _req
 
-        # ── 1. Resolve the payer signer (validates keypair_path when no signer) ──
+        sid = session_id or f"sess-{uuid.uuid4().hex[:12]}"
         payer = self._resolve_signer()
 
-        # ── 2. Build payment requirements + the partially-signed payment ─────
-        requirements = self._build_payment_requirements(
-            amount_usdc, recipient_wallet, session_id
-        )
         payment = build_solana_x402_payment(
-            payer, requirements, self.config.effective_rpc,
+            payer, payment_requirements, self.config.effective_rpc,
             decimals=self.config.asset_decimals,
         )
         body = {
             "x402Version":         1,
             "paymentPayload":      payment,
-            "paymentRequirements": requirements,
+            "paymentRequirements": payment_requirements,
         }
         headers = {"Content-Type": "application/json", "User-Agent": "nulla-x402/1.0"}
         fac = self.config.effective_facilitator
 
-        # ── 3. /verify ───────────────────────────────────────────────────────
         vr = _req.post(f"{fac}/verify", json=body, headers=headers, timeout=20)
         if vr.status_code not in (200, 201):
             raise X402PaymentError(f"x402 /verify HTTP {vr.status_code}: {vr.text[:200]}")
@@ -496,7 +494,6 @@ class X402Client:
         if not vd.get("isValid"):
             raise X402PaymentError(f"x402 /verify rejected: {vd.get('invalidReason')}")
 
-        # ── 4. /settle → on-chain signature ──────────────────────────────────
         sr = _req.post(f"{fac}/settle", json=body, headers=headers, timeout=45)
         if sr.status_code not in (200, 201):
             raise X402PaymentError(f"x402 /settle HTTP {sr.status_code}: {sr.text[:200]}")
@@ -505,18 +502,37 @@ class X402Client:
         if not sd.get("success") or not tx_sig:
             raise X402PaymentError(f"x402 /settle failed: {sd.get('errorReason') or sd}")
 
-        # Canonical x402 /settle returns no receipt signature — the on-chain
-        # tx (payment_tx) IS the proof. Leave facilitator_sig empty rather than
-        # mislabel the verified-payer field as a signature.
+        try:
+            amount_usdc = int(payment_requirements.get("maxAmountRequired") or 0) / (
+                10 ** self.config.asset_decimals)
+        except (TypeError, ValueError):
+            amount_usdc = 0.0
+        # Canonical x402 /settle returns no receipt signature — the on-chain tx
+        # (payment_tx) IS the proof; leave facilitator_sig empty.
         return X402Receipt(
-            session_id=session_id,
+            session_id=sid,
             payment_tx=tx_sig,                      # real on-chain Solana signature
             amount_usdc=amount_usdc,
-            recipient_wallet=recipient_wallet,
+            recipient_wallet=str(payment_requirements.get("payTo") or ""),
             facilitator_sig="",
             timestamp=time.time(),
             mode=self.config.mode.value,
         )
+
+    def _solana_pay(
+        self,
+        amount_usdc: float,
+        recipient_wallet: str,
+        session_id: str,
+    ) -> X402Receipt:
+        """Client-initiated settle: build the requirements ourselves, then settle."""
+        # Resolve the signer first so DEVNET/MAINNET without a keypair raises before
+        # any network call (and before building requirements).
+        self._resolve_signer()
+        requirements = self._build_payment_requirements(
+            amount_usdc, recipient_wallet, session_id
+        )
+        return self.pay_requirements(requirements, session_id)
 
 
 # ---------------------------------------------------------------------------
