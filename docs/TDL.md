@@ -25,6 +25,36 @@ The rule is simple:
 - follow-up/research notices are rewritten as short human-facing prompts or suppressed entirely when they are not actionable.
 - OpenClaw/default chat UX stops looking like a log console for routine conversation.
 
+## Shipped (2026-06-23) — was queued, now done with on-chain evidence
+
+- `null://` dial — resolve a `.null` name, reach the named agent's x402 endpoint, pay it (gated), return the result. Off by default; SSRF-guarded; pays through the canonical x402 engine.
+  - Evidence: mainnet settlement [`37o7An4A…`](https://explorer.solana.com/tx/37o7An4AUJDQqyZK2LvdGARHFpEQK3ZJiZSJwwADoeqeMHYUtSv9uddMzCcueBLU5p1S3fWDBb2FoWAMBCMn7F5a); self-describing memo'd mainnet [`4JBYfRff…`](https://explorer.solana.com/tx/4JBYfRffsA3xh6gWDTi4ybuDxrKSf8U9Vvn8xipwxmESPJt8T26jsWnUYMR1SLJ2YCUyPzTw9gALUHurWExT3ets); full devnet round-trip [`WR2syULn…`](https://explorer.solana.com/tx/WR2syULnAAyfnbBjjvwXrAuexiGnDH88KLyKe5c2PogRidoHE7xs7MLWU1frs1Bzn5WAXCUZ6jvKdnhiAxs66hz?cluster=devnet) (`verified: true`). See `proofs/mainnet/2026-06-23/` + `proofs/devnet/2026-06-23/ROUNDTRIP.md`.
+- `.nullpass` — portable, offline-verifiable work credential (recompute proof + payment hashes, verify ed25519 signature, optional on-chain settlement confirm). 14-case forgery matrix green. Evidence: `proofs/devnet/2026-06-23/NULLPASS.md`.
+
+## Next Feature Explorations (candidate builds — all local-buildable)
+
+Each is its own branch, same discipline: grounded build → adversarial review → tested green → push to `main` on the user's word.
+
+1. `P2` Entity-graph memory — make `MemoryNode.linked_node_ids` live with 1-hop recall expansion.
+- Current truth: links are stored but recall does not traverse them.
+- Done when: recall optionally expands one hop along `linked_node_ids` (ranked), with a held-out recall delta measured.
+
+2. `P1` Bind WorkProof to reward paths — wire the commit/reveal verifier (`core/credits/proof_of_work.py`) into the reward paths that currently credit unverified work.
+- Current truth: the verifier exists but is not called on the forgeable reward paths.
+- Done when: reward credit requires a verified WorkProof; a forged or absent proof is rejected (adversarial test).
+
+3. `P2` Two-NULLA local handshake — compose `build_task_capsule` + `verify_task_capsule` into a signed-capsule-in → signed-receipt-out exchange between two local nodes.
+- Done when: node A sends a signed capsule, node B verifies and returns a signed receipt, A verifies it; tamper is rejected.
+
+4. `P2` Expose the full web0 page builder — wire the remaining `web0_*` builder intents (gated sections, encrypt, publish) beyond the current subset.
+- Done when: the full builder intent set is callable and tested, CSP-safe.
+
+5. `P2` Knowledge-marketplace buy side — the supply side auto-lists; add search plus a credit-burning purchase.
+- Done when: search returns listings; a purchase burns credits and unlocks the item; insufficient-credit and double-spend are rejected.
+
+6. `P1` Embedder unification + recall eval — fix the 768-vs-384-dim mismatch that silently zeroes recall; ship a held-out recall benchmark.
+- Done when: one embedder dimension across the recall path (no silent zero), with a committed recall benchmark and baseline.
+
 ## Open Items
 
 1. `P0` Multi-helper speculative reasoning is still partial.
