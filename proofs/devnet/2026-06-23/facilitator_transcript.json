@@ -1,0 +1,72 @@
+[
+  {
+    "method": "POST",
+    "request": {
+      "paymentPayload": {
+        "network": "solana-devnet",
+        "payload": {
+          "transaction": "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBLpjwCcUxlyIlPvuBRoDbQk5smvNRjFz7s9dFXQgRt8MQwcPZnjXkFkHp1ERrqkq6PNNK3gxW3s++tIa8yz8MgAIBAwccxm7UN1ERWkK1kFEyxPZoMoYR5ejet9hiWF0qNVHQAfPv/b1Mj6sodbwVdV3wNyZ75FOK4WuINkkPvTPGf04aFq3y11LVFFvFG/Xd00epJMupsimZ5eRqdBxili5szNZ9T6RWe8SM17yT8XOt3Dkj1sm1RynhxAzc4kGT2RgnLAMGRm/lIRcy/+ytunLDm+e8jOW7xfcSayxDmzpAAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKnoKrcVc3eJxDSCncMKf+o9ANgOJ2PyTPpyuX1WyZFIN+jaTlkc4RarTR/KYsVTe7PQKeI/ovmfXn97F5ph061IAwQABQJQwwAABAAJAwEAAAAAAAAABQQDBgIBCgzoAwAAAAAAAAYA"
+        },
+        "scheme": "exact",
+        "x402Version": 1
+      },
+      "paymentRequirements": {
+        "asset": "GdHN5TcjZ4vDbacspJ9TUBquNrirozGAeLZFda3SrL4e",
+        "description": "nulla x402 settlement devnet-proof-1782202408",
+        "extra": {
+          "feePayer": "2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4"
+        },
+        "maxAmountRequired": "1000",
+        "maxTimeoutSeconds": 120,
+        "mimeType": "application/json",
+        "network": "solana-devnet",
+        "payTo": "Bpd1AZSRpPR9XRDbiS9n9i4WpqsxyswJNE3A4fnJmtw7",
+        "resource": "https://nulla.local/x402/devnet-proof-1782202408",
+        "scheme": "exact"
+      },
+      "x402Version": 1
+    },
+    "response": {
+      "isValid": true,
+      "payer": "HREKZMe5KyqMA46k5thX2CA1CdCP6rjKj9vXFtmUpM13"
+    },
+    "status": 200,
+    "url": "https://facilitator.payai.network/verify"
+  },
+  {
+    "method": "POST",
+    "request": {
+      "paymentPayload": {
+        "network": "solana-devnet",
+        "payload": {
+          "transaction": "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBLpjwCcUxlyIlPvuBRoDbQk5smvNRjFz7s9dFXQgRt8MQwcPZnjXkFkHp1ERrqkq6PNNK3gxW3s++tIa8yz8MgAIBAwccxm7UN1ERWkK1kFEyxPZoMoYR5ejet9hiWF0qNVHQAfPv/b1Mj6sodbwVdV3wNyZ75FOK4WuINkkPvTPGf04aFq3y11LVFFvFG/Xd00epJMupsimZ5eRqdBxili5szNZ9T6RWe8SM17yT8XOt3Dkj1sm1RynhxAzc4kGT2RgnLAMGRm/lIRcy/+ytunLDm+e8jOW7xfcSayxDmzpAAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKnoKrcVc3eJxDSCncMKf+o9ANgOJ2PyTPpyuX1WyZFIN+jaTlkc4RarTR/KYsVTe7PQKeI/ovmfXn97F5ph061IAwQABQJQwwAABAAJAwEAAAAAAAAABQQDBgIBCgzoAwAAAAAAAAYA"
+        },
+        "scheme": "exact",
+        "x402Version": 1
+      },
+      "paymentRequirements": {
+        "asset": "GdHN5TcjZ4vDbacspJ9TUBquNrirozGAeLZFda3SrL4e",
+        "description": "nulla x402 settlement devnet-proof-1782202408",
+        "extra": {
+          "feePayer": "2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4"
+        },
+        "maxAmountRequired": "1000",
+        "maxTimeoutSeconds": 120,
+        "mimeType": "application/json",
+        "network": "solana-devnet",
+        "payTo": "Bpd1AZSRpPR9XRDbiS9n9i4WpqsxyswJNE3A4fnJmtw7",
+        "resource": "https://nulla.local/x402/devnet-proof-1782202408",
+        "scheme": "exact"
+      },
+      "x402Version": 1
+    },
+    "response": {
+      "network": "solana-devnet",
+      "payer": "HREKZMe5KyqMA46k5thX2CA1CdCP6rjKj9vXFtmUpM13",
+      "success": true,
+      "transaction": "4PL49WioTAcQng9HLqYhSb7RUYGu7n8YoHRKW54VNjMkV3Macbh4XTtfoT29peCMPDfrJjFMAuo1FhweE35z3e38"
+    },
+    "status": 200,
+    "url": "https://facilitator.payai.network/settle"
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "amount": 0.001,
+  "payTo_ata": "2XXp16SQ2c8ArosURdQRJhEAN9PD5X99m8XFCikbXCJ1",
+  "payTo_token_after": "0.002",
+  "payTo_token_before": "0.001",
+  "payer_ata": "9SAQ5jidiGPTuVtj5Lm7ZHjYbkJutBz7uhxEHy9vvEbD",
+  "payer_token_after": "99.998",
+  "payer_token_before": "99.999"
+}

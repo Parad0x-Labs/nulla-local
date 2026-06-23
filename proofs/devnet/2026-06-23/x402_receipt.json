@@ -1,0 +1,11 @@
+{
+  "amount_usdc": 0.001,
+  "facilitator_sig": "",
+  "mode": "devnet",
+  "payment_tx": "4PL49WioTAcQng9HLqYhSb7RUYGu7n8YoHRKW54VNjMkV3Macbh4XTtfoT29peCMPDfrJjFMAuo1FhweE35z3e38",
+  "receipt_hash": "58f5c95358b7fe05761eeb06a8d0dac09f605c74a2c2771d466ac68e2dcb9446",
+  "recipient_wallet": "Bpd1AZSRpPR9XRDbiS9n9i4WpqsxyswJNE3A4fnJmtw7",
+  "session_id": "devnet-proof-1782202408",
+  "settle_ms": 2944,
+  "timestamp": 1782202411.7651598
+}

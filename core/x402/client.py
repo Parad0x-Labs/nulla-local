@@ -3,25 +3,31 @@ core/x402/client.py
 ===================
 Minimal x402 payment client for the NULLA compute rental mesh.
 
-Implements the HTTP 402 payment-required flow for agent-to-agent
-USDC settlements on Solana, matching the dna-x402 public-beta protocol.
+Implements the HTTP 402 payment-required flow for agent-to-agent USDC
+settlements on Solana using the canonical x402 "exact" scheme against the
+PayAI facilitator (https://facilitator.payai.network).
 
 Modes
 -----
 stub    — default; deterministic fake receipt, no Solana calls. Existing
           tests pass unmodified. Safe for CI and offline development.
-devnet  — real USDC transfer on Solana devnet via a live x402 facilitator
-          (requires funded devnet wallet at config.keypair_path).
-mainnet — production; same flow against mainnet RPC + PayAI facilitator.
+devnet  — real SPL-token transfer on Solana devnet, settled by the PayAI
+          facilitator (network "solana-devnet"); requires a funded devnet
+          wallet at config.keypair_path.
+mainnet — production; same flow on network "solana" against the same facilitator.
 
-Protocol (x402 Solana path)
----------------------------
-1. client POSTs to {endpoint}/x402/quote → 402 with payment details
-   (or client builds quote from known price + recipient directly)
-2. client constructs USDC SPL transfer tx: client_ata → facilitator_ata
-3. client signs + submits tx to Solana RPC
-4. client POSTs tx sig to facilitator → signed X402Receipt
-5. receipt.receipt_hash is included in WorkProof.signature for anchoring
+Protocol (canonical x402 "exact" on Solana)
+-------------------------------------------
+1. Payment requirements (scheme/network/maxAmountRequired/payTo/asset/feePayer)
+   come from the resource server's HTTP 402 (or are built directly here).
+2. The client builds a v0 transaction — ComputeBudget limit+price, then an SPL
+   TransferChecked of `asset` from the payer's ATA to payTo's ATA — with the
+   facilitator's sponsored `feePayer` as the fee payer, and PARTIALLY signs it
+   (the payer slot only; the facilitator fills the feePayer signature at settle).
+3. The base64 transaction is wrapped as the x402 payment payload and POSTed to
+   the facilitator /verify, then /settle.
+4. /settle returns the on-chain Solana transaction signature → X402Receipt.
+5. receipt.receipt_hash is included in WorkProof.signature for anchoring.
 
 Usage
 -----
@@ -63,9 +69,18 @@ def usdc_to_atomic(amount_usdc: float) -> int:
     return round(amount_usdc * (10 ** USDC_DECIMALS))
 
 
-# PayAI facilitator — primary Solana x402 facilitator (public beta)
-PAYAI_FACILITATOR_MAINNET = "https://facilitator.payai.network"
-PAYAI_FACILITATOR_DEVNET  = "https://devnet.facilitator.payai.network"
+# PayAI facilitator — canonical x402 facilitator. ONE host for every network
+# (the network is a field in the payment, not a subdomain). The old
+# devnet.facilitator.payai.network subdomain does NOT resolve.
+PAYAI_FACILITATOR = "https://facilitator.payai.network"
+
+# Sponsored Solana fee payer the facilitator advertises at GET /supported. It is
+# fetched live at runtime; this is only the fallback if that fetch fails.
+PAYAI_SOLANA_FEEPAYER = "2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4"
+
+# Canonical Solana program ids (universal — safe as literals, not "our" ids).
+TOKEN_PROGRAM_ID            = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 
 # Solana RPC endpoints. Mainnet uses the keyless publicnode endpoint — the
 # api.mainnet-beta endpoint 403s on requests carrying an Origin header and is
@@ -133,6 +148,8 @@ class X402Config:
     keypair_path: Optional[str] = None
     facilitator_url: Optional[str] = None
     rpc_url: Optional[str] = None
+    asset_mint: Optional[str] = None       # override the asset (default: cluster USDC)
+    asset_decimals: int = USDC_DECIMALS    # decimals of the asset being transferred
     max_fee_usdc: float = 1.0
 
     @property
@@ -143,13 +160,22 @@ class X402Config:
 
     @property
     def effective_facilitator(self) -> str:
-        if self.facilitator_url:
-            return self.facilitator_url
-        return PAYAI_FACILITATOR_DEVNET if self.mode == X402Mode.DEVNET else PAYAI_FACILITATOR_MAINNET
+        # Canonical x402 uses one facilitator host for every network.
+        return self.facilitator_url or PAYAI_FACILITATOR
+
+    @property
+    def network_name(self) -> str:
+        """x402 network id for this mode ("solana-devnet" / "solana")."""
+        return "solana-devnet" if self.mode == X402Mode.DEVNET else "solana"
 
     @property
     def effective_usdc_mint(self) -> str:
         return USDC_MINT_DEVNET if self.mode == X402Mode.DEVNET else USDC_MINT_MAINNET
+
+    @property
+    def effective_asset(self) -> str:
+        """The SPL mint to transfer (asset_mint override, else cluster USDC)."""
+        return self.asset_mint or self.effective_usdc_mint
 
 
 # ---------------------------------------------------------------------------
@@ -333,18 +359,20 @@ class X402Client:
         session_id: str,
     ) -> X402Receipt:
         """
-        Execute a real USDC transfer on Solana and obtain a facilitator receipt.
+        Settle a real Solana payment via the canonical x402 "exact" flow.
 
         Flow
         ----
         1. Load keypair from config.keypair_path.
-        2. Derive client USDC ATA.
-        3. POST {facilitator}/quote to get the facilitator's escrow ATA.
-        4. Build + sign + submit SPL token transfer tx.
-        5. POST {facilitator}/receipt with tx sig → get signed receipt.
+        2. Build payment requirements (network / asset / payTo / sponsored feePayer).
+        3. Build a partially-signed v0 TransferChecked tx → x402 payment payload.
+        4. POST the payment to {facilitator}/verify, then /settle.
+        5. /settle returns the on-chain tx signature → X402Receipt.
         """
         try:
             return self._solana_pay(amount_usdc, recipient_wallet, session_id)
+        except X402PaymentError:
+            raise
         except Exception as exc:
             raise X402PaymentError(
                 f"x402 live payment failed: {exc}"
@@ -376,105 +404,208 @@ class X402Client:
             kp_data = _json.load(f)
         return SoldersKeypair.from_seed(bytes(kp_data[:32]))
 
+    def _facilitator_fee_payer(self) -> str:
+        """The sponsored Solana fee payer for this network, from GET /supported.
+
+        Cached per client. Falls back to the advertised constant if the fetch
+        fails so a transient /supported hiccup never blocks a payment.
+        """
+        cached = getattr(self, "_fee_payer_cache", None)
+        if cached:
+            return cached
+        fee_payer = PAYAI_SOLANA_FEEPAYER
+        try:
+            import requests as _req
+            r = _req.get(
+                f"{self.config.effective_facilitator}/supported",
+                headers={"User-Agent": "nulla-x402/1.0"}, timeout=15,
+            )
+            if r.status_code == 200:
+                for kind in (r.json().get("kinds") or []):
+                    if (kind.get("scheme") == "exact"
+                            and kind.get("network") == self.config.network_name):
+                        fp = (kind.get("extra") or {}).get("feePayer")
+                        if fp:
+                            fee_payer = fp
+                            break
+        except Exception:
+            pass
+        self._fee_payer_cache = fee_payer
+        return fee_payer
+
+    def _build_payment_requirements(
+        self, amount_usdc: float, recipient_wallet: str, session_id: str,
+    ) -> dict:
+        """The x402 paymentRequirements a resource server would issue in its 402."""
+        return {
+            "scheme":            "exact",
+            "network":           self.config.network_name,
+            "maxAmountRequired": str(usdc_to_atomic(amount_usdc)),  # atomic units
+            "resource":          f"https://nulla.local/x402/{session_id}",
+            "description":       f"nulla x402 settlement {session_id}",
+            "mimeType":          "application/json",
+            "payTo":             recipient_wallet,
+            "maxTimeoutSeconds": 120,
+            "asset":             self.config.effective_asset,
+            "extra":             {"feePayer": self._facilitator_fee_payer()},
+        }
+
     def _solana_pay(
         self,
         amount_usdc: float,
         recipient_wallet: str,
         session_id: str,
     ) -> X402Receipt:
-        """Inner Solana payment implementation."""
+        """Canonical x402 "exact" settle on Solana via the PayAI facilitator."""
+        import requests as _req
+
         # ── 1. Load keypair (validates keypair_path before heavier imports) ──
         payer = self._load_payer_keypair()
-        payer_pubkey = payer.pubkey()
 
-        import requests as _req
-        from solana.rpc.api import Client as SolanaClient  # type: ignore
-        from solana.transaction import Transaction  # type: ignore
-        from solders.pubkey import Pubkey  # type: ignore
-        from spl.token.instructions import (  # type: ignore
-            TransferParams,
-            get_associated_token_address,
+        # ── 2. Build payment requirements + the partially-signed payment ─────
+        requirements = self._build_payment_requirements(
+            amount_usdc, recipient_wallet, session_id
         )
-        from spl.token.instructions import (  # type: ignore
-            transfer as spl_transfer,
+        payment = build_solana_x402_payment(
+            payer, requirements, self.config.effective_rpc,
+            decimals=self.config.asset_decimals,
         )
+        body = {
+            "x402Version":         1,
+            "paymentPayload":      payment,
+            "paymentRequirements": requirements,
+        }
+        headers = {"Content-Type": "application/json", "User-Agent": "nulla-x402/1.0"}
+        fac = self.config.effective_facilitator
 
-        # ── 2. Get facilitator quote (escrow ATA + fee breakdown) ────────
-        resp = _req.post(
-            f"{self.config.effective_facilitator}/quote",
-            json={
-                "amount_usdc":      round(amount_usdc, 6),
-                "recipient_wallet": recipient_wallet,
-                "payer_wallet":     str(payer_pubkey),
-                "session_id":       session_id,
-                "mint":             self.config.effective_usdc_mint,
-            },
-            timeout=10,
-        )
-        if resp.status_code not in (200, 201):
-            raise X402PaymentError(
-                f"Facilitator quote failed: {resp.status_code} {resp.text[:200]}"
-            )
-        quote_data = resp.json()
-        escrow_ata: str = quote_data["escrow_ata"]
-        lamports_atomic: int = usdc_to_atomic(amount_usdc)
+        # ── 3. /verify ───────────────────────────────────────────────────────
+        vr = _req.post(f"{fac}/verify", json=body, headers=headers, timeout=20)
+        if vr.status_code not in (200, 201):
+            raise X402PaymentError(f"x402 /verify HTTP {vr.status_code}: {vr.text[:200]}")
+        vd = vr.json()
+        if not vd.get("isValid"):
+            raise X402PaymentError(f"x402 /verify rejected: {vd.get('invalidReason')}")
 
-        # ── 3. Build SPL token transfer ──────────────────────────────────
-        usdc_mint_pk   = Pubkey.from_string(self.config.effective_usdc_mint)
-        payer_ata      = get_associated_token_address(payer_pubkey, usdc_mint_pk)
-        escrow_ata_pk  = Pubkey.from_string(escrow_ata)
+        # ── 4. /settle → on-chain signature ──────────────────────────────────
+        sr = _req.post(f"{fac}/settle", json=body, headers=headers, timeout=45)
+        if sr.status_code not in (200, 201):
+            raise X402PaymentError(f"x402 /settle HTTP {sr.status_code}: {sr.text[:200]}")
+        sd = sr.json()
+        tx_sig = sd.get("transaction")
+        if not sd.get("success") or not tx_sig:
+            raise X402PaymentError(f"x402 /settle failed: {sd.get('errorReason') or sd}")
 
-        from spl.token.constants import TOKEN_PROGRAM_ID  # type: ignore
-        transfer_ix = spl_transfer(
-            TransferParams(
-                program_id=TOKEN_PROGRAM_ID,
-                source=payer_ata,
-                dest=escrow_ata_pk,
-                owner=payer_pubkey,
-                amount=lamports_atomic,
-                signers=[],
-            )
-        )
-
-        solana_client = SolanaClient(self.config.effective_rpc)
-        blockhash_resp = solana_client.get_latest_blockhash()
-        recent_blockhash = blockhash_resp.value.blockhash
-
-        tx = Transaction(recent_blockhash=recent_blockhash)
-        tx.add(transfer_ix)
-        tx.sign(payer)
-
-        # ── 4. Submit to Solana ──────────────────────────────────────────
-        tx_resp = solana_client.send_raw_transaction(bytes(tx.serialize()))
-        tx_sig = str(tx_resp.value)
-
-        # ── 5. Get facilitator receipt ───────────────────────────────────
-        receipt_resp = _req.post(
-            f"{self.config.effective_facilitator}/receipt",
-            json={
-                "tx_signature": tx_sig,
-                "session_id":   session_id,
-                "amount_usdc":  round(amount_usdc, 6),
-                "recipient":    recipient_wallet,
-            },
-            timeout=15,
-        )
-        if receipt_resp.status_code not in (200, 201):
-            raise X402PaymentError(
-                f"Facilitator receipt failed: {receipt_resp.status_code} "
-                f"{receipt_resp.text[:200]}"
-            )
-        receipt_data = receipt_resp.json()
-
+        # Canonical x402 /settle returns no receipt signature — the on-chain
+        # tx (payment_tx) IS the proof. Leave facilitator_sig empty rather than
+        # mislabel the verified-payer field as a signature.
         return X402Receipt(
             session_id=session_id,
-            payment_tx=tx_sig,
+            payment_tx=tx_sig,                      # real on-chain Solana signature
             amount_usdc=amount_usdc,
             recipient_wallet=recipient_wallet,
-            facilitator_sig=receipt_data.get("facilitator_sig", ""),
+            facilitator_sig="",
             timestamp=time.time(),
             mode=self.config.mode.value,
         )
+
+
+# ---------------------------------------------------------------------------
+# Canonical x402 "exact" Solana transaction builder
+# ---------------------------------------------------------------------------
+
+def _get_latest_blockhash(rpc_url: str) -> str:
+    """Fetch a recent blockhash (base58) from a Solana RPC."""
+    import requests as _req
+    r = _req.post(
+        rpc_url,
+        json={"jsonrpc": "2.0", "id": 1, "method": "getLatestBlockhash",
+              "params": [{"commitment": "finalized"}]},
+        headers={"Content-Type": "application/json", "User-Agent": "nulla-x402/1.0"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    return r.json()["result"]["value"]["blockhash"]
+
+
+def build_solana_x402_payment(
+    payer, payment_requirements: dict, rpc_url: str, *, decimals: int = USDC_DECIMALS,
+    compute_unit_limit: int = 50_000, compute_unit_price: int = 1,
+) -> dict:
+    """Build the canonical x402 "exact" Solana payment payload.
+
+    ``payer`` is a solders ``Keypair`` (the token sender). Constructs a v0
+    transaction — ComputeBudget limit+price then an SPL ``TransferChecked`` of
+    ``asset`` from the payer's ATA to ``payTo``'s ATA — with the facilitator's
+    ``extra.feePayer`` as the transaction fee payer, PARTIALLY signs it (only the
+    payer slot; the facilitator fills the feePayer signature at settle), and
+    returns the x402 envelope ``{x402Version, scheme, network, payload:{transaction}}``.
+
+    The destination ATA must already exist (the facilitator settles, it does not
+    create accounts); pre-create it for a recipient that may not have one.
+
+    ``compute_unit_limit`` is capped by the facilitator (it rejects an over-high
+    sponsored limit with ``..._compute_limit_too_high``); 50k is comfortably under
+    the cap and well above a TransferChecked's real consumption. ``compute_unit_price``
+    is the priority fee in micro-lamports/CU (the facilitator caps this low).
+    """
+    import base64 as _b64
+
+    from solders.compute_budget import set_compute_unit_limit, set_compute_unit_price
+    from solders.hash import Hash
+    from solders.instruction import AccountMeta, Instruction
+    from solders.message import MessageV0, to_bytes_versioned
+    from solders.pubkey import Pubkey
+    from solders.signature import Signature
+    from solders.transaction import VersionedTransaction
+
+    token_program = Pubkey.from_string(TOKEN_PROGRAM_ID)
+    ata_program   = Pubkey.from_string(ASSOCIATED_TOKEN_PROGRAM_ID)
+    mint      = Pubkey.from_string(payment_requirements["asset"])
+    pay_to    = Pubkey.from_string(payment_requirements["payTo"])
+    fee_payer = Pubkey.from_string(payment_requirements["extra"]["feePayer"])
+    amount    = int(payment_requirements["maxAmountRequired"])
+
+    def _ata(owner: Pubkey) -> Pubkey:
+        addr, _ = Pubkey.find_program_address(
+            [bytes(owner), bytes(token_program), bytes(mint)], ata_program
+        )
+        return addr
+
+    src_ata = _ata(payer.pubkey())
+    dst_ata = _ata(pay_to)
+
+    # SPL TransferChecked: instruction index 12, amount u64 LE, decimals u8.
+    data = bytes([12]) + amount.to_bytes(8, "little") + bytes([decimals])
+    transfer_ix = Instruction(
+        token_program, data,
+        [AccountMeta(src_ata, False, True),
+         AccountMeta(mint, False, False),
+         AccountMeta(dst_ata, False, True),
+         AccountMeta(payer.pubkey(), True, False)],
+    )
+    ixs = [
+        set_compute_unit_limit(compute_unit_limit),
+        set_compute_unit_price(compute_unit_price),
+        transfer_ix,
+    ]
+
+    blockhash = Hash.from_string(_get_latest_blockhash(rpc_url))
+    msg = MessageV0.try_compile(fee_payer, ixs, [], blockhash)
+
+    # Partial sign: payer signs its slot; the feePayer slot stays empty (default)
+    # for the facilitator to fill at settle.
+    sigs = [Signature.default()] * msg.header.num_required_signatures
+    sigs[list(msg.account_keys).index(payer.pubkey())] = payer.sign_message(
+        to_bytes_versioned(msg)
+    )
+    tx = VersionedTransaction.populate(msg, sigs)
+
+    return {
+        "x402Version": 1,
+        "scheme":      payment_requirements["scheme"],
+        "network":     payment_requirements["network"],
+        "payload":     {"transaction": _b64.b64encode(bytes(tx)).decode()},
+    }
 
 
 # ---------------------------------------------------------------------------

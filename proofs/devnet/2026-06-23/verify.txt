@@ -1,0 +1,12 @@
+tx: 4PL49WioTAcQng9HLqYhSb7RUYGu7n8YoHRKW54VNjMkV3Macbh4XTtfoT29peCMPDfrJjFMAuo1FhweE35z3e38
+slot: 471371283  err: None  (None == success)
+version: 0
+fee payer (accountKeys[0]): 2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4   == PayAI sponsored? True
+fee (lamports): 10001  paid by accountKeys[0] (PayAI), not payer
+
+token GdHN5TcjZ4vDbacspJ9TUBquNrirozGAeLZFda3SrL4e balances by owner:
+  Bpd1AZSR… (payTo): 0.001 -> 0.002
+  HREKZMe5… (PAYER): 99.999 -> 99.998
+
+payer delta: -0.000999999999990564  (expect -0.001)
+VERIFIED: real on-chain x402 'exact' transfer settled on solana-devnet
