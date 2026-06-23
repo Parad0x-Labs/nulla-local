@@ -31,6 +31,8 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from core.credits.proof_of_work import ProofOfWorkMinter, WorkProof
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -116,6 +118,11 @@ class MeshTaskRouter:
         self._bids: dict[str, list[TaskBid]] = {}
         self._assignments: dict[str, TaskBid] = {}
         self._results: dict[str, dict[str, Any]] = {}
+        # Anti-cheat proof-of-work: a per-task secret challenge is issued at
+        # assignment; a helper earns the reward only by producing a verified
+        # commit/reveal WorkProof (see commit_result / submit_result).
+        self._minter = ProofOfWorkMinter()
+        self._commitments: dict[str, dict[str, str]] = {}
 
     # ------------------------------------------------------------------
     # Broadcast
@@ -267,6 +274,20 @@ class MeshTaskRouter:
         except Exception as exc:
             logger.warning("mesh:escrow_failed task_id=%s err=%s", tid, exc)
 
+        # Issue a secret per-task challenge. The publishable challenge_hash goes to
+        # the winner; the nonce stays local and is only revealed once the worker
+        # commits to a result hash (commit_result), so the reward can't be forged.
+        challenge_hash: str | None = None
+        try:
+            issued = self._minter.issue_task_challenge(
+                task_id=tid,
+                issuer_id=self._registry.local_node_id,
+                credits_offered=int(bid.credits_requested) or 1,
+            )
+            challenge_hash = issued.challenge_hash
+        except Exception as exc:
+            logger.warning("mesh:challenge_issue_failed task_id=%s err=%s", tid, exc)
+
         # Notify winning peer.
         try:
             import requests  # type: ignore[import]
@@ -278,6 +299,7 @@ class MeshTaskRouter:
                     "assigned_to": bid.bidder_node_id,
                     "credits_promised": bid.credits_requested,
                     "poster_node_id": self._registry.local_node_id,
+                    "challenge_hash": challenge_hash,
                 },
                 timeout=4.0,
             )
@@ -296,113 +318,150 @@ class MeshTaskRouter:
             "task_id": tid,
             "winning_node": bid.bidder_node_id,
             "credits_escrowed": bid.credits_requested,
+            "challenge_hash": challenge_hash,
         }
 
     # ------------------------------------------------------------------
     # Result submission & verification
     # ------------------------------------------------------------------
 
-    def submit_result(
+    def commit_result(
         self,
         task_id: str,
-        result: str,
-        proof_hash: str | None = None,
+        result_hash: str,
         *,
         node_id: str | None = None,
     ) -> dict[str, Any]:
         """
-        Called by the *worker* node after it has finished executing a task.
+        Phase 1 of the anti-cheat protocol: the assigned worker COMMITS to its
+        ``result_hash`` and, in return, receives the challenge nonce.
 
-        Computes (and optionally validates) the SHA-256 proof-of-work hash,
-        then appends a contribution receipt via ``core.contribution_proof``.
+        Commit-before-reveal: the worker must lock in a result hash *before* it
+        can learn the nonce, and the commitment is one-shot — so it cannot grind
+        or swap the result after seeing the nonce. Only the assigned worker may
+        commit.
 
-        Parameters
-        ----------
-        task_id:   The task being reported on.
-        result:    The LLM output / completed work product.
-        proof_hash:
-            Pre-computed proof hash.  When *None* the canonical hash is
-            computed automatically: ``SHA-256(task_id + result + node_id)``.
-        node_id:   The worker's node ID.  Defaults to the local node.
-
-        Returns
-        -------
-        dict  With keys ``"accepted"``, ``"proof_hash"``, ``"receipt_id"``.
+        Returns ``{"committed": True, "challenge_nonce": <hex>}`` on success.
         """
         worker_id = str(node_id or self._registry.local_node_id)
-        canonical_hash = _compute_proof_hash(task_id, result, worker_id)
+        assignment = self._assignments.get(task_id)
+        if assignment is not None and worker_id != assignment.bidder_node_id:
+            return {"committed": False, "reason": "not_the_assigned_worker", "task_id": task_id}
+        if task_id in self._commitments:
+            return {"committed": False, "reason": "already_committed", "task_id": task_id}
+        try:
+            nonce = self._minter.reveal_challenge(task_id)
+        except KeyError:
+            return {"committed": False, "reason": "no_challenge", "task_id": task_id}
+        except ValueError:
+            return {"committed": False, "reason": "challenge_expired", "task_id": task_id}
+        self._commitments[task_id] = {"worker_id": worker_id, "result_hash": str(result_hash)}
+        return {"committed": True, "task_id": task_id, "challenge_nonce": nonce}
 
-        if proof_hash and proof_hash != canonical_hash:
-            logger.warning(
-                "mesh:proof_mismatch task_id=%s expected=%s got=%s",
-                task_id, canonical_hash, proof_hash,
-            )
-            return {"accepted": False, "reason": "proof_hash_mismatch", "task_id": task_id}
+    def _verify_reward(
+        self, task_id: str, worker_id: str, result_bytes: bytes,
+        result_hash: str, challenge_response: str | None,
+    ) -> tuple[bool, str]:
+        """True only when a genuine commit/reveal WorkProof backs the result.
 
+        Closes the forgery where a self-computable hash earned a reward: the
+        worker must have committed this exact result hash and produced
+        ``sha256(nonce + result_bytes)`` for the secret per-task nonce.
+        """
+        try:
+            nonce = self._minter.reveal_challenge(task_id)
+        except KeyError:
+            return False, "no_challenge"
+        except ValueError:
+            return False, "challenge_expired"
+        if not challenge_response:
+            return False, "missing_challenge_response"
+        commitment = self._commitments.get(task_id)
+        if commitment is None:
+            return False, "no_commitment"
+        if commitment["worker_id"] != worker_id:
+            return False, "commitment_worker_mismatch"
+        if commitment["result_hash"] != result_hash:
+            return False, "result_differs_from_commitment"  # anti-swap / anti-grind
+        # Fixed credits/timestamp so the proof's canonical_id is STABLE for identical
+        # work — that id is the minter's replay key, so a re-submitted proof is caught.
+        proof = WorkProof(
+            task_id=task_id, worker_node_id=worker_id, result_hash=result_hash,
+            challenge_response=str(challenge_response), credits_earned=0,
+            timestamp=0.0, solana_anchor_tx=None,
+        )
+        ok = self._minter.verify_proof_with_challenge(proof, nonce, result_bytes)
+        return (ok, "verified" if ok else "invalid_challenge_response")
+
+    def submit_result(
+        self,
+        task_id: str,
+        result: str,
+        *,
+        challenge_response: str | None = None,
+        node_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Phase 2: the worker submits its result plus the commit/reveal
+        ``challenge_response``. The result is always recorded, but the
+        contribution-credit REWARD is granted only when a genuine WorkProof
+        verifies — a forged or unproven submission earns zero.
+        """
+        worker_id = str(node_id or self._registry.local_node_id)
+        result_bytes = result.encode() if isinstance(result, str) else bytes(result)
+        result_hash = hashlib.sha256(result_bytes).hexdigest()
+
+        verified, reason = self._verify_reward(
+            task_id, worker_id, result_bytes, result_hash, challenge_response,
+        )
         receipt_id = f"mesh_result:{task_id}:{worker_id}"
         self._results[task_id] = {
             "result": result,
-            "proof_hash": canonical_hash,
+            "result_hash": result_hash,
             "worker_id": worker_id,
             "receipt_id": receipt_id,
+            "verified": verified,
             "submitted_at": time.time(),
         }
 
-        # Append a durable contribution proof receipt.
+        assignment = self._assignments.get(task_id)
+        offered = float(assignment.credits_requested) if assignment else 0.0
+        credits = offered if verified else 0.0  # reward gated on a verified WorkProof
+
         try:
             from core.contribution_proof import append_contribution_proof_receipt
 
-            assignment = self._assignments.get(task_id)
-            credits = float(assignment.credits_requested) if assignment else 0.0
             append_contribution_proof_receipt(
                 entry_id=receipt_id,
                 task_id=task_id,
                 helper_peer_id=worker_id,
                 parent_peer_id=self._registry.local_node_id,
                 stage="mesh_result",
-                outcome="submitted",
+                outcome="verified" if verified else "unverified",
                 compute_credits=credits,
-                evidence={"proof_hash": canonical_hash, "result_chars": len(result)},
+                evidence={"result_hash": result_hash, "verified": verified,
+                          "reason": reason, "result_chars": len(result)},
             )
         except Exception as exc:
             logger.debug("mesh:contribution_proof_failed task_id=%s err=%s", task_id, exc)
 
         logger.info(
-            "mesh:result_submitted task_id=%s worker=%s hash=%s",
-            task_id, worker_id, canonical_hash[:16],
+            "mesh:result_submitted task_id=%s worker=%s verified=%s reason=%s",
+            task_id, worker_id, verified, reason,
         )
-        return {"accepted": True, "proof_hash": canonical_hash, "receipt_id": receipt_id, "task_id": task_id}
+        return {
+            "accepted": True, "verified": verified, "reason": reason,
+            "result_hash": result_hash, "credits_awarded": credits,
+            "receipt_id": receipt_id, "task_id": task_id,
+        }
 
-    def verify_result(
-        self,
-        task_id: str,
-        result: str,
-        proof_hash: str,
-        *,
-        node_id: str | None = None,
-    ) -> bool:
+    def verify_result(self, task_id: str, **_legacy: Any) -> bool:
+        """Whether the stored result for ``task_id`` was reward-verified.
+
+        Verification (with replay protection) happens once, in ``submit_result``;
+        this just reports that stored verdict.
         """
-        Verify that *result* matches *proof_hash*.
-
-        Uses the same canonical hash formula:
-        ``SHA-256(task_id + result + node_id)``.
-
-        Returns *True* when the hash is valid, *False* otherwise.
-        """
-        stored = self._results.get(task_id)
-        worker_id = str(
-            node_id
-            or (stored and stored.get("worker_id"))
-            or self._registry.local_node_id
-        )
-        expected = _compute_proof_hash(task_id, result, worker_id)
-        ok = proof_hash == expected
-        if not ok:
-            logger.warning(
-                "mesh:verify_failed task_id=%s expected=%s got=%s",
-                task_id, expected, proof_hash,
-            )
-        return ok
+        return bool((self._results.get(task_id) or {}).get("verified"))
 
 
 # ---------------------------------------------------------------------------
