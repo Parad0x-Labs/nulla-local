@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -87,6 +88,51 @@ def stream_response(
     )
 
 
+# Task-completion self-credit: minted only against an internally-consistent work
+# receipt, paid only to the LOCAL peer (no cross-peer transfer is possible here), and
+# capped per rolling window so a flood of requests cannot inflate the balance.
+_TASK_AWARD_WINDOW_SEC = 60
+_TASK_AWARD_MAX_PER_WINDOW = 30
+_task_award_window: dict[int, int] = {}
+
+
+def _award_task_completion_credit(receipt: Any) -> dict[str, Any]:
+    """Award the local node's task-completion credit — gated + rate-limited.
+
+    Returns ``{"awarded": bool, "reason": str}``. The receipt's proof must recompute
+    and bind the same result (no minting on a malformed/forged receipt); the recipient
+    is always the local peer; and awards are bounded per window against spam-inflation.
+    """
+    import time as _time
+
+    from core.proof_of_execution import verify_proof_receipt
+
+    try:
+        if not verify_proof_receipt(receipt.proof):
+            return {"awarded": False, "reason": "invalid_proof"}
+        if receipt.result_hash != receipt.proof.result_hash:
+            return {"awarded": False, "reason": "result_binding_mismatch"}
+    except Exception:
+        return {"awarded": False, "reason": "proof_check_error"}
+
+    window = int(_time.time()) // _TASK_AWARD_WINDOW_SEC
+    for w in [w for w in _task_award_window if w < window]:
+        _task_award_window.pop(w, None)
+    if _task_award_window.get(window, 0) >= _TASK_AWARD_MAX_PER_WINDOW:
+        return {"awarded": False, "reason": "rate_limited"}
+
+    try:
+        from core.credit_ledger import award_credits
+        from network.signer import get_local_peer_id
+        ok = award_credits(get_local_peer_id(), amount=1.0, reason="task_completion",
+                           receipt_id=receipt.receipt_id)
+    except Exception:
+        return {"awarded": False, "reason": "ledger_error"}
+    if ok:
+        _task_award_window[window] = _task_award_window.get(window, 0) + 1
+    return {"awarded": bool(ok), "reason": "awarded" if ok else "ledger_declined"}
+
+
 def _attach_work_receipt(
     payload: dict[str, Any],
     *,
@@ -117,13 +163,9 @@ def _attach_work_receipt(
         )
         payload = dict(payload)
         payload["web0_receipt"] = receipt.to_dict()
-        # Award 1 credit to self per completed task turn
-        try:
-            from core.credit_ledger import award_credits
-            from network.signer import get_local_peer_id
-            award_credits(get_local_peer_id(), amount=1.0, reason="task_completion", receipt_id=receipt.receipt_id)
-        except Exception:
-            pass
+        # Award the local node a bounded, proof-gated task-completion credit.
+        with contextlib.suppress(Exception):
+            _award_task_completion_credit(receipt)
         # Anchor receipt hash on Solana when anchoring is opted in (shared gate)
         from core.solana_anchor import anchor_enabled
         if anchor_enabled():
