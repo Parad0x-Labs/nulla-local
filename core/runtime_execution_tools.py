@@ -43,7 +43,16 @@ from core.install_recommendations import install_recommendation_machine_summary
 from core.learning import promote_verified_procedure
 from core.runtime_paths import resolve_workspace_root
 from core.runtime_tool_contracts import runtime_tool_contract_map, runtime_tool_contracts
-from core.web0_tools import web0_open_builder_draft
+from core.web0_tools import (
+    web0_add_block,
+    web0_add_gated_section,
+    web0_compile_preview,
+    web0_create_project,
+    web0_encrypt_whole_site,
+    web0_fill_slots,
+    web0_open_builder_draft,
+    web0_publish,
+)
 from sandbox.network_guard import parse_command
 from sandbox.sandbox_runner import SandboxRunner
 from tools.browser.browser_render import browser_render
@@ -596,6 +605,20 @@ def execute_runtime_tool(
             return _write_machine_file(arguments)
         if intent == "web0.open_builder_draft":
             return _web0_open_builder_draft(arguments)
+        if intent == "web0.create_project":
+            return _web0_create_project(arguments)
+        if intent == "web0.fill_slots":
+            return _web0_fill_slots(arguments)
+        if intent == "web0.add_block":
+            return _web0_add_block(arguments)
+        if intent == "web0.add_gated_section":
+            return _web0_add_gated_section(arguments)
+        if intent == "web0.encrypt_whole_site":
+            return _web0_encrypt_whole_site(arguments)
+        if intent == "web0.compile_preview":
+            return _web0_compile_preview(arguments)
+        if intent == "web0.publish":
+            return _web0_publish(arguments, source_context=source_context)
         if intent == "web.fetch":
             return _web_fetch(arguments, source_context=source_context)
         if intent == "web.browser_render":
@@ -720,6 +743,216 @@ def _web0_open_builder_draft(arguments: dict[str, Any]) -> RuntimeExecutionResul
                 title=str(result.get("title") or ""),
             ),
         },
+    )
+
+
+def _web0_result(
+    intent: str,
+    result: dict[str, Any],
+    *,
+    ok_response: str,
+    **observation_fields: Any,
+) -> RuntimeExecutionResult:
+    error = str(result.get("error") or "").strip()
+    if error:
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="rejected",
+            response_text=f"`{intent}` could not complete: {error}",
+            details={
+                **result,
+                "observation": _tool_observation(
+                    intent=intent, tool_surface="web0", ok=False, status="rejected", error=error
+                ),
+            },
+        )
+    return RuntimeExecutionResult(
+        handled=True,
+        ok=True,
+        status="executed",
+        response_text=ok_response,
+        details={
+            **result,
+            "observation": _tool_observation(
+                intent=intent,
+                tool_surface="web0",
+                ok=True,
+                status="executed",
+                project_id=str(result.get("project_id") or ""),
+                result_status=str(result.get("status") or ""),
+                **observation_fields,
+            ),
+        },
+    )
+
+
+def _web0_create_project(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    result = web0_create_project(
+        str(arguments.get("template_id") or ""),
+        str(arguments.get("domain") or ""),
+        str(arguments.get("project_name") or ""),
+    )
+    return _web0_result(
+        "web0.create_project",
+        result,
+        ok_response=(
+            f"Web0 builder project `{result.get('project_id', '')}` created for "
+            f"{result.get('domain', '')} ({result.get('source', 'local_draft')})."
+        ),
+        domain=str(result.get("domain") or ""),
+    )
+
+
+def _web0_fill_slots(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    slots = arguments.get("slots")
+    result = web0_fill_slots(
+        str(arguments.get("project_id") or ""),
+        slots if isinstance(slots, dict) else {},
+    )
+    updated = result.get("updated_slots") or []
+    return _web0_result(
+        "web0.fill_slots",
+        result,
+        ok_response=f"Filled {len(updated)} slot(s): {', '.join(str(s) for s in updated)}.",
+    )
+
+
+def _web0_add_block(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    block = arguments.get("block")
+    result = web0_add_block(
+        str(arguments.get("project_id") or ""),
+        str(arguments.get("page_id") or "home"),
+        block if isinstance(block, dict) else {},
+        int(arguments.get("position", -1) or -1),
+    )
+    return _web0_result(
+        "web0.add_block",
+        result,
+        ok_response=(
+            f"Block added to page `{result.get('page_id', 'home')}` "
+            f"({result.get('block_count', 0)} block(s) on the page)."
+        ),
+    )
+
+
+def _coerce_str_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _web0_add_gated_section(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    result = web0_add_gated_section(
+        str(arguments.get("project_id") or ""),
+        str(arguments.get("page_id") or "home"),
+        str(arguments.get("content") or ""),
+        _coerce_str_list(arguments.get("whitelist")),
+        str(arguments.get("mode") or "whitelist"),
+        str(arguments.get("label") or "Private content"),
+        int(arguments.get("position", -1) or -1),
+    )
+    return _web0_result(
+        "web0.add_gated_section",
+        result,
+        ok_response=(
+            f"Gated section added (block `{result.get('block_id', '')}`, "
+            f"{result.get('wallets_registered', 0)} wallet(s) whitelisted). Only the ciphertext ships."
+        ),
+        block_id=str(result.get("block_id") or ""),
+    )
+
+
+def _web0_encrypt_whole_site(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    result = web0_encrypt_whole_site(
+        str(arguments.get("project_id") or ""),
+        _coerce_str_list(arguments.get("whitelist")),
+        str(arguments.get("mode") or "whitelist"),
+        str(arguments.get("label") or "Private content"),
+    )
+    return _web0_result(
+        "web0.encrypt_whole_site",
+        result,
+        ok_response=(
+            f"Encrypted {result.get('blocks_protected', 0)} block(s) behind the wallet gate; "
+            "the plaintext is no longer present in the compiled page."
+        ),
+        blocks_protected=int(result.get("blocks_protected") or 0),
+    )
+
+
+def _web0_compile_preview(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    result = web0_compile_preview(str(arguments.get("project_id") or ""))
+    return _web0_result(
+        "web0.compile_preview",
+        result,
+        ok_response=(
+            f"Compiled a local preview ({result.get('size_kb', 0)} KB, "
+            f"source={result.get('source', 'local_fallback')}). Nothing was published."
+        ),
+        size_kb=float(result.get("size_kb") or 0.0),
+    )
+
+
+def _web0_publish(
+    arguments: dict[str, Any],
+    *,
+    source_context: dict[str, Any] | None,
+) -> RuntimeExecutionResult:
+    """Gated off by default. The autonomous layer never publishes on its own.
+
+    Publishing needs BOTH an explicit ``allow_network_publish`` opt-in *and* a
+    real wallet wired by the trusted caller via ``source_context['nulla_wallet']``
+    — mirroring the spend guard on ``pay.x402``. The model can ask, but it can
+    neither flip the opt-in for the caller nor conjure a wallet.
+    """
+    project_id = str(arguments.get("project_id") or "")
+    allow_network_publish = bool(arguments.get("allow_network_publish", False))
+    wallet = (source_context or {}).get("nulla_wallet")
+
+    if not allow_network_publish or wallet is None:
+        reason = (
+            "No publish opt-in was given (allow_network_publish is off)."
+            if not allow_network_publish
+            else "No publishing wallet is wired into this runtime."
+        )
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="requires_opt_in",
+            response_text=(
+                "I won't publish to Arweave from here. "
+                f"{reason} Publishing uploads content permanently and needs an explicit "
+                "opt-in plus a caller-supplied wallet — it never runs autonomously."
+            ),
+            details={
+                "project_id": project_id,
+                "status": "publish_gated_off",
+                "allow_network_publish": allow_network_publish,
+                "wallet_present": wallet is not None,
+                "observation": _tool_observation(
+                    intent="web0.publish",
+                    tool_surface="web0",
+                    ok=False,
+                    status="requires_opt_in",
+                    project_id=project_id,
+                    allow_network_publish=allow_network_publish,
+                    wallet_present=wallet is not None,
+                ),
+            },
+        )
+
+    result = web0_publish(project_id, wallet, allow_network_publish=True)
+    return _web0_result(
+        "web0.publish",
+        result,
+        ok_response=(
+            f"Published to Arweave: {result.get('permanent_url', '')} "
+            f"(tx {result.get('arweave_txid', '')})."
+        ),
+        arweave_txid=str(result.get("arweave_txid") or ""),
     )
 
 

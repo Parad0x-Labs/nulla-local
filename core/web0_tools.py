@@ -17,6 +17,7 @@ from core.nulla_wallet import NullaWallet
 from core.web0_gated_html import (
     DEFAULT_GATE_URL,
     WalletKeyStore,
+    _split_whitelist,
     encrypt_content_block,
     render_gated_block_css,
     render_gated_block_html,
@@ -32,6 +33,8 @@ _TEMPLATE_FALLBACKS = (
     {"id": "storefront", "name": "Storefront", "description": "Products or services"},
 )
 _ALLOWED_BLOCK_KINDS = {"text", "heading", "image", "video", "divider", "quote", "callout", "_gated_html"}
+# Block kinds that carry recoverable visible text and so can be encrypted behind a gate.
+_GATEABLE_TEXT_KINDS = ("heading", "text", "quote", "callout")
 _GLOBAL_GATE_STORE = WalletKeyStore()
 
 
@@ -261,12 +264,88 @@ def web0_add_gated_section(
     }
 
 
-def web0_encrypt_whole_site(project_id: str, whitelist: list[str], mode: str = "whitelist") -> dict[str, Any]:
+def web0_encrypt_whole_site(
+    project_id: str,
+    whitelist: list[str],
+    mode: str = "whitelist",
+    label: str = "Private content",
+) -> dict[str, Any]:
+    """Encrypt every text-bearing block on every page behind the same wallet gate.
+
+    Each gateable block (heading/text/quote/callout) is replaced in place with a
+    ``_gated_html`` block whose payload carries only AES-GCM ciphertext — the
+    plaintext is no longer present in the project state or its compiled HTML and
+    is recoverable only with the per-block key held in the project key store.
+    Already-gated blocks and blocks with no recoverable text (image/video/
+    divider) are skipped and reported.
+    """
     project = _active_projects.get(_text(project_id))
     if project is None:
         return {"error": "project_not_found", "project_id": project_id}
-    project.slots["_whole_site_gate"] = {"whitelist": list(whitelist), "mode": _text(mode) or "whitelist"}
-    return {"project_id": project.project_id, "status": "marked_for_whole_site_gate"}
+
+    wallets, pending_names, invalid_entries = _split_whitelist(list(whitelist))
+    if not wallets:
+        return {
+            "error": "whitelist_requires_valid_wallet",
+            "pending_null_resolve": list(pending_names),
+            "invalid_whitelist_entries": list(invalid_entries),
+        }
+
+    protected: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for page_id, blocks in project.pages.items():
+        for idx, block in enumerate(blocks):
+            kind = _text(block.get("kind"))
+            if kind == "_gated_html":
+                skipped.append({"page_id": page_id, "reason": "already_gated", "block_id": block.get("block_id")})
+                continue
+            if kind not in _GATEABLE_TEXT_KINDS:
+                skipped.append({"page_id": page_id, "reason": f"no_gateable_text:{kind or 'unknown'}"})
+                continue
+            text_value = _text(block.get("text") or block.get("content"))
+            if not text_value:
+                skipped.append({"page_id": page_id, "reason": "empty_text"})
+                continue
+            try:
+                encrypted = encrypt_content_block(
+                    text_value, list(whitelist), mode=mode, gate_url=NULLA_GATE_URL, label=label
+                )
+            except ValueError as exc:
+                return {"error": str(exc)}
+            project.key_store.register_encrypted_block(encrypted)
+            _GLOBAL_GATE_STORE.register_encrypted_block(encrypted)
+            blocks[idx] = {
+                "kind": "_gated_html",
+                "block_id": encrypted.block.block_id,
+                "html": render_gated_block_html(encrypted.block),
+                "mode": encrypted.block.mode,
+                "wallet_count": len(encrypted.block.allowed_wallets),
+            }
+            project.gated_blocks.append(
+                {
+                    "block_id": encrypted.block.block_id,
+                    "page_id": page_id,
+                    "mode": encrypted.block.mode,
+                    "wallet_count": len(encrypted.block.allowed_wallets),
+                }
+            )
+            protected.append({"page_id": page_id, "block_id": encrypted.block.block_id, "prev_kind": kind})
+
+    project.slots["_whole_site_gate"] = {
+        "wallets": len(wallets),
+        "mode": _text(mode) or "whitelist",
+        "blocks_protected": len(protected),
+    }
+    return {
+        "project_id": project.project_id,
+        "blocks_protected": len(protected),
+        "protected": protected,
+        "skipped": skipped,
+        "wallets_registered": len(wallets),
+        "pending_null_resolve": list(pending_names),
+        "invalid_whitelist_entries": list(invalid_entries),
+        "status": "encrypted" if protected else "nothing_to_encrypt",
+    }
 
 
 def web0_set_background_fx(project_id: str, effect: str, accent: str = "#00C2A8") -> dict[str, Any]:
