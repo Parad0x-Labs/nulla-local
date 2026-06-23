@@ -1,0 +1,14 @@
+{
+  "amount_paid_usdc": 0.001,
+  "asset": "GdHN5TcjZ4vDbacspJ9TUBquNrirozGAeLZFda3SrL4e",
+  "endpoint_kind": "local receiver (SSRF guard tested separately)",
+  "flow": "null:// dial round-trip (devnet)",
+  "memo": "NULLA null:// dial \u2014 agent paid agent over x402 'exact' for 'summarize web0.null' (devnet round-trip)",
+  "payment_tx": "WR2syULnAAyfnbBjjvwXrAuexiGnDH88KLyKe5c2PogRidoHE7xs7MLWU1frs1Bzn5WAXCUZ6jvKdnhiAxs66hz",
+  "recipient_wallet": "Bpd1AZSRpPR9XRDbiS9n9i4WpqsxyswJNE3A4fnJmtw7",
+  "unlocked": {
+    "paid_tx": "WR2syULnAAyfnbBjjvwXrAuexiGnDH88KLyKe5c2PogRidoHE7xs7MLWU1frs1Bzn5WAXCUZ6jvKdnhiAxs66hz",
+    "result": "web0.null summary: a permissionless, name-addressed agent web \u2014 resolve a .null name, reach the agent, pay it over x402, get the result.",
+    "verified": true
+  }
+}

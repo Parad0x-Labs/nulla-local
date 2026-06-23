@@ -84,8 +84,11 @@ ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 MEMO_PROGRAM_ID             = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"  # SPL Memo v2
 
 # A memo on the settlement tx makes it self-describing on-chain (explorers render
-# it). The facilitator permits a memo instruction after the transfer; keep it short.
-_MEMO_MAX_BYTES = 200
+# it). The SPL Memo program costs ~445 CU/byte, and the facilitator caps the
+# sponsored compute limit (60k accepted, 80k rejected — see compute_unit_limit
+# below), so the memo length is bounded: 120 bytes (~53k CU) fits under a 60k cap
+# alongside the transfer. Longer memos are truncated rather than risk a sim failure.
+_MEMO_MAX_BYTES = 120
 
 # Solana RPC endpoints. Mainnet uses the keyless publicnode endpoint — the
 # api.mainnet-beta endpoint 403s on requests carrying an Origin header and is
@@ -565,7 +568,7 @@ def _get_latest_blockhash(rpc_url: str) -> str:
 
 def build_solana_x402_payment(
     payer, payment_requirements: dict, rpc_url: str, *, decimals: int = USDC_DECIMALS,
-    compute_unit_limit: int = 50_000, compute_unit_price: int = 1, memo: str = "",
+    compute_unit_limit: int = 60_000, compute_unit_price: int = 1, memo: str = "",
 ) -> dict:
     """Build the canonical x402 "exact" Solana payment payload.
 
@@ -580,9 +583,10 @@ def build_solana_x402_payment(
     create accounts); pre-create it for a recipient that may not have one.
 
     ``compute_unit_limit`` is capped by the facilitator (it rejects an over-high
-    sponsored limit with ``..._compute_limit_too_high``); 50k is comfortably under
-    the cap and well above a TransferChecked's real consumption. ``compute_unit_price``
-    is the priority fee in micro-lamports/CU (the facilitator caps this low).
+    sponsored limit with ``..._compute_limit_too_high``); measured cap is between
+    60k (accepted) and 80k (rejected), so 60k is the safe default — enough for a
+    TransferChecked plus a bounded memo. ``compute_unit_price`` is the priority fee
+    in micro-lamports/CU (the facilitator caps this low).
     """
     import base64 as _b64
 
@@ -625,13 +629,13 @@ def build_solana_x402_payment(
         transfer_ix,
     ]
     # Optional SPL Memo (after the transfer) so the settled tx is self-describing
-    # on-chain — explorers render the memo text. Signed by the payer for attribution.
+    # on-chain — explorers render the memo text. NO signer account: a signer-bearing
+    # memo makes the Memo program do ed25519 verification (~48k CU) and blows the
+    # facilitator's sponsored compute cap; an anonymous memo costs a few hundred CU.
+    # Attribution is already clear — the payer signs the transfer in the same tx.
     if memo:
         memo_bytes = memo.encode("utf-8")[:_MEMO_MAX_BYTES]
-        ixs.append(Instruction(
-            Pubkey.from_string(MEMO_PROGRAM_ID), memo_bytes,
-            [AccountMeta(payer.pubkey(), True, False)],
-        ))
+        ixs.append(Instruction(Pubkey.from_string(MEMO_PROGRAM_ID), memo_bytes, []))
 
     blockhash = Hash.from_string(_get_latest_blockhash(rpc_url))
     msg = MessageV0.try_compile(fee_payer, ixs, [], blockhash)
