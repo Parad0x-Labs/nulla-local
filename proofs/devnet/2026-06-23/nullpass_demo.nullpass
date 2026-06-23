@@ -1,0 +1,42 @@
+{
+  "version": "nullpass/1",
+  "receipt": {
+    "receipt_id": "wr-f9cf1331f2d04be99d6877779cb42cdf",
+    "task_id": "nullpass-demo",
+    "worker_id": "HREKZMe5KyqMA46k5thX2CA1CdCP6rjKj9vXFtmUpM13",
+    "result_hash": "82880a09d10c9db760c2375a10ebe9303cf39d2de29d2bd86dadddc51efd5828",
+    "proof": {
+      "receipt_id": "wr-f9cf1331f2d04be99d6877779cb42cdf",
+      "task_id": "nullpass-demo",
+      "helper_peer_id": "HREKZMe5KyqMA46k5thX2CA1CdCP6rjKj9vXFtmUpM13",
+      "result_hash": "82880a09d10c9db760c2375a10ebe9303cf39d2de29d2bd86dadddc51efd5828",
+      "started_at": "2026-06-23T11:05:41.939688Z",
+      "finished_at": "2026-06-23T11:05:41.940688Z",
+      "proof_hash": "1f0a57f16dd7df203f295c8a510429a87eaed4172e277a5b1a0dee37f9d6ae67"
+    },
+    "payment": {
+      "session_id": "nullpass-demo",
+      "payment_tx": "4XEPQP84s1M9eW62pDzMWQ3zNtDbcwo6wKgkQeq6kxCPfv6qPi4fUGiFDdyxexyJNoimWLJGMnLhBjtLKMQPWzpL",
+      "amount_usdc": 0.001,
+      "recipient_wallet": "Bpd1AZSRpPR9XRDbiS9n9i4WpqsxyswJNE3A4fnJmtw7",
+      "facilitator_sig": "",
+      "timestamp": 1782212745.09944,
+      "mode": "devnet",
+      "receipt_hash": "c02f38abcdf3243133dc690dc0725539f017818bdf2549fd4592d9100c490d93"
+    },
+    "zk_proof": null,
+    "issued_at": 1782212741.940688
+  },
+  "issuer": {
+    "alg": "ed25519",
+    "pubkey": "HREKZMe5KyqMA46k5thX2CA1CdCP6rjKj9vXFtmUpM13",
+    "signature": "DAw/MA/hxmZZIYet730Gk6kagzqbdY6BBLBriCFZNLVw074zTWo52h8VV2gqAtDlmkhzvTJhTNPO2nunVem3Dw=="
+  },
+  "anchor": {
+    "payment_tx": "4XEPQP84s1M9eW62pDzMWQ3zNtDbcwo6wKgkQeq6kxCPfv6qPi4fUGiFDdyxexyJNoimWLJGMnLhBjtLKMQPWzpL",
+    "mode": "devnet",
+    "recipient_wallet": "Bpd1AZSRpPR9XRDbiS9n9i4WpqsxyswJNE3A4fnJmtw7",
+    "amount_usdc": 0.001,
+    "explorer": "https://explorer.solana.com/tx/4XEPQP84s1M9eW62pDzMWQ3zNtDbcwo6wKgkQeq6kxCPfv6qPi4fUGiFDdyxexyJNoimWLJGMnLhBjtLKMQPWzpL?cluster=devnet"
+  }
+}

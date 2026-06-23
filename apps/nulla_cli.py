@@ -634,6 +634,85 @@ def cmd_x402_pay(
     return 0
 
 
+def _nullpass_rpc(mode: str):
+    """An RPC caller routed to the right cluster for an on-chain confirm."""
+    import urllib.request
+    rpc_url = "https://api.devnet.solana.com" if mode == "devnet" else "https://solana-rpc.publicnode.com"
+
+    def rpc(method: str, params: list):
+        body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+        req = urllib.request.Request(
+            rpc_url, data=body, method="POST",
+            headers={"Content-Type": "application/json", "User-Agent": "nulla/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read().decode()).get("result")
+    return rpc
+
+
+def cmd_nullpass(
+    action: str,
+    target: str,
+    *,
+    result: str = "",
+    out: str = "",
+    confirm_onchain: bool = False,
+    json_mode: bool = False,
+) -> int:
+    """Issue or verify a portable .nullpass work credential."""
+    from core.nullpass import build_nullpass, verify_nullpass
+
+    if action == "verify":
+        if not target:
+            print("usage: nulla nullpass verify <file.nullpass> [--confirm-onchain]")
+            return 2
+        try:
+            with open(target) as f:
+                bundle = json.load(f)
+        except Exception as exc:
+            print(f"cannot read {target}: {exc}")
+            return 2
+        rpc = None
+        if confirm_onchain:
+            mode = str(((bundle.get("receipt") or {}).get("payment") or {}).get("mode", ""))
+            rpc = _nullpass_rpc(mode)
+        verdict = verify_nullpass(bundle, confirm_onchain=confirm_onchain, rpc_call=rpc)
+        if json_mode:
+            _emit_json(verdict)
+        else:
+            print(f"{'VALID' if verdict['valid'] else 'INVALID'} .nullpass  "
+                  f"receipt={verdict.get('receipt_id')}  issuer={verdict.get('issuer')}")
+            for name, ok in (verdict.get("checks") or {}).items():
+                print(f"  [{'ok' if ok else 'FAIL'}] {name}")
+        return 0 if verdict["valid"] else 1
+
+    if action == "issue":
+        if not target:
+            print('usage: nulla nullpass issue <task_id> --result "<text>" [--out file]')
+            return 2
+        from core.nulla_wallet import NullaWallet
+        from core.web0_work_receipt import issue_work_receipt
+
+        wallet = NullaWallet()
+        if not wallet.exists():
+            print("no local wallet to sign with — create one first.")
+            return 2
+        wallet = wallet.load()
+        receipt = issue_work_receipt(task_id=target, result=result or target, worker_id=wallet.pubkey())
+        bundle = build_nullpass(receipt, signer=wallet)
+        if out:
+            with open(out, "w") as f:
+                json.dump(bundle, f, indent=2)
+            print(f"wrote {out}")
+        if json_mode:
+            _emit_json(bundle)
+        elif not out:
+            print(json.dumps(bundle, indent=2))
+        return 0
+
+    print("usage: nulla nullpass <verify|issue> …")
+    return 2
+
+
 def cmd_providers(json_mode: bool = False) -> int:
     _bootstrap_cli_storage()
     context = build_runtime_context(mode="cli_storage")
@@ -1507,6 +1586,17 @@ def build_parser() -> argparse.ArgumentParser:
     x402pay.add_argument("--memo", default="", metavar="TEXT", help="On-chain memo describing the payment (shown on explorers).")
     x402pay.add_argument("--allow-spend", action="store_true", help="Actually spend. Without it this is a dry run.")
     x402pay.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
+
+    nullpass = sub.add_parser(
+        "nullpass",
+        help="Portable .nullpass work credential: issue one (signed by your wallet) or verify one offline.",
+    )
+    nullpass.add_argument("action", choices=["verify", "issue"], help="verify a .nullpass file, or issue a new one")
+    nullpass.add_argument("target", help="file path (verify) or task id (issue)")
+    nullpass.add_argument("--result", default="", help="result text to bind into the receipt (issue)")
+    nullpass.add_argument("--out", default="", metavar="FILE", help="write the issued .nullpass here (issue)")
+    nullpass.add_argument("--confirm-onchain", action="store_true", help="also confirm the payment settled on-chain (verify)")
+    nullpass.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     providers = sub.add_parser("providers", help="Show registered external model providers and declared licenses.")
     providers.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     install_profile = sub.add_parser(
@@ -1709,6 +1799,15 @@ def main() -> int:
             asset_mint=str(args.asset or ""),
             memo=str(args.memo or ""),
             allow_spend=bool(args.allow_spend),
+            json_mode=bool(args.json),
+        )
+    if args.command == "nullpass":
+        return cmd_nullpass(
+            str(args.action),
+            str(args.target or ""),
+            result=str(args.result or ""),
+            out=str(args.out or ""),
+            confirm_onchain=bool(args.confirm_onchain),
             json_mode=bool(args.json),
         )
     if args.command == "providers":
