@@ -251,8 +251,18 @@ class X402Client:
     to either the stub path or the live Solana path depending on config.mode.
     """
 
-    def __init__(self, config: Optional[X402Config] = None) -> None:
+    def __init__(self, config: Optional[X402Config] = None, *, signer=None) -> None:
         self.config: X402Config = config or X402Config(mode=X402Mode.STUB)
+        # Optional signer (anything exposing .pubkey() -> solders Pubkey and
+        # .sign_message(bytes) -> solders Signature, e.g. a wrapped NullaWallet).
+        # When None, the live path loads a solders Keypair from config.keypair_path.
+        self._signer = signer
+
+    def _resolve_signer(self):
+        """The payer signer: an injected signer, else the keypair from config."""
+        if self._signer is not None:
+            return self._signer
+        return self._load_payer_keypair()
 
     # ------------------------------------------------------------------
     # Public API
@@ -459,8 +469,8 @@ class X402Client:
         """Canonical x402 "exact" settle on Solana via the PayAI facilitator."""
         import requests as _req
 
-        # ── 1. Load keypair (validates keypair_path before heavier imports) ──
-        payer = self._load_payer_keypair()
+        # ── 1. Resolve the payer signer (validates keypair_path when no signer) ──
+        payer = self._resolve_signer()
 
         # ── 2. Build payment requirements + the partially-signed payment ─────
         requirements = self._build_payment_requirements(
@@ -606,6 +616,34 @@ def build_solana_x402_payment(
         "network":     payment_requirements["network"],
         "payload":     {"transaction": _b64.b64encode(bytes(tx)).decode()},
     }
+
+
+class _WalletSigner:
+    """Adapts a NullaWallet to the solders-Keypair surface the payment needs.
+
+    Exposes ``pubkey() -> solders.Pubkey`` and ``sign_message(bytes) -> Signature``
+    so ``build_solana_x402_payment`` and ``X402Client(signer=...)`` accept either a
+    raw solders ``Keypair`` or a wrapped NullaWallet (which signs ed25519 over raw
+    bytes via ``.sign``). The private seed never leaves the wallet.
+    """
+
+    def __init__(self, wallet) -> None:
+        self._wallet = wallet
+
+    def pubkey(self):
+        from solders.pubkey import Pubkey
+        pk = self._wallet.pubkey
+        pk = pk() if callable(pk) else pk
+        return Pubkey.from_string(str(pk))
+
+    def sign_message(self, message):
+        from solders.signature import Signature
+        return Signature.from_bytes(bytes(self._wallet.sign(bytes(message))))
+
+
+def wallet_signer(wallet) -> _WalletSigner:
+    """Wrap a NullaWallet so the canonical x402 payment path can sign with it."""
+    return _WalletSigner(wallet)
 
 
 # ---------------------------------------------------------------------------

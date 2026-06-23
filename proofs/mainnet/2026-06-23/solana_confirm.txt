@@ -1,0 +1,50 @@
+RPC URL: https://solana-rpc.publicnode.com
+Default Signer Path: /Users/sauliuskruopis/.config/solana/web0-deploy-fresh.json
+Commitment: confirmed
+
+Transaction executed in slot 428346414:
+  Block Time: 2026-06-23T12:18:29+03:00
+  Version: 0
+  Recent Blockhash: AJ8RFyvnZuXWdda8uZgDETb97mQH9n2UZK4MvWPwqP4M
+  Signature 0: 37o7An4AUJDQqyZK2LvdGARHFpEQK3ZJiZSJwwADoeqeMHYUtSv9uddMzCcueBLU5p1S3fWDBb2FoWAMBCMn7F5a
+  Signature 1: 24DTEPb62LFsHmYLPXMRN5dHzCUTGbDApk1n99th1NdAdBn2p2XJEhH1kHUAeCRpQFATLQkVPGds7uH5hFaeGJpp
+  Account 0: srw- 2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4 (fee payer)
+  Account 1: sr-- J7kAWMC6icRh6i6Ptg2i2m8Xn5w2Tgnt69fWpHxArjkh
+  Account 2: -rw- 3ntmzoaKgqdrhPrNQKZp4zBxXR5Q4siX6hWhYQEeatX7
+  Account 3: -rw- 4BPop6dA5tVG1tznTj2NeML3DC1pYKF7mVi6VBqyknyH
+  Account 4: -r-x ComputeBudget111111111111111111111111111111
+  Account 5: -r-x TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+  Account 6: -r-- EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+  Instruction 0
+    Program:   ComputeBudget111111111111111111111111111111 (4)
+    Data: [2, 80, 195, 0, 0]
+  Instruction 1
+    Program:   ComputeBudget111111111111111111111111111111 (4)
+    Data: [3, 1, 0, 0, 0, 0, 0, 0, 0]
+  Instruction 2
+    Program:   TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA (5)
+    Account 0: 4BPop6dA5tVG1tznTj2NeML3DC1pYKF7mVi6VBqyknyH (3)
+    Account 1: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v (6)
+    Account 2: 3ntmzoaKgqdrhPrNQKZp4zBxXR5Q4siX6hWhYQEeatX7 (2)
+    Account 3: J7kAWMC6icRh6i6Ptg2i2m8Xn5w2Tgnt69fWpHxArjkh (1)
+    Data: [12, 232, 3, 0, 0, 0, 0, 0, 0, 6]
+  Status: Ok
+    Fee: ◎0.000010001
+    Account 0 balance: ◎0.110261028 -> ◎0.110251027
+    Account 1 balance: ◎0.01
+    Account 2 balance: ◎0.00203928
+    Account 3 balance: ◎0.00203928
+    Account 4 balance: ◎0.000000001
+    Account 5 balance: ◎0.04371278
+    Account 6 balance: ◎511.192599019
+  Compute Units Consumed: 405
+  Log Messages:
+    Program ComputeBudget111111111111111111111111111111 invoke [1]
+    Program ComputeBudget111111111111111111111111111111 success
+    Program ComputeBudget111111111111111111111111111111 invoke [1]
+    Program ComputeBudget111111111111111111111111111111 success
+    Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]
+    Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 105 of 49700 compute units
+    Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+
+Finalized

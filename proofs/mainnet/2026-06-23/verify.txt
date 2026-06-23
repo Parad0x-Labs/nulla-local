@@ -1,0 +1,9 @@
+MAINNET x402 settlement — on-chain verification (2026-06-23)
+
+tx: 37o7An4AUJDQqyZK2LvdGARHFpEQK3ZJiZSJwwADoeqeMHYUtSv9uddMzCcueBLU5p1S3fWDBb2FoWAMBCMn7F5a
+slot: 428346414   err: None (success)   version: 0 (versioned)
+fee payer (accountKeys[0]): 2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4  (PayAI sponsored — fee 10001 lamports paid by the facilitator, NOT the payer)
+asset: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v  (real mainnet USDC)
+USDC delta: payer J7kAWMC6… 0.02 -> 0.019 (-0.001) ; recipient 9vDnXsPo… 0.034593 -> 0.035593 (+0.001)
+settled by: shipping `nulla x402-pay … --mainnet --allow-spend` (core/x402/client.py X402Client.pay, canonical /verify+/settle vs facilitator.payai.network)
+VERIFIED: real mainnet USDC x402 "exact" settlement.

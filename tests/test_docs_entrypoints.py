@@ -70,7 +70,7 @@ def test_docs_root_is_curated_after_archive_sweep() -> None:
         "TDL.md",
         "THIRD_PARTY_LICENSES.md",
         "TRUST.md",
-        "x402-devnet-proof.md",
+        "x402-proof.md",
     }
 
     assert actual_files == expected_files

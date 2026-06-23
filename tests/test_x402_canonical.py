@@ -162,6 +162,13 @@ class TestCanonicalSettle:
         with pytest.raises(X402PaymentError, match="keypair_path"):
             X402Client(cfg).pay(0.001, _pubkey(), "sess-4")
 
+    def test_pay_with_injected_signer_needs_no_keypair_path(self, monkeypatch):
+        # The dial pays with a wrapped NullaWallet (a signer), not a keypair file.
+        self._patch(monkeypatch)
+        cfg = X402Config(mode=X402Mode.DEVNET, asset_mint=_pubkey())  # no keypair_path
+        receipt = X402Client(cfg, signer=Keypair()).pay(0.001, _pubkey(), "sess-signer")
+        assert receipt.payment_tx == "SETTLED_SIG_123"
+
 
 # ── config: network + asset selection ───────────────────────────────────────
 
@@ -179,3 +186,24 @@ class TestConfig:
         from core.x402.client import USDC_MINT_DEVNET
         assert X402Config(mode=X402Mode.DEVNET).effective_asset == USDC_MINT_DEVNET
         assert X402Config(mode=X402Mode.DEVNET, asset_mint="MINT").effective_asset == "MINT"
+
+
+class TestWalletSigner:
+    """wallet_signer adapts a NullaWallet (pubkey() + sign(bytes)) to the
+    solders-Keypair surface the payment builder needs."""
+
+    def test_wraps_wallet_to_signer_surface(self):
+        from core.x402.client import wallet_signer
+        kp = Keypair()
+
+        class FakeWallet:  # mirrors NullaWallet: pubkey() method + sign(bytes)
+            def pubkey(self):
+                return str(kp.pubkey())
+
+            def sign(self, payload):
+                return bytes(kp.sign_message(bytes(payload)))
+
+        s = wallet_signer(FakeWallet())
+        assert str(s.pubkey()) == str(kp.pubkey())
+        msg = b"x402-wallet-signer"
+        assert s.sign_message(msg) == kp.sign_message(msg)

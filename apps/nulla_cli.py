@@ -567,6 +567,71 @@ def cmd_dial(
     return 0
 
 
+def cmd_x402_pay(
+    amount_usdc: float,
+    recipient: str,
+    *,
+    keypair_path: str = "",
+    mainnet: bool = False,
+    asset_mint: str = "",
+    allow_spend: bool = False,
+    json_mode: bool = False,
+) -> int:
+    """Settle one x402 "exact" payment on Solana via the PayAI facilitator.
+
+    Devnet by default. Gated on ``--allow-spend``: without it this is a DRY RUN
+    (no network, no spend) that prints what it would pay; with it, it settles a
+    real on-chain payment and prints the transaction signature. The recipient's
+    associated token account for the asset must already exist.
+    """
+    from core.x402.client import X402Client, X402Config, X402Mode
+
+    recipient = str(recipient or "").strip()
+    if amount_usdc <= 0 or not recipient:
+        print('usage: nulla x402-pay <amount_usdc> <recipient_pubkey> '
+              '--keypair <path> [--mainnet --asset <mint>] --allow-spend')
+        return 2
+
+    mode = X402Mode.MAINNET if mainnet else X402Mode.DEVNET
+    network = "mainnet" if mainnet else "devnet"
+
+    if not allow_spend:
+        msg = (f"Dry run — no spend. Would settle {amount_usdc} (asset: "
+               f"{asset_mint or 'cluster USDC'}) to {recipient} on {network}. "
+               f"Re-run with --allow-spend to settle for real.")
+        if json_mode:
+            _emit_json({"would_pay": True, "amount_usdc": amount_usdc,
+                        "recipient": recipient, "network": network,
+                        "asset": asset_mint or "cluster-usdc", "message": msg})
+        else:
+            print(msg)
+        return 0
+
+    if not keypair_path:
+        print("error: --keypair <solana JSON keypair path> is required to pay.")
+        return 2
+
+    cfg = X402Config(mode=mode, keypair_path=keypair_path, asset_mint=(asset_mint or None))
+    try:
+        receipt = X402Client(cfg).pay(amount_usdc=amount_usdc, recipient_wallet=recipient)
+    except Exception as exc:
+        if json_mode:
+            _emit_json({"error": str(exc), "network": network})
+        else:
+            print(f"payment failed: {exc}")
+        return 1
+
+    explorer = (f"https://explorer.solana.com/tx/{receipt.payment_tx}"
+                f"{'' if mainnet else '?cluster=devnet'}")
+    if json_mode:
+        _emit_json({**receipt.to_dict(), "network": network, "explorer": explorer})
+    else:
+        print(f"paid {amount_usdc} on {network}")
+        print(f"  tx: {receipt.payment_tx}")
+        print(f"  {explorer}")
+    return 0
+
+
 def cmd_providers(json_mode: bool = False) -> int:
     _bootstrap_cli_storage()
     context = build_runtime_context(mode="cli_storage")
@@ -1427,6 +1492,18 @@ def build_parser() -> argparse.ArgumentParser:
     dial.add_argument("--allow-spend", action="store_true", help="Permit paying the endpoint via x402 (within --max-spend).")
     dial.add_argument("--max-spend", type=float, default=1.0, metavar="USDC", help="Spend cap in USDC (clamped to 1.0).")
     dial.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
+
+    x402pay = sub.add_parser(
+        "x402-pay",
+        help="Settle a single x402 payment on Solana (devnet by default). Real spend requires --allow-spend.",
+    )
+    x402pay.add_argument("amount", type=float, help="Amount in USDC, e.g. 0.001")
+    x402pay.add_argument("recipient", help="Recipient Solana wallet (base58); its token account for the asset must exist.")
+    x402pay.add_argument("--keypair", default="", metavar="PATH", help="Payer Solana JSON keypair (required to actually pay).")
+    x402pay.add_argument("--mainnet", action="store_true", help="Settle on mainnet (real funds). Default is devnet.")
+    x402pay.add_argument("--asset", default="", metavar="MINT", help="SPL mint to transfer (default: the cluster USDC mint).")
+    x402pay.add_argument("--allow-spend", action="store_true", help="Actually spend. Without it this is a dry run.")
+    x402pay.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     providers = sub.add_parser("providers", help="Show registered external model providers and declared licenses.")
     providers.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     install_profile = sub.add_parser(
@@ -1618,6 +1695,16 @@ def main() -> int:
             str(args.task or ""),
             allow_spend=bool(args.allow_spend),
             max_spend_usdc=float(args.max_spend),
+            json_mode=bool(args.json),
+        )
+    if args.command == "x402-pay":
+        return cmd_x402_pay(
+            float(args.amount),
+            str(args.recipient or ""),
+            keypair_path=str(args.keypair or ""),
+            mainnet=bool(args.mainnet),
+            asset_mint=str(args.asset or ""),
+            allow_spend=bool(args.allow_spend),
             json_mode=bool(args.json),
         )
     if args.command == "providers":
