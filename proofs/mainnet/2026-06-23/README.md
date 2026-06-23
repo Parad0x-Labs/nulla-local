@@ -6,7 +6,22 @@ shipping NULLA CLI (`nulla x402-pay … --mainnet --allow-spend` →
 (`/verify` then `/settle`). Real USDC moved on-chain; the facilitator sponsored
 the transaction fee.
 
-## The settlement
+## Self-describing settlement (with on-chain memo) — headline
+
+A second mainnet settlement carries an **on-chain memo**, so the transaction reads
+its own story on any explorer (not an opaque transfer):
+
+| | |
+|---|---|
+| **Transaction** | [`4JBYfRffsA3xh6gWDTi4ybuDxrKSf8U9Vvn8xipwxmESPJt8T26jsWnUYMR1SLJ2YCUyPzTw9gALUHurWExT3ets`](https://explorer.solana.com/tx/4JBYfRffsA3xh6gWDTi4ybuDxrKSf8U9Vvn8xipwxmESPJt8T26jsWnUYMR1SLJ2YCUyPzTw9gALUHurWExT3ets) |
+| On-chain memo | `Memo (len 89): "NULLA null:// dial — agent paid agent over x402 'exact' on Solana mainnet — web0.null"` |
+| Asset / amount | real mainnet USDC `EPjFW…` / 0.001 |
+| Fee payer | PayAI sponsored `2wKupLR9…` — `err: None`, version 0 |
+| USDC delta | payer `J7kAWMC6…` 0.025 → 0.024 (−0.001) ; recipient `9vDnXsPo…` 0.029593 → 0.030593 (+0.001) |
+
+Artifacts: `readable_settle_tx.txt`, `readable_getTransaction.json`.
+
+## The settlement (first run, no memo)
 
 | | |
 |---|---|
