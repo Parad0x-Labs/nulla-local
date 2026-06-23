@@ -658,12 +658,11 @@ def _json_list(raw: Any) -> list[Any]:
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b, strict=False))
-    mag_a = sum(x * x for x in a) ** 0.5
-    mag_b = sum(y * y for y in b) ** 0.5
-    return dot / (mag_a * mag_b) if mag_a and mag_b else 0.0
+    # Delegate to the shared cosine so a dimension mismatch is projected-and-compared
+    # (and logged once) instead of silently scoring 0.0 — which previously hid total
+    # recall failure when the embedding backend changed dimension between store/query.
+    from core.embedding_service import cosine_similarity as _shared_cosine
+    return _shared_cosine(a, b)
 
 
 def _token_set(text: str) -> set[str]:
