@@ -14,6 +14,7 @@ _DEFAULT_POLICY = {
         "advice_only_default": True,
         "local_only_mode": False,
         "allow_web_fallback": False,
+        "allow_null_dial": False,
         "allow_swarm_queries": True,
         "max_datagram_bytes": 32768,
         "max_message_bytes": 262144,
@@ -318,11 +319,19 @@ def _apply_env_overrides(config: dict[str, Any], env: dict[str, str] | None = No
     Web access is opt-in and off by default. Setting `NULLA_ENABLE_WEB=1`
     (or its alias `NULLA_ALLOW_WEB=1`) deliberately enables live web lookup by
     mapping to `system.allow_web_fallback=True` at load time.
+
+    Remote `null://` dial is opt-in and off by default the same way. Setting
+    `NULLA_ENABLE_NULL_DIAL=1` (or its alias `NULLA_ALLOW_NULL_DIAL=1`) maps to
+    `system.allow_null_dial=True`. Spend stays separately gated at call time.
     """
     env_map = os.environ if env is None else env
     if _env_is_truthy(env_map.get("NULLA_ENABLE_WEB")) or _env_is_truthy(env_map.get("NULLA_ALLOW_WEB")):
         system = dict(config.get("system") or {})
         system["allow_web_fallback"] = True
+        config["system"] = system
+    if _env_is_truthy(env_map.get("NULLA_ENABLE_NULL_DIAL")) or _env_is_truthy(env_map.get("NULLA_ALLOW_NULL_DIAL")):
+        system = dict(config.get("system") or {})
+        system["allow_null_dial"] = True
         config["system"] = system
     return config
 
@@ -363,6 +372,9 @@ def local_only_mode() -> bool:
 
 def allow_web_fallback() -> bool:
     return bool(get("system.allow_web_fallback", False)) and not local_only_mode()
+
+def null_dial_enabled() -> bool:
+    return bool(get("system.allow_null_dial", False))
 
 def allow_remote_only_without_backend() -> bool:
     return bool(get("system.allow_remote_only_without_backend", True)) and not local_only_mode()

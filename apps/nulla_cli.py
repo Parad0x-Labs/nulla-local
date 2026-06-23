@@ -482,6 +482,91 @@ def cmd_sell_quote(target: str, *, json_mode: bool = False) -> int:
     return 0
 
 
+DIAL_DISABLED_MESSAGE = (
+    "Remote dial is opt-in; enable with NULLA_ENABLE_NULL_DIAL=1 "
+    "(remote dial is off by default). Payment is separately gated by "
+    "--allow-spend within a cap."
+)
+
+
+def cmd_dial(
+    name: str,
+    task: str,
+    *,
+    allow_spend: bool = False,
+    max_spend_usdc: float = 1.0,
+    json_mode: bool = False,
+) -> int:
+    """Reach a named .null agent's endpoint and return its result.
+
+    Gated on the null-dial policy flag: when off, this prints how to enable it and
+    makes ZERO network calls.
+    """
+    if not policy_engine.null_dial_enabled():
+        if json_mode:
+            _emit_json({"enabled": False, "message": DIAL_DISABLED_MESSAGE})
+        else:
+            print(DIAL_DISABLED_MESSAGE)
+        return 2
+
+    clean = _strip_null_suffix(name)
+    task_text = str(task or "").strip()
+    if not clean or not task_text:
+        print('usage: nulla dial <name>.null "<task>" [--allow-spend --max-spend <usdc>]')
+        return 2
+
+    from core.null_dial import try_dial
+
+    record = resolve_null_domain(clean)
+    if record is None:
+        payload = {"name": clean, "resolved": False, "dialed": False}
+        if json_mode:
+            _emit_json(payload)
+        else:
+            print(f"{clean}.null did not resolve to an on-chain record.")
+        return 1
+    if not record.x402_endpoint:
+        payload = {"name": clean, "resolved": True, "dialed": False, "reason": "no_endpoint"}
+        if json_mode:
+            _emit_json(payload)
+        else:
+            print(f"{clean}.null has no x402 endpoint set; nothing to dial.")
+        return 1
+
+    wallet = None
+    if allow_spend:
+        from core.nulla_wallet import NullaWallet
+
+        candidate = NullaWallet()
+        if candidate.exists():
+            wallet = candidate.load()
+
+    uri = _quote_target_to_uri(clean)
+    result = try_dial(
+        uri,
+        task_text,
+        record=record,
+        wallet=wallet,
+        allow_spend=bool(allow_spend),
+        max_spend_usdc=float(max_spend_usdc),
+    )
+    if result is None:
+        payload = {"name": clean, "resolved": True, "dialed": False, "reason": "no_remote_result"}
+        if json_mode:
+            _emit_json(payload)
+        else:
+            print(f"{clean}.null could not be reached; run it locally instead.")
+        return 1
+
+    payload = {"name": clean, "resolved": True, "dialed": True, "endpoint": record.x402_endpoint, "result": result}
+    if json_mode:
+        _emit_json(payload)
+    else:
+        print(f"NULLA dial -> {clean}.null ({record.x402_endpoint})")
+        print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
 def cmd_providers(json_mode: bool = False) -> int:
     _bootstrap_cli_storage()
     context = build_runtime_context(mode="cli_storage")
@@ -1332,6 +1417,16 @@ def build_parser() -> argparse.ArgumentParser:
     sell_quote = sub.add_parser("sell-quote", help="Preview the x402 invoice for a null:// request or a .null name (read-only).")
     sell_quote.add_argument("target", help="A null:// service URI or a <name>.null")
     sell_quote.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
+
+    dial = sub.add_parser(
+        "dial",
+        help="Reach a named .null agent's endpoint and return its result. Opt-in: off unless NULLA_ENABLE_NULL_DIAL=1.",
+    )
+    dial.add_argument("name", help="The .null name to dial, e.g. web0.null")
+    dial.add_argument("task", help="The task to hand the named agent.")
+    dial.add_argument("--allow-spend", action="store_true", help="Permit paying the endpoint via x402 (within --max-spend).")
+    dial.add_argument("--max-spend", type=float, default=1.0, metavar="USDC", help="Spend cap in USDC (clamped to 1.0).")
+    dial.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     providers = sub.add_parser("providers", help="Show registered external model providers and declared licenses.")
     providers.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     install_profile = sub.add_parser(
@@ -1517,6 +1612,14 @@ def main() -> int:
         return cmd_manifest(json_mode=bool(args.json))
     if args.command == "sell-quote":
         return cmd_sell_quote(str(args.target or ""), json_mode=bool(args.json))
+    if args.command == "dial":
+        return cmd_dial(
+            str(args.name or ""),
+            str(args.task or ""),
+            allow_spend=bool(args.allow_spend),
+            max_spend_usdc=float(args.max_spend),
+            json_mode=bool(args.json),
+        )
     if args.command == "providers":
         return cmd_providers(json_mode=bool(args.json))
     if args.command == "install-profile":

@@ -461,6 +461,8 @@ def dispatch_post(
     stable_openclaw_session_id_provider: Callable[..., str] = stable_openclaw_session_id,
     run_agent_provider: Callable[..., dict[str, Any]] = run_agent,
     stream_agent_with_events_provider: Callable[..., Iterable[bytes]] = stream_agent_with_events,
+    resolve_null_domain_provider: Callable[[str], Any] | None = None,
+    try_dial_provider: Callable[..., Any] | None = None,
 ) -> ApiResponse:
     normalized_path = path.rstrip("/") or "/"
 
@@ -470,11 +472,81 @@ def dispatch_post(
         if not uri_str:
             return apply_runtime_headers(json_response(400, {"error": "missing 'uri' field"}), runtime)
         try:
-            from core.null_protocol import NullResponse, resolve_null_request
-            null_req = resolve_null_request(uri_str)
+            from core.null_protocol import NullResponse, parse_null_uri
+        except Exception as exc:
+            return apply_runtime_headers(json_response(400, {"error": str(exc)}), runtime)
+
+        # When remote dial is opted in, resolve the .null name carried by the URI
+        # (the service segment) so the quote shows the REAL recipient wallet (the
+        # on-chain owner) instead of the default. A resolution miss or any error
+        # leaves recipient + record unset and the path behaves as before.
+        from core import policy_engine
+
+        null_record = None
+        recipient_wallet = "stub-wallet"
+        # Owner resolution does a live on-chain read, so it ONLY runs when remote
+        # dial is opted in — with the flag off this route stays fully local (no
+        # network), byte-identical to before this feature.
+        if policy_engine.null_dial_enabled():
+            resolve_domain = resolve_null_domain_provider
+            if resolve_domain is None:
+                from core.null_resolver import resolve_null_domain as resolve_domain
+            try:
+                parsed_uri = parse_null_uri(uri_str)
+                null_record = resolve_domain(parsed_uri.service)
+                if null_record is not None and getattr(null_record, "owner", ""):
+                    recipient_wallet = null_record.owner
+            except Exception:
+                null_record = None
+
+        try:
+            from core.null_protocol import resolve_null_request
+            null_req = resolve_null_request(uri_str, recipient_wallet=recipient_wallet)
         except Exception as exc:
             return apply_runtime_headers(json_response(400, {"error": str(exc)}), runtime)
         task_text = prompt or null_req.uri.path or null_req.uri.service
+
+        # Remote dial is opt-in and off by default. When enabled and the resolved
+        # record carries a safe x402 endpoint, reach the named agent; otherwise
+        # fall through to the unchanged local run.
+        dial_result = None
+        try:
+            if policy_engine.null_dial_enabled() and null_record is not None:
+                dial_fn = try_dial_provider
+                if dial_fn is None:
+                    from core.null_dial import try_dial as dial_fn
+                dial_result = dial_fn(
+                    uri_str,
+                    task_text,
+                    record=null_record,
+                    wallet=None,
+                    allow_spend=False,
+                )
+        except Exception:
+            dial_result = None
+
+        if dial_result is not None:
+            null_resp = NullResponse(
+                session_id=null_req.session_id,
+                service=null_req.uri.service,
+                path=null_req.uri.path,
+                result=dial_result,
+            )
+            dial_payload: dict[str, Any] = {
+                "session_id": null_resp.session_id,
+                "service":    null_resp.service,
+                "path":       null_resp.path,
+                "result":     null_resp.result,
+                "receipt_id": None,
+                "zk_proof":   null_resp.zk_proof,
+                "dialed":     True,
+                "quote": {
+                    "amount_usdc":      null_req.quote.amount_usdc,
+                    "recipient_wallet": null_req.quote.recipient_wallet,
+                } if null_req.quote else None,
+            }
+            return apply_runtime_headers(json_response(200, dial_payload), runtime)
+
         try:
             null_result = run_agent_provider(
                 runtime,

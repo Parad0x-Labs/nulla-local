@@ -158,6 +158,16 @@ def main() -> int:
                 continue
             cmd_resolve(name)
             continue
+        if user_text.lower().startswith("/dial"):
+            from apps.nulla_cli import cmd_dial
+
+            rest = user_text[len("/dial"):].strip()
+            parts = rest.split(None, 1)
+            if len(parts) < 2:
+                print('usage: /dial <name>.null "<task>"')
+                continue
+            cmd_dial(parts[0], parts[1])
+            continue
         if user_text.lower() in {"/manifest", "/capabilities"}:
             from apps.nulla_cli import cmd_manifest
 

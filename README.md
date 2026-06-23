@@ -160,6 +160,11 @@ wants **WSL2/Linux plus a non-local-only profile**:
   explicit, informed override (static command guard only, no kernel isolation).
 - **Live web lookup:** opt-in and OFF in the local-only profile. Enable it on a non-local-only
   profile (and/or `NULLA_ENABLE_WEB=1` when not local-only). See [Web Access](docs/INSTALL.md#web-access-opt-in).
+- **Remote `null://` dial:** opt-in and OFF by default. A `null://` request runs locally unless
+  dial is enabled with `NULLA_ENABLE_NULL_DIAL=1`, at which point it can reach the named `.null`
+  agent's x402 endpoint and return that agent's result. Payment is separately gated by
+  `--allow-spend` within a cap. An SSRF guard rejects internal/loopback endpoints. See
+  [Remote dial](docs/INSTALL.md#remote-dial-opt-in).
 
 ---
 

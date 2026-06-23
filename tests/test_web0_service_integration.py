@@ -69,6 +69,8 @@ def _fake_agent(
 
 
 def _post(path: str, body: dict[str, Any]) -> Any:
+    # Inject a resolver that always misses so the null:// route never touches the
+    # network in unit tests; behavior matches an unresolved name (local run).
     return dispatch_post(
         path=path,
         body=body,
@@ -77,6 +79,7 @@ def _post(path: str, body: dict[str, Any]) -> Any:
         model_name="nulla",
         workspace_root_provider=lambda: "/tmp",
         run_agent_provider=_fake_agent,
+        resolve_null_domain_provider=lambda name: None,
     )
 
 
@@ -156,6 +159,7 @@ def test_null_route_prompt_fallback_uses_uri_path() -> None:
         model_name="nulla",
         workspace_root_provider=lambda: "/tmp",
         run_agent_provider=capturing_agent,
+        resolve_null_domain_provider=lambda name: None,
     )
     assert captured == ["my-job"]
 

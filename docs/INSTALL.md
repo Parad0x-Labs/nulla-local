@@ -223,6 +223,27 @@ Drive web directly from the CLI or chat once it is enabled:
 
 In chat, use `/web <query>`. While web is off, both surfaces print a clear note pointing you to `NULLA_ENABLE_WEB=1`, and `GET /api/runtime/capabilities` reports `web.live_lookup` and `browser_render` as unsupported with that same enable hint.
 
+## Remote dial (opt-in)
+
+A `null://` request normally runs LOCALLY. Remote dial lets a request instead reach the named `.null` agent's on-chain x402 endpoint, hand it the task, and return that agent's result — falling back to the local run on any miss. It is opt-in and OFF by default; network egress AND spend are both separately gated.
+
+Enable remote dial for a session:
+
+```bash
+NULLA_ENABLE_NULL_DIAL=1 .venv/bin/python -m apps.nulla_cli dial web0.null "summarize this page"
+# NULLA_ALLOW_NULL_DIAL=1 is accepted as an alias
+```
+
+To make it persistent, export the flag or set `system.allow_null_dial: true` in `config/default_policy.yaml`.
+
+Payment is a second, independent opt-in. If the endpoint answers with HTTP 402 (payment required), NULLA pays only when you pass `--allow-spend`, and always within a cap (`--max-spend <usdc>`, clamped to a 1.0 USDC ceiling). Without `--allow-spend` you get a no-spend preview of what the endpoint is asking for.
+
+```bash
+NULLA_ENABLE_NULL_DIAL=1 .venv/bin/python -m apps.nulla_cli dial web0.null "embed this" --allow-spend --max-spend 0.05
+```
+
+In chat, use `/dial <name>.null "<task>"`. While dial is off, the CLI prints how to enable it and makes zero network calls. The SSRF guard rejects any endpoint that resolves to a private, loopback, link-local, or otherwise internal address.
+
 ## Common Notes
 
 - NULLA is alpha. Read [STATUS.md](STATUS.md) before assuming a surface is production-ready.
