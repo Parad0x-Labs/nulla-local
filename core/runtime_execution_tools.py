@@ -40,6 +40,7 @@ from core.execution.workspace_tools import (
 from core.execution_gate import ExecutionGate
 from core.hardware_tier import probe_machine
 from core.install_recommendations import install_recommendation_machine_summary
+from core.knowledge_marketplace import purchase_knowledge, search_listings
 from core.learning import promote_verified_procedure
 from core.runtime_paths import resolve_workspace_root
 from core.runtime_tool_contracts import runtime_tool_contract_map, runtime_tool_contracts
@@ -53,6 +54,7 @@ from core.web0_tools import (
     web0_open_builder_draft,
     web0_publish,
 )
+from network.signer import get_local_peer_id
 from sandbox.network_guard import parse_command
 from sandbox.sandbox_runner import SandboxRunner
 from tools.browser.browser_render import browser_render
@@ -619,6 +621,10 @@ def execute_runtime_tool(
             return _web0_compile_preview(arguments)
         if intent == "web0.publish":
             return _web0_publish(arguments, source_context=source_context)
+        if intent == "marketplace.search_listings":
+            return _marketplace_search_listings(arguments)
+        if intent == "marketplace.purchase_knowledge":
+            return _marketplace_purchase_knowledge(arguments)
         if intent == "web.fetch":
             return _web_fetch(arguments, source_context=source_context)
         if intent == "web.browser_render":
@@ -953,6 +959,101 @@ def _web0_publish(
             f"(tx {result.get('arweave_txid', '')})."
         ),
         arweave_txid=str(result.get("arweave_txid") or ""),
+    )
+
+
+def _marketplace_search_listings(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    listings = search_listings(
+        query=str(arguments.get("query") or ""),
+        domain_tag=str(arguments.get("domain_tag") or ""),
+        max_results=int(arguments.get("max_results", 50) or 50),
+    )
+    rows = [
+        {
+            "shard_id": item.shard_id,
+            "title": item.title,
+            "seller_peer_id": item.seller_peer_id,
+            "price_credits": item.price_credits,
+            "quality_score": item.quality_score,
+            "purchase_count": item.purchase_count,
+            "domain_tags": list(item.domain_tags),
+        }
+        for item in listings
+    ]
+    return RuntimeExecutionResult(
+        handled=True,
+        ok=True,
+        status="executed",
+        response_text=(f"Found {len(rows)} marketplace listing(s)." if rows else "No marketplace listings matched."),
+        details={
+            "listings": rows,
+            "count": len(rows),
+            "observation": _tool_observation(
+                intent="marketplace.search_listings",
+                tool_surface="marketplace",
+                ok=True,
+                status="executed",
+                count=len(rows),
+                shard_ids=[r["shard_id"] for r in rows][:20],
+            ),
+        },
+    )
+
+
+def _marketplace_purchase_knowledge(arguments: dict[str, Any]) -> RuntimeExecutionResult:
+    """Buy a shard for the LOCAL node. The buyer is always this node's peer id —
+    the model can pick a shard but cannot spend another peer's credits."""
+    shard_id = str(arguments.get("shard_id") or "").strip()
+    if not shard_id:
+        return RuntimeExecutionResult(
+            handled=True,
+            ok=False,
+            status="rejected",
+            response_text="`marketplace.purchase_knowledge` needs a shard_id.",
+            details={
+                "observation": _tool_observation(
+                    intent="marketplace.purchase_knowledge",
+                    tool_surface="marketplace",
+                    ok=False,
+                    status="rejected",
+                    error="missing_shard_id",
+                ),
+            },
+        )
+
+    buyer = get_local_peer_id()
+    receipt_id = str(arguments.get("receipt_id") or "").strip() or None
+    result = purchase_knowledge(buyer, shard_id, receipt_id=receipt_id)
+
+    ok = bool(result.get("ok"))
+    reason = str(result.get("reason") or "")
+    charged = float(result.get("charged_credits") or 0.0)
+    if ok and reason == "already_purchased":
+        response = f"Already unlocked shard `{shard_id}` — no credits charged."
+    elif ok:
+        response = f"Purchased shard `{shard_id}` for {charged} credit(s); access unlocked."
+    else:
+        response = f"Could not buy shard `{shard_id}`: {reason}."
+    status = "executed" if ok else "rejected"
+
+    return RuntimeExecutionResult(
+        handled=True,
+        ok=ok,
+        status=status,
+        response_text=response,
+        details={
+            **result,
+            "buyer_peer_id": buyer,
+            "observation": _tool_observation(
+                intent="marketplace.purchase_knowledge",
+                tool_surface="marketplace",
+                ok=ok,
+                status=status,
+                shard_id=shard_id,
+                reason=reason,
+                charged_credits=charged,
+            ),
+        },
     )
 
 
