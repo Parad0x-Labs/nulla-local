@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import base64
 import unittest
+from unittest import mock
 
+from core import null_resolver
 from core.null_resolver import (
     NULL_DOMAIN_SIZE,
     decode_null_domain,
+    derive_domain_pda,
     domain_filters,
+    find_program_address,
     is_valid_x402_endpoint,
     pad_name64,
+    resolve_null_domain,
     resolve_x402_endpoint,
 )
-from core.nulla_wallet import b58encode
+from core.nulla_wallet import b58decode, b58encode
 
 
 def _blob(name="web0", owner=b"\x01" * 32, arweave=b"\x02" * 32,
@@ -107,6 +112,91 @@ class EndpointValidatorTests(unittest.TestCase):
         self.assertEqual(rec.x402_endpoint, "")
         ok = decode_null_domain(_blob(endpoint="https://parad0xlabs.com/x402"))
         self.assertEqual(ok.x402_endpoint, "https://parad0xlabs.com/x402")
+
+
+class PdaDerivationTests(unittest.TestCase):
+    # Golden vectors confirmed LIVE against the deployed registrar (NXgQhepF):
+    # getAccountInfo on each PDA returns the matching on-chain NullDomain. These
+    # pin the client derivation to the on-chain seed scheme forever.
+    GOLDEN = {
+        "nulla": "5LnTqT68dERqRL7jYvPZBWsbTRrC8sR6hYaXh2q7aJbN",
+        "null":  "6LGKrgqdUAo1ErsHpMgZmuhRLYGzjkA7dRvsJtg8fGku",
+        "web0":  "CT2QddDtxAHAhf4FP9CvPVChUxRWrhrGnzqGeu1BGUKx",
+    }
+
+    def test_derive_matches_onchain_golden_pdas(self) -> None:
+        for name, expected in self.GOLDEN.items():
+            self.assertEqual(derive_domain_pda(name), expected, name)
+
+    def test_derive_is_deterministic(self) -> None:
+        self.assertEqual(derive_domain_pda("nulla"), derive_domain_pda("nulla"))
+
+    def test_derive_overflow_name_is_none(self) -> None:
+        self.assertIsNone(derive_domain_pda("x" * 65))
+
+    def test_find_program_address_is_off_curve(self) -> None:
+        import hashlib
+
+        from core.null_resolver import _is_on_curve
+        seed_hash = hashlib.sha256(pad_name64("nulla")).digest()
+        pda, bump = find_program_address(
+            [b"null-domain", seed_hash], null_resolver.NULL_REGISTRAR_MAINNET
+        )
+        self.assertEqual(bump, 255)
+        # A real PDA must NOT be a valid ed25519 point.
+        self.assertFalse(_is_on_curve(b58decode(pda)))
+
+
+class ResolveViaAccountInfoTests(unittest.TestCase):
+    def _account_info(self, raw: bytes) -> dict:
+        return {"context": {"slot": 1}, "value": {"data": [base64.b64encode(raw).decode(), "base64"]}}
+
+    def test_resolves_via_get_account_info_on_pda(self) -> None:
+        calls: list = []
+
+        def _fake_rpc(method, params, *, timeout=5.0):
+            calls.append((method, params))
+            return self._account_info(_blob(name="nulla", endpoint=""))
+
+        with mock.patch.object(null_resolver, "_rpc_call", _fake_rpc):
+            rec = resolve_null_domain("nulla")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec.name, "nulla")
+        # The cheap getAccountInfo path is used — NOT the getProgramAccounts scan.
+        self.assertEqual(calls[0][0], "getAccountInfo")
+        self.assertEqual(calls[0][1][0], derive_domain_pda("nulla"))
+
+    def test_empty_account_value_is_unresolved(self) -> None:
+        with mock.patch.object(null_resolver, "_rpc_call", lambda *a, **k: {"value": None}):
+            self.assertIsNone(resolve_null_domain("nulla"))
+
+    def test_rpc_error_is_unresolved(self) -> None:
+        with mock.patch.object(null_resolver, "_rpc_call", lambda *a, **k: None):
+            self.assertIsNone(resolve_null_domain("nulla"))
+
+    def test_name_mismatch_is_rejected(self) -> None:
+        # A PDA whose stored record decodes to a different name is not returned.
+        with mock.patch.object(
+            null_resolver, "_rpc_call",
+            lambda *a, **k: {"value": {"data": [base64.b64encode(_blob(name="other")).decode(), "base64"]}},
+        ):
+            self.assertIsNone(resolve_null_domain("nulla"))
+
+    def test_falls_back_to_scan_when_curve_check_unavailable(self) -> None:
+        calls: list = []
+
+        def _fake_rpc(method, params, *, timeout=5.0):
+            calls.append(method)
+            if method == "getProgramAccounts":
+                return [{"account": {"data": [base64.b64encode(_blob(name="nulla")).decode(), "base64"]}}]
+            return None
+
+        with mock.patch.object(null_resolver, "_ed25519_is_valid_point", None), \
+             mock.patch.object(null_resolver, "_rpc_call", _fake_rpc):
+            rec = resolve_null_domain("nulla")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec.name, "nulla")
+        self.assertEqual(calls, ["getProgramAccounts"])  # no PDA path available
 
 
 if __name__ == "__main__":

@@ -7,13 +7,16 @@ publicnode RPC. No write, no signing, no key.
 
 The byte layout is the authoritative on-chain `NullDomain` struct
 (programs/null_registrar/src/state.rs v1); offsets are kept in lockstep with the
-web0-resolver browser extension's codec.js. Resolution uses getProgramAccounts +
-memcmp on the stored bytes (exact match, no client-side PDA derivation, so no
-ed25519 curve dependency is needed).
+web0-resolver browser extension's codec.js. Resolution derives the record's PDA
+client-side (seeds ``[b"null-domain", sha256(pad_name64(name))]``) and reads it
+with a single getAccountInfo — one cheap call the public RPCs serve, where an
+unfiltered getProgramAccounts scan times out. A getProgramAccounts + memcmp scan
+remains as a fallback for environments without the ed25519 curve check.
 """
 from __future__ import annotations
 
 import base64
+import hashlib
 import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -21,8 +24,18 @@ from urllib.parse import urlparse
 # Reuse the ONE compliant RPC path (publicnode endpoints only — never the
 # Origin-403 api.mainnet-beta endpoint) and the base58 codec, so there is no
 # second place an endpoint list could drift out of policy.
-from core.nulla_wallet import _rpc_call, b58encode
+from core.nulla_wallet import _rpc_call, b58decode, b58encode
 from core.x402.client import NULL_REGISTRAR_MAINNET
+
+# ed25519 curve check for find_program_address. nacl is a hard dependency (the
+# wallet signs with it); the guard only keeps this module importable if it is
+# ever stripped, in which case resolution falls back to the getProgramAccounts scan.
+try:
+    from nacl.bindings import crypto_core_ed25519_is_valid_point as _ed25519_is_valid_point
+except Exception:  # pragma: no cover - nacl is always present in practice
+    _ed25519_is_valid_point = None
+
+_PDA_MARKER = b"ProgramDerivedAddress"
 
 # --- authoritative NullDomain layout (314 bytes) ---------------------------
 NULL_DOMAIN_SIZE = 314
@@ -135,10 +148,75 @@ def domain_filters(name: str) -> list[dict] | None:
     ]
 
 
-def resolve_null_domain(
+def _is_on_curve(point: bytes) -> bool:
+    """True if the 32 bytes are a valid ed25519 point — i.e. NOT a valid PDA."""
+    if _ed25519_is_valid_point is None:
+        return False
+    try:
+        return bool(_ed25519_is_valid_point(point))
+    except Exception:
+        return False
+
+
+def find_program_address(seeds: list[bytes], program_id: str) -> tuple[str, int] | None:
+    """Solana find_program_address: the canonical off-curve PDA + bump for `seeds`.
+
+    Mirrors the on-chain derivation — sha256(seeds || bump || program_id || marker),
+    walking bump 255→0 and taking the first hash that is OFF the ed25519 curve.
+    None if the curve check is unavailable or the program id is unparseable.
+    """
+    if _ed25519_is_valid_point is None:
+        return None
+    try:
+        pid = b58decode(program_id)
+    except Exception:
+        return None
+    prefix = b"".join(seeds)
+    for bump in range(255, -1, -1):
+        digest = hashlib.sha256(prefix + bytes([bump]) + pid + _PDA_MARKER).digest()
+        if not _is_on_curve(digest):
+            return b58encode(digest), bump
+    return None
+
+
+def derive_domain_pda(
+    name: str, *, program_id: str = NULL_REGISTRAR_MAINNET
+) -> str | None:
+    """The NullDomain PDA for `name`: seeds [b"null-domain", sha256(pad_name64(name))]."""
+    padded = pad_name64(name)
+    if padded is None:
+        return None
+    seed_hash = hashlib.sha256(padded).digest()
+    found = find_program_address([b"null-domain", seed_hash], program_id)
+    return found[0] if found else None
+
+
+def _resolve_via_account_info(
+    pubkey: str, name: str, *, timeout: float = 5.0
+) -> NullDomainRecord | None:
+    """getAccountInfo on a derived PDA → decoded record, or None (empty / RPC miss)."""
+    result = _rpc_call("getAccountInfo", [pubkey, {"encoding": "base64"}], timeout=timeout)
+    if not isinstance(result, dict):
+        return None
+    value = result.get("value")
+    if not value:  # account does not exist (unregistered) or RPC returned null
+        return None
+    try:
+        data_field = value["data"]
+        b64 = data_field[0] if isinstance(data_field, list) else data_field
+        raw = base64.b64decode(b64)
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+    rec = decode_null_domain(raw)
+    if rec is not None and rec.name == name:
+        return rec
+    return None
+
+
+def _resolve_via_program_accounts(
     name: str, *, program_id: str = NULL_REGISTRAR_MAINNET, timeout: float = 5.0
 ) -> NullDomainRecord | None:
-    """Resolve a .null name on mainnet (read-only). None if unresolved or RPC unreachable."""
+    """Fallback scan (slow on public RPCs) — only used when PDA derivation is unavailable."""
     filters = domain_filters(name)
     if filters is None:
         return None
@@ -162,6 +240,21 @@ def resolve_null_domain(
     return None
 
 
+def resolve_null_domain(
+    name: str, *, program_id: str = NULL_REGISTRAR_MAINNET, timeout: float = 5.0
+) -> NullDomainRecord | None:
+    """Resolve a .null name on mainnet (read-only). None if unresolved or RPC unreachable.
+
+    Primary path derives the NullDomain PDA and reads it with one getAccountInfo —
+    cheap and public-RPC-friendly. Only when the PDA can't be derived (no ed25519
+    curve check) does it fall back to the getProgramAccounts memcmp scan.
+    """
+    pda = derive_domain_pda(name, program_id=program_id)
+    if pda is not None:
+        return _resolve_via_account_info(pda, name, timeout=timeout)
+    return _resolve_via_program_accounts(name, program_id=program_id, timeout=timeout)
+
+
 def resolve_x402_endpoint(name: str, **kwargs) -> str | None:
     """Convenience: a .null name -> its x402 payment endpoint URL, or None."""
     rec = resolve_null_domain(name, **kwargs)
@@ -178,7 +271,9 @@ __all__ = [
     "NULL_DOMAIN_SIZE",
     "NullDomainRecord",
     "decode_null_domain",
+    "derive_domain_pda",
     "domain_filters",
+    "find_program_address",
     "is_valid_x402_endpoint",
     "pad_name64",
     "resolve_null_domain",

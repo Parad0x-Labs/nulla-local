@@ -130,7 +130,11 @@ def _rpc_call(method: str, params: list[Any], *, timeout: float = 5.0) -> Any:
             request = urllib.request.Request(
                 url,
                 data=payload,
-                headers={"Content-Type": "application/json"},
+                # publicnode rejects the default Python-urllib User-Agent with a
+                # 403, which the except below would swallow to None — silently
+                # killing every on-chain read (resolution, balance, dial). Send a
+                # plain app UA so the RPC actually answers.
+                headers={"Content-Type": "application/json", "User-Agent": "nulla/1.0"},
                 method="POST",
             )
             with urllib.request.urlopen(request, timeout=timeout) as response:
