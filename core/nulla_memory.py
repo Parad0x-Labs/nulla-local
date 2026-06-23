@@ -111,6 +111,13 @@ class NullaMemory:
     _DEDUP_SIM = 0.97          # cosine above which a near-identical write is a NOOP
     _DEDUP_OVERLAP = 0.85      # Jaccard token-overlap required alongside high cosine
                               # (strict: only true restatements NOOP, never updates)
+    # 1-hop entity-graph expansion: after ranking, pull in nodes linked from the top
+    # hits so directly-connected context surfaces even if it fell below min_score on
+    # direct similarity. Bounded (one hop, capped fan-out + total) and dedup'd.
+    _LINK_EXPANSION = True
+    _LINK_FANOUT = 3           # max links followed per top hit
+    _LINK_WEIGHT = 0.9         # a linked node rides in at this fraction of its linker's score
+    _LINK_EXPANSION_MAX = 5    # cap on total linked nodes pulled into one search
     _COLLAPSE_SIM = 0.85       # retrieval-time: same-topic memories collapse to the
                               # NEWEST one (latest value of a fact wins) without
                               # deleting history — surfaces updates over stale values
@@ -463,9 +470,40 @@ class NullaMemory:
         collapsed = self._temporal_collapse(scored)
         collapsed.sort(key=lambda item: item[1], reverse=True)
         top = collapsed[: max(1, int(top_k))]
-        if top:
-            self._bump_access([nid for (_n, _s, nid) in top], now)
-        return [(n, s) for (n, s, _nid) in top]
+        merged = self._expand_one_hop(top) if (top and self._LINK_EXPANSION) else top
+        if merged:
+            self._bump_access([nid for (_n, _s, nid) in merged], now)
+        return [(n, s) for (n, s, _nid) in merged]
+
+    def _expand_one_hop(
+        self, top: list[tuple[MemoryNode, float, str]],
+    ) -> list[tuple[MemoryNode, float, str]]:
+        """Pull nodes linked from the top hits into the result, downweighted.
+
+        One hop only (links of `top` are followed, not links of the pulled nodes),
+        with a capped fan-out + total and a seen-set, so cycles and result-set
+        explosion are impossible. A linked node rides in at ``_LINK_WEIGHT`` of its
+        linker's score, so it surfaces just below the hit that connected it even if
+        its own direct similarity fell below ``min_score``.
+        """
+        in_result = {nid for (_n, _s, nid) in top}
+        extras: list[tuple[MemoryNode, float, str]] = []
+        for node, score, _nid in top:
+            for linked_id in list(node.linked_node_ids or [])[: self._LINK_FANOUT]:
+                if linked_id in in_result:
+                    continue
+                linked = self.node_get(linked_id)
+                if linked is None:
+                    continue
+                in_result.add(linked_id)
+                extras.append((linked, score * self._LINK_WEIGHT, linked_id))
+                if len(extras) >= self._LINK_EXPANSION_MAX:
+                    break
+            if len(extras) >= self._LINK_EXPANSION_MAX:
+                break
+        if not extras:
+            return top
+        return sorted(top + extras, key=lambda item: item[1], reverse=True)
 
     def _temporal_collapse(
         self, scored: list[tuple[MemoryNode, float, str]]
