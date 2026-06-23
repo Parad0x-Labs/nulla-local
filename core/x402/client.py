@@ -81,6 +81,11 @@ PAYAI_SOLANA_FEEPAYER = "2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4"
 # Canonical Solana program ids (universal — safe as literals, not "our" ids).
 TOKEN_PROGRAM_ID            = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+MEMO_PROGRAM_ID             = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"  # SPL Memo v2
+
+# A memo on the settlement tx makes it self-describing on-chain (explorers render
+# it). The facilitator permits a memo instruction after the transfer; keep it short.
+_MEMO_MAX_BYTES = 200
 
 # Solana RPC endpoints. Mainnet uses the keyless publicnode endpoint — the
 # api.mainnet-beta endpoint 403s on requests carrying an Origin header and is
@@ -150,6 +155,7 @@ class X402Config:
     rpc_url: Optional[str] = None
     asset_mint: Optional[str] = None       # override the asset (default: cluster USDC)
     asset_decimals: int = USDC_DECIMALS    # decimals of the asset being transferred
+    memo: str = ""                         # optional on-chain memo for client-built payments
     max_fee_usdc: float = 1.0
 
     @property
@@ -447,6 +453,9 @@ class X402Client:
         self, amount_usdc: float, recipient_wallet: str, session_id: str,
     ) -> dict:
         """The x402 paymentRequirements a resource server would issue in its 402."""
+        extra: dict = {"feePayer": self._facilitator_fee_payer()}
+        if self.config.memo:
+            extra["memo"] = self.config.memo
         return {
             "scheme":            "exact",
             "network":           self.config.network_name,
@@ -457,7 +466,7 @@ class X402Client:
             "payTo":             recipient_wallet,
             "maxTimeoutSeconds": 120,
             "asset":             self.config.effective_asset,
-            "extra":             {"feePayer": self._facilitator_fee_payer()},
+            "extra":             extra,
         }
 
     def pay_requirements(
@@ -475,9 +484,10 @@ class X402Client:
         sid = session_id or f"sess-{uuid.uuid4().hex[:12]}"
         payer = self._resolve_signer()
 
+        memo = str((payment_requirements.get("extra") or {}).get("memo") or "")
         payment = build_solana_x402_payment(
             payer, payment_requirements, self.config.effective_rpc,
-            decimals=self.config.asset_decimals,
+            decimals=self.config.asset_decimals, memo=memo,
         )
         body = {
             "x402Version":         1,
@@ -555,7 +565,7 @@ def _get_latest_blockhash(rpc_url: str) -> str:
 
 def build_solana_x402_payment(
     payer, payment_requirements: dict, rpc_url: str, *, decimals: int = USDC_DECIMALS,
-    compute_unit_limit: int = 50_000, compute_unit_price: int = 1,
+    compute_unit_limit: int = 50_000, compute_unit_price: int = 1, memo: str = "",
 ) -> dict:
     """Build the canonical x402 "exact" Solana payment payload.
 
@@ -614,6 +624,14 @@ def build_solana_x402_payment(
         set_compute_unit_price(compute_unit_price),
         transfer_ix,
     ]
+    # Optional SPL Memo (after the transfer) so the settled tx is self-describing
+    # on-chain — explorers render the memo text. Signed by the payer for attribution.
+    if memo:
+        memo_bytes = memo.encode("utf-8")[:_MEMO_MAX_BYTES]
+        ixs.append(Instruction(
+            Pubkey.from_string(MEMO_PROGRAM_ID), memo_bytes,
+            [AccountMeta(payer.pubkey(), True, False)],
+        ))
 
     blockhash = Hash.from_string(_get_latest_blockhash(rpc_url))
     msg = MessageV0.try_compile(fee_payer, ixs, [], blockhash)

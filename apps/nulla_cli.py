@@ -574,6 +574,7 @@ def cmd_x402_pay(
     keypair_path: str = "",
     mainnet: bool = False,
     asset_mint: str = "",
+    memo: str = "",
     allow_spend: bool = False,
     json_mode: bool = False,
 ) -> int:
@@ -611,7 +612,8 @@ def cmd_x402_pay(
         print("error: --keypair <solana JSON keypair path> is required to pay.")
         return 2
 
-    cfg = X402Config(mode=mode, keypair_path=keypair_path, asset_mint=(asset_mint or None))
+    cfg = X402Config(mode=mode, keypair_path=keypair_path,
+                     asset_mint=(asset_mint or None), memo=memo)
     try:
         receipt = X402Client(cfg).pay(amount_usdc=amount_usdc, recipient_wallet=recipient)
     except Exception as exc:
@@ -1502,6 +1504,7 @@ def build_parser() -> argparse.ArgumentParser:
     x402pay.add_argument("--keypair", default="", metavar="PATH", help="Payer Solana JSON keypair (required to actually pay).")
     x402pay.add_argument("--mainnet", action="store_true", help="Settle on mainnet (real funds). Default is devnet.")
     x402pay.add_argument("--asset", default="", metavar="MINT", help="SPL mint to transfer (default: the cluster USDC mint).")
+    x402pay.add_argument("--memo", default="", metavar="TEXT", help="On-chain memo describing the payment (shown on explorers).")
     x402pay.add_argument("--allow-spend", action="store_true", help="Actually spend. Without it this is a dry run.")
     x402pay.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
     providers = sub.add_parser("providers", help="Show registered external model providers and declared licenses.")
@@ -1704,6 +1707,7 @@ def main() -> int:
             keypair_path=str(args.keypair or ""),
             mainnet=bool(args.mainnet),
             asset_mint=str(args.asset or ""),
+            memo=str(args.memo or ""),
             allow_spend=bool(args.allow_spend),
             json_mode=bool(args.json),
         )
