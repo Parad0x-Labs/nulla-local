@@ -32,7 +32,7 @@ the agent verifies the payment on-chain → it unlocks and returns the result.**
 | `roundtrip_result.json` | the dial's return — `status: paid`, the tx, and the unlocked result |
 | `roundtrip_getTransaction.json` | the settled tx read back from devnet (memo + transfer) |
 
-## Scope / honesty
+## Scope & limitations
 
 - The agent ran on `localhost` for this capture; the dial's **SSRF guard rejects
   loopback by design** (a public host is required in normal use, and the guard's
