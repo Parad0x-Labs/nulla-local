@@ -564,7 +564,12 @@ class NullaMemory:
             return {}
         worst = max(r for _id, r in ranks)
         best = min(r for _id, r in ranks)
-        span = (worst - best) or 1.0
+        # Single match (or all-equal ranks): every MATCH row is a genuine keyword
+        # hit, so give it the full 1.0 boost rather than collapsing to 0.0 when
+        # the span is empty.
+        if worst == best:
+            return {nid: 1.0 for nid, _ in ranks}
+        span = worst - best
         return {nid: (worst - r) / span for nid, r in ranks}
 
     def _bump_access(self, node_ids: list[str], now: float) -> None:

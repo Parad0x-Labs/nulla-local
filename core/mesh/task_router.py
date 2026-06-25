@@ -239,6 +239,21 @@ class MeshTaskRouter:
         if bid.task_id != offer_payload["task_id"]:
             return None
 
+        # Authenticate the bid: the signature must bind the canonical payload
+        # (task_id, bidder_node_id, endpoint, model, tokens, credits) to the
+        # claimed bidder_node_id. An unsigned or forged bid — including a MITM
+        # rewrite of the unauthenticated HTTP response — is dropped here so it
+        # never reaches selection or escrow.
+        try:
+            from network.signer import verify as _verify_sig
+
+            if not _verify_sig(bid.canonical_payload().encode("utf-8"), bid.signature, bid.bidder_node_id):
+                logger.debug("mesh:bid_signature_invalid endpoint=%s bidder=%s", endpoint, bid.bidder_node_id)
+                return None
+        except Exception as exc:
+            logger.debug("mesh:bid_verify_error endpoint=%s err=%s", endpoint, exc)
+            return None
+
         return bid
 
     # ------------------------------------------------------------------
@@ -260,19 +275,25 @@ class MeshTaskRouter:
         dict  Assignment confirmation, including ``"assigned"`` bool.
         """
         tid = bid.task_id
-        self._assignments[tid] = bid
 
-        # Escrow credits so they cannot be double-spent.
-        try:
-            from core.credit_ledger import CreditLedger  # local import avoids cycle
-            ledger = CreditLedger(node_id=self._registry.local_node_id)
-            ledger.spend(
-                task_id=tid,
-                amount=bid.credits_requested,
-                recipient=bid.bidder_node_id,
-            )
-        except Exception as exc:
-            logger.warning("mesh:escrow_failed task_id=%s err=%s", tid, exc)
+        # Escrow credits FIRST and FAIL CLOSED. The funds hold is the real control
+        # against over-committing credits; if it cannot be placed we do not assign,
+        # do not issue a challenge, and do not notify the winner. (Skipped only for
+        # a genuinely free 0-credit bid, where there is nothing to hold.)
+        if bid.credits_requested > 0:
+            try:
+                from core.mesh.credit_ledger import CreditLedger  # local import avoids cycle
+                ledger = CreditLedger(node_id=self._registry.local_node_id)
+                ledger.spend(
+                    task_id=tid,
+                    amount=bid.credits_requested,
+                    recipient=bid.bidder_node_id,
+                )
+            except Exception as exc:
+                logger.warning("mesh:escrow_failed task_id=%s err=%s", tid, exc)
+                return {"assigned": False, "reason": "escrow_failed", "task_id": tid, "detail": str(exc)}
+
+        self._assignments[tid] = bid
 
         # Issue a secret per-task challenge. The publishable challenge_hash goes to
         # the winner; the nonce stays local and is only revealed once the worker

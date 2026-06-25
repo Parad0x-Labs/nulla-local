@@ -360,6 +360,18 @@ def _receipt_exists(conn, receipt_id: str | None) -> bool:
     return bool(row)
 
 
+def receipt_exists(receipt_id: str | None) -> bool:
+    """True if any ledger entry already used ``receipt_id`` (a consumed replay key)."""
+    if not receipt_id:
+        return False
+    _init_ledger_table()
+    conn = get_connection()
+    try:
+        return _receipt_exists(conn, receipt_id)
+    finally:
+        conn.close()
+
+
 def is_real_receipt_hash(receipt_hash: str | None) -> bool:
     """True when ``receipt_hash`` is a real on-chain x402 receipt digest.
 

@@ -265,11 +265,28 @@ def test_web0_publish_intent_refuses_optin_without_a_wired_wallet(tmp_path: Path
     created = web0_create_project("landing_page", "loop.null", "Loop", http=_offline)
     pid = created["project_id"]
 
-    # Even with the opt-in flipped, no caller-supplied wallet means no publish.
+    # Even with the opt-in present in source_context, no wallet means no publish.
     res = execute_runtime_tool(
         "web0.publish",
-        {"project_id": pid, "allow_network_publish": True},
-        source_context={},
+        {"project_id": pid},
+        source_context={"allow_network_publish": True},
     )
     assert not res.ok and res.status == "requires_opt_in"
     assert res.details["wallet_present"] is False
+
+
+def test_web0_publish_ignores_model_supplied_optin(tmp_path: Path) -> None:
+    _reset_projects()
+    wallet = _wallet(tmp_path)
+    created = web0_create_project("landing_page", "loop.null", "Loop", http=_offline)
+    pid = created["project_id"]
+
+    # A wallet is wired, but the opt-in lives only in model arguments — which are
+    # NOT trusted. The model cannot flip its own publish gate: still refused.
+    res = execute_runtime_tool(
+        "web0.publish",
+        {"project_id": pid, "allow_network_publish": True},
+        source_context={"nulla_wallet": wallet},  # opt-in NOT in trusted context
+    )
+    assert not res.ok and res.status == "requires_opt_in"
+    assert res.details["allow_network_publish"] is False  # the model-supplied flag was ignored

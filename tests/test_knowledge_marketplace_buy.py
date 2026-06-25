@@ -7,6 +7,7 @@ no-op that never double-debits.
 """
 from __future__ import annotations
 
+import threading
 import uuid
 
 from core import knowledge_marketplace as km
@@ -161,3 +162,76 @@ def test_purchase_intent_requires_a_shard_id() -> None:
     _clear_marketplace()
     res = execute_runtime_tool("marketplace.purchase_knowledge", {})
     assert not res.ok and res.status == "rejected"
+
+
+# ---------------------------------------------------------------------------
+# audit regressions: seller payment, concurrency double-debit, free listing
+# ---------------------------------------------------------------------------
+
+def test_purchase_actually_pays_the_seller() -> None:
+    _clear_marketplace()
+    shard, seller = _list_shard(price=7.0)
+    buyer = f"buyer-{uuid.uuid4().hex[:8]}"
+    _fund(buyer, 10.0)
+
+    km.purchase_knowledge(buyer, shard)
+
+    assert get_credit_balance(buyer) == 3.0    # 10 - 7 debited
+    assert get_credit_balance(seller) == 7.0   # seller credited the price (not burned)
+
+
+def test_concurrent_purchase_same_shard_debits_once() -> None:
+    _clear_marketplace()
+    shard, seller = _list_shard(price=5.0)
+    buyer = f"buyer-{uuid.uuid4().hex[:8]}"
+    _fund(buyer, 50.0)  # enough for two debits — proves it does NOT take two
+
+    results: list[dict] = []
+    barrier = threading.Barrier(2)
+
+    def buy() -> None:
+        barrier.wait()
+        results.append(km.purchase_knowledge(buyer, shard))  # no receipt_id -> deterministic dedup
+
+    threads = [threading.Thread(target=buy) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert get_credit_balance(buyer) == 45.0   # exactly one 5-credit debit
+    assert get_credit_balance(seller) == 5.0    # seller paid exactly once
+    assert km.get_listing(shard).purchase_count == 1
+    assert len(km.list_entitlements(buyer)) == 1
+    assert all(r["ok"] for r in results)
+    assert {r["reason"] for r in results} <= {"purchased", "already_purchased"}
+
+
+def test_free_listing_unlocks_without_charge() -> None:
+    _clear_marketplace()
+    shard, seller = _list_shard(price=0.0)
+    buyer = f"buyer-{uuid.uuid4().hex[:8]}"  # never funded: zero balance
+
+    out = km.purchase_knowledge(buyer, shard)
+
+    assert out["ok"] and out["reason"] == "purchased" and out["charged_credits"] == 0.0
+    assert out["unlocked"] is True and km.has_entitlement(buyer, shard)
+    assert get_credit_balance(buyer) == 0.0
+    assert get_credit_balance(seller) == 0.0   # no ledger movement for a free shard
+
+    again = km.purchase_knowledge(buyer, shard)
+    assert again["reason"] == "already_purchased" and again["charged_credits"] == 0.0
+
+
+def test_record_purchase_rating_average_is_over_ratings_not_purchases() -> None:
+    _clear_marketplace()
+    shard, _ = _list_shard(price=1.0)
+    # Two unrated purchases, then one 5.0 rating: the average must be 5.0, not
+    # diluted toward 0 by the unrated buys (the old purchase_count divisor bug).
+    km.record_purchase(shard, "b1")
+    km.record_purchase(shard, "b2")
+    km.record_purchase(shard, "b3", rating=5.0)
+    assert km.get_listing(shard).avg_rating == 5.0
+    # A second rating of 3.0 -> mean of [5, 3] == 4.0.
+    km.record_purchase(shard, "b4", rating=3.0)
+    assert km.get_listing(shard).avg_rating == 4.0

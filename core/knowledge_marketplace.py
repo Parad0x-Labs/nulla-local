@@ -10,12 +10,11 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from core.credit_ledger import burn_credits, get_credit_balance
+from core.credit_ledger import get_credit_balance, receipt_exists, transfer_credits
 from storage.db import get_connection
 
 logger = logging.getLogger(__name__)
@@ -52,10 +51,16 @@ def ensure_marketplace_table() -> None:
                 quality_score REAL DEFAULT 0.0,
                 purchase_count INTEGER DEFAULT 0,
                 avg_rating REAL DEFAULT 0.0,
+                rating_count INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
         """)
+        # Defensive migration: add rating_count to a table created before it existed.
+        try:
+            conn.execute("ALTER TABLE knowledge_marketplace ADD COLUMN rating_count INTEGER DEFAULT 0")
+        except Exception:
+            pass  # column already present
         conn.commit()
     finally:
         conn.close()
@@ -147,13 +152,18 @@ def record_purchase(shard_id: str, buyer_peer_id: str, rating: float | None = No
             (datetime.now(timezone.utc).isoformat(), shard_id),
         )
         if rating is not None:
-            # Running average
-            row = conn.execute("SELECT avg_rating, purchase_count FROM knowledge_marketplace WHERE shard_id = ?", (shard_id,)).fetchone()
+            # Running average over RATINGS, not purchases: dividing by purchase_count
+            # would dilute each rating by the unrated buys in between. rating_count
+            # tracks only how many ratings have actually been recorded.
+            row = conn.execute("SELECT avg_rating, rating_count FROM knowledge_marketplace WHERE shard_id = ?", (shard_id,)).fetchone()
             if row:
                 old_avg = float(row["avg_rating"] or 0.0)
-                count = int(row["purchase_count"])
-                new_avg = ((old_avg * (count - 1)) + rating) / count if count > 0 else rating
-                conn.execute("UPDATE knowledge_marketplace SET avg_rating = ? WHERE shard_id = ?", (round(new_avg, 3), shard_id))
+                rcount = int(row["rating_count"] or 0) + 1
+                new_avg = ((old_avg * (rcount - 1)) + rating) / rcount
+                conn.execute(
+                    "UPDATE knowledge_marketplace SET avg_rating = ?, rating_count = ? WHERE shard_id = ?",
+                    (round(new_avg, 3), rcount, shard_id),
+                )
         conn.commit()
         logger.info("Recorded purchase: shard=%s, buyer=%s", shard_id, buyer_peer_id[:12])
         return True
@@ -279,14 +289,18 @@ def purchase_knowledge(
     *,
     receipt_id: str | None = None,
 ) -> dict[str, Any]:
-    """Buy access to a listed knowledge shard with compute credits.
+    """Buy access to a listed knowledge shard, paying the seller in compute credits.
 
-    Atomic and idempotent: the price is burned once via the credit ledger
-    (balance-checked inside a single transaction), the entitlement is keyed on
-    ``(buyer, shard)`` so a repeat purchase is a no-op, and ``receipt_id`` gives
-    a second layer of ledger-level replay protection. Returns a structured
-    result; never raises on the ordinary insufficient-credit / already-owned
-    paths.
+    Atomic and idempotent. The price moves buyer -> seller in a single ledger
+    transaction (``transfer_credits``), so the seller is actually paid and the
+    buyer can never go negative. Idempotency is keyed on ``(buyer, shard)`` — a
+    repeat purchase is a no-op with no second debit — and the transfer's
+    receipt key is *deterministic* on ``(buyer, shard)`` so two concurrent buys
+    of the same shard collapse to one debit at the ledger replay guard rather
+    than double-charging. ``receipt_id``, if supplied, is recorded for the
+    caller's bookkeeping but does NOT widen the idempotency key. A free listing
+    (price 0) unlocks without any ledger movement. Returns a structured result;
+    never raises on the ordinary insufficient-credit / already-owned paths.
     """
     listing = get_listing(shard_id)
     if listing is None:
@@ -296,20 +310,48 @@ def purchase_knowledge(
         return {"ok": False, "reason": "seller_cannot_buy_own_listing", "shard_id": str(shard_id)}
 
     price = max(0.0, float(listing.price_credits or 0.0))
-    rid = str(receipt_id or f"{_PURCHASE_REASON}:{buyer_peer_id}:{shard_id}:{uuid.uuid4().hex}")
+    # Deterministic on (buyer, shard): the ledger replay guard collapses a
+    # concurrent / repeated debit even when no caller receipt_id is supplied.
+    dedup_id = f"{_PURCHASE_REASON}:{buyer_peer_id}:{shard_id}"
+    record_id = str(receipt_id or dedup_id)
 
-    # Idempotency: already entitled -> no second debit, no second unlock.
-    if has_entitlement(buyer_peer_id, shard_id):
+    def _already(charged: float = 0.0) -> dict[str, Any]:
+        # Ensure the buyer that paid is unlocked even if a race granted late.
+        grant_entitlement(buyer_peer_id, shard_id, record_id, price)
         return {
             "ok": True,
             "reason": "already_purchased",
             "shard_id": str(shard_id),
             "seller_peer_id": listing.seller_peer_id,
             "price_credits": price,
-            "charged_credits": 0.0,
+            "charged_credits": charged,
             "unlocked": True,
-            "receipt_id": rid,
+            "receipt_id": record_id,
         }
+
+    # Idempotency: already entitled -> no second debit, no second unlock.
+    if has_entitlement(buyer_peer_id, shard_id):
+        return _already()
+
+    def _purchased() -> dict[str, Any]:
+        record_purchase(shard_id, buyer_peer_id)
+        grant_entitlement(buyer_peer_id, shard_id, record_id, price)
+        logger.info("Knowledge purchased: shard=%s buyer=%s price=%.2f", shard_id, str(buyer_peer_id)[:12], price)
+        return {
+            "ok": True,
+            "reason": "purchased",
+            "shard_id": str(shard_id),
+            "seller_peer_id": listing.seller_peer_id,
+            "price_credits": price,
+            "charged_credits": price,
+            "unlocked": True,
+            "receipt_id": record_id,
+            "balance": get_credit_balance(buyer_peer_id),
+        }
+
+    # Free listing: unlock with no ledger movement (transfer_credits rejects 0).
+    if price <= 0.0:
+        return _purchased()
 
     balance = get_credit_balance(buyer_peer_id)
     if balance < price:
@@ -321,20 +363,11 @@ def purchase_knowledge(
             "balance": balance,
         }
 
-    # burn_credits is atomic + balance-gated; a False here means the receipt was
-    # already used (replay) or the balance moved under us.
-    if not burn_credits(buyer_peer_id, price, reason=_PURCHASE_REASON, receipt_id=rid):
-        if has_entitlement(buyer_peer_id, shard_id):
-            return {
-                "ok": True,
-                "reason": "already_purchased",
-                "shard_id": str(shard_id),
-                "seller_peer_id": listing.seller_peer_id,
-                "price_credits": price,
-                "charged_credits": 0.0,
-                "unlocked": True,
-                "receipt_id": rid,
-            }
+    # Atomic buyer -> seller transfer; a False means the deterministic receipt
+    # was already used (concurrent/replay) or the balance moved under us.
+    if not transfer_credits(buyer_peer_id, listing.seller_peer_id, price, reason=_PURCHASE_REASON, receipt_id=dedup_id):
+        if has_entitlement(buyer_peer_id, shard_id) or receipt_exists(dedup_id):
+            return _already()  # the one debit already happened under dedup_id
         return {
             "ok": False,
             "reason": "insufficient_credits",
@@ -343,17 +376,4 @@ def purchase_knowledge(
             "balance": get_credit_balance(buyer_peer_id),
         }
 
-    record_purchase(shard_id, buyer_peer_id)
-    grant_entitlement(buyer_peer_id, shard_id, rid, price)
-    logger.info("Knowledge purchased: shard=%s buyer=%s price=%.2f", shard_id, str(buyer_peer_id)[:12], price)
-    return {
-        "ok": True,
-        "reason": "purchased",
-        "shard_id": str(shard_id),
-        "seller_peer_id": listing.seller_peer_id,
-        "price_credits": price,
-        "charged_credits": price,
-        "unlocked": True,
-        "receipt_id": rid,
-        "balance": get_credit_balance(buyer_peer_id),
-    }
+    return _purchased()

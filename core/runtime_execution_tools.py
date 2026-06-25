@@ -909,14 +909,16 @@ def _web0_publish(
 ) -> RuntimeExecutionResult:
     """Gated off by default. The autonomous layer never publishes on its own.
 
-    Publishing needs BOTH an explicit ``allow_network_publish`` opt-in *and* a
-    real wallet wired by the trusted caller via ``source_context['nulla_wallet']``
-    — mirroring the spend guard on ``pay.x402``. The model can ask, but it can
-    neither flip the opt-in for the caller nor conjure a wallet.
+    BOTH gates are read from the trusted ``source_context``, never from the
+    model-supplied ``arguments``: the ``allow_network_publish`` opt-in and the
+    ``nulla_wallet``. The model can emit the intent but can neither flip the
+    opt-in nor conjure a wallet, so a request alone is never sufficient to
+    publish — only a trusted caller that has wired both can.
     """
     project_id = str(arguments.get("project_id") or "")
-    allow_network_publish = bool(arguments.get("allow_network_publish", False))
-    wallet = (source_context or {}).get("nulla_wallet")
+    ctx = source_context or {}
+    allow_network_publish = bool(ctx.get("allow_network_publish", False))
+    wallet = ctx.get("nulla_wallet")
 
     if not allow_network_publish or wallet is None:
         reason = (
