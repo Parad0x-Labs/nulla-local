@@ -90,7 +90,7 @@ Core lane:
 - `core/meet_and_greet_service.py`: meet presence/search service that now shapes exported `endpoint` and `endpoints` fields from delivery-ordered verified targets instead of stale verified-row ordering
 - `network/assist_router.py`: signed assist ingress and helper-routing seam that now advertises verified peers only for `FIND_NODE`/missing-block replies and uses the best current delivery target when local `BLOCK_FOUND` self-advertising needs a reachable endpoint
 - `network/nat_probe.py`: local vs public NAT classification seam
-- `network/relay_fallback.py`: honest advertised transport-mode selection seam
+- `network/relay_fallback.py`: accurate advertised transport-mode selection seam
 - `network/hole_punch.py`: hole-punch connectivity classification and attempt helpers
 - `network/dht.py`: bucketed routing table with iterative lookup-frontier helpers, stale-bucket refresh targets, bounded replacement-cache promotion for full buckets, fresh-first lookup candidate ordering with stale fallback, and endpoint-source provenance/liveness rules that keep referral-only peers out of verified reply exports and stop weaker gossip from refreshing observed-peer freshness
 
@@ -262,7 +262,7 @@ Core lane:
 - `core/provider_routing.py`: envelope-aware provider routing for local drone lanes vs higher-tier synthesis lanes, including local fail-closed checks for private/mutating work, queue-pressure and role-fit scoring, and health-aware availability truth so circuit-open lanes stop looking ready
 - `core/memory_first_router.py`: main model execution router that now honors provider-role routing for slow-lane synthesis and tool-intent selection
 - `core/runtime_tool_contracts.py`: authoritative runtime intent contract map for workspace, git, validation, envelope orchestration, sandbox, Hive, web, and operator execution
-- `core/runtime_execution_tools.py`: coding/operator execution surface for workspace inspection, diff patching, git status/diff, bounded validation, rollback, emitted artifacts, bounded `orchestration.execute_envelope` execution, validation-failure and symbol-search followup hints, and fresh-timestamp writes that stay honest across repeated same-size rewrites
+- `core/runtime_execution_tools.py`: coding/operator execution surface for workspace inspection, diff patching, git status/diff, bounded validation, rollback, emitted artifacts, bounded `orchestration.execute_envelope` execution, validation-failure and symbol-search followup hints, and fresh-timestamp writes that stay accurate across repeated same-size rewrites
 - `core/runtime_continuity.py`: append-only runtime session/receipt/event store plus normalized status derivation for task, tool, and envelope lifecycle events
 - `core/execution/workspace_tools.py`: workspace tree, symbol search, and strict unified-diff patch helpers that prefer full Python application before shell `patch` and now preserve fresh source mtimes across repeated write cycles
 - `core/execution/git_tools.py`: bounded git status/diff helpers

@@ -44,4 +44,4 @@ Live quote rule:
   - timestamp or freshness marker
   - cited source label
   - cited source URL
-- If grounded evidence is missing, the expected outcome is an honest failure, not filler.
+- If grounded evidence is missing, the expected outcome is a clean failure, not filler.

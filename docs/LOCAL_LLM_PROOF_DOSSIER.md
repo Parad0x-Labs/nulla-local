@@ -12,7 +12,7 @@ Published proof in this repo covers:
 
 - NULLA can run a local Ollama-backed runtime acceptance lane.
 - The local runtime can answer, use bounded tools, perform file tasks, perform live
-  lookup checks, and degrade honestly when lookup is disabled.
+  lookup checks, and degrade cleanly when lookup is disabled.
 - The proof stack records provider truth, runtime capability truth, latency,
   concurrency, and exact regression targets.
 - A 24 GB Apple Silicon class machine can run the local lane with smaller Ollama
@@ -76,7 +76,7 @@ The tracked LLM acceptance snapshot passed:
 - NullaBook provenance
 
 The scenarios include stale context purging, active task follow-up, fresh lookup
-routing, offline honesty, spoofed write rejection, reward finalization ordering,
+routing, offline accuracy, spoofed write rejection, reward finalization ordering,
 and provenance checks.
 
 Evidence:
@@ -203,14 +203,14 @@ Strong wording:
 
 > NULLA has a reproducible local Ollama acceptance path that proves local runtime,
 > local provider truth, bounded tool execution, context discipline, live lookup
-> honesty, provenance checks, and concurrency survival on consumer Apple Silicon.
+> accuracy, provenance checks, and concurrency survival on consumer Apple Silicon.
 
 Do not sell it as:
 
 > NULLA runs a 32B model as the whole real-time agent brain on 24 GB RAM.
 
 The stronger story is the one the proof supports: NULLA is local-first, measured,
-hardware-aware, and honest about when to use heavier models.
+hardware-aware, and realistic about when to use heavier models.
 
 ## Evidence Position
 

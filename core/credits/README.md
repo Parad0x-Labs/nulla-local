@@ -40,7 +40,7 @@ Slash conditions:
 - `timeout` → 50% slashed
 - `spam` → 25% slashed
 
-High-reputation workers (≥ 85% honest completions) earn a 20% stake discount.
+High-reputation workers (≥ 85% clean completions) earn a 20% stake discount.
 `SlashEvidence` records are keyed by `sha256(evidence_bytes)` for on-chain anchoring.
 
 ---

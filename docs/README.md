@@ -1,6 +1,6 @@
 # NULLA Docs
 
-Start here if you want the shortest honest path through the repo.
+Start here if you want the shortest accurate path through the repo.
 
 NULLA is an alpha local-first AI agent runtime. It starts on your machine, uses memory and tools, and can optionally ask trusted helpers for more reach. The docs below are organized around that core lane instead of spreading the story across unrelated side paths.
 

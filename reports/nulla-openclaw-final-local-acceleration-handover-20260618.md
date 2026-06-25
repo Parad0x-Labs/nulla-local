@@ -286,7 +286,7 @@ python3 -m pytest -q \
 
 ## Known Caveats
 
-- EAGLE is still not active. This is correct and honest for current backend support.
+- EAGLE is still not active. This is correct and accurate for current backend support.
 - llama.cpp prompt-lookup speculative decoding is active, but it is not EAGLE.
 - Some live answers are semantically weak because the local model is small/specialized. The routing/proof layer is now real; answer quality still depends on model capacity.
 - Ollama currently may keep `qwen3:0.6b` and `qwen3:8b` resident after verifier/classifier runs. This is expected. 35B was not loaded in final proof.

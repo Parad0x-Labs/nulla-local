@@ -78,7 +78,7 @@ That is the lane to demonstrate first.
 
 ## What Is Still Not Proven Enough
 
-Be honest here.
+Be precise here.
 
 - fuzzy entity lookup is still weaker than it should be
 - WAN/internet-scale routing is not hardened enough to headline

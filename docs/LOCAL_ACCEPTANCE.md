@@ -17,7 +17,7 @@ What `full` does:
 1. starts local NULLA on the current checked-out commit
 2. runs the online acceptance suite
 3. captures a manual BTC spot-check against the locked source
-4. restarts with web lookup disabled and runs the offline honesty gate
+4. restarts with web lookup disabled and runs the offline accuracy gate
 5. restores normal online mode
 6. renders the final report under `artifacts/acceptance_runs/<stamp>/evidence/`
 
@@ -29,7 +29,7 @@ Locked gate:
 - chained-task median must stay under `60s`
 - consistency must stay at `>= 2/3`
 - all P0 checks must pass
-- offline honesty must pass
+- offline accuracy must pass
 - manual BTC verification must pass
 
 This is a real gate, not a vanity report. If a future run wants to call itself green, it should pass this profile or a stricter one.
@@ -76,7 +76,7 @@ What the fast gate proves:
 What only the live gate proves:
 - real local runtime boot on the current commit
 - real latency numbers for the locked local profile
-- live lookup/manual verification and offline honesty on the same runtime
+- live lookup/manual verification and offline accuracy on the same runtime
 
 ## Current Branch Truth
 

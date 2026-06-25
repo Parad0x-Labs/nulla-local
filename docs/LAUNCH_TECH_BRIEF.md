@@ -254,7 +254,7 @@ Canonical program: `2stas3cZYnBiWpndcTXQDGLXwfQ7kjEYYrW52DsUAcxF`
 
 **Groth16 verify cost**: alt_bn128 path on Solana ≈ $0.0007 per proof. Already priced in.
 
-**`MAINNET_READY = false` — honest:** the Powers of Tau ceremony had zero independent contributors. Every other component is production-grade. The Solana Foundation grant funds: (1) independent ceremony participants, (2) external audit of the on-chain verifier, (3) formal verification of the nullifier uniqueness property. We're not hiding the gap; it's the whole reason for the grant.
+**`MAINNET_READY = false` — precise:** the Powers of Tau ceremony had zero independent contributors. Every other component is production-grade. The Solana Foundation grant funds: (1) independent ceremony participants, (2) external audit of the on-chain verifier, (3) formal verification of the nullifier uniqueness property. We're not hiding the gap; it's the whole reason for the grant.
 
 ---
 
@@ -306,7 +306,7 @@ Every entity in Web0 — person, agent, post, skill, `.null` site — is the sam
 **Phase 1:** tipping live (SPL transfer + memo `w0tip:1:<targetId>`). 100% to recipient — no protocol skim.  
 **Phase 2 (next):** Solana state-compression — records as Merkle leaves (~$0.0001/record), DAS API for queries.
 
-Honest: if the indexer dies, the forum is reconstructable from on-chain + Arweave data. Posts are signed records on permanent ledger. Reddit model fails this test; web0 social passes it.
+Sound: if the indexer dies, the forum is reconstructable from on-chain + Arweave data. Posts are signed records on permanent ledger. Reddit model fails this test; web0 social passes it.
 
 ---
 
@@ -355,9 +355,9 @@ All program IDs verifiable at explorer.solana.com. No hand-wavy "coming soon" pr
 
 **What we applied for, 23 weeks ago:** x402 + Dark-Null-Protocol.  
 **What happened since:** everything except the ceremony shipped to mainnet.  
-**The one honest gap:** `MAINNET_READY = false` in `dark_shielded_pool`. The Groth16 circuit works. The on-chain verifier works. The math is sound. But the trusted setup ceremony had zero independent contributors — meaning you're trusting us. That's the grant: independent ceremony participants + external audit + formal verification.
+**The one open gap:** `MAINNET_READY = false` in `dark_shielded_pool`. The Groth16 circuit works. The on-chain verifier works. The math is sound. But the trusted setup ceremony had zero independent contributors — meaning you're trusting us. That's the grant: independent ceremony participants + external audit + formal verification.
 
-That gap is not a blocker for x402, for `.null` domains, for sealed-bid auctions, for NullPay, for the receipt anchor, or for the NULLA mesh. It's a blocker for fully trustless ZK private settlement. We ship what's ready; we're honest about what needs the ceremony.
+That gap is not a blocker for x402, for `.null` domains, for sealed-bid auctions, for NullPay, for the receipt anchor, or for the NULLA mesh. It's a blocker for fully trustless ZK private settlement. We ship what's ready; we're clear about what needs the ceremony.
 
 ---
 

@@ -30,7 +30,7 @@ This is not a roadmap fantasy. It is the exact execution plan for making NULLA i
 
 One command should:
 
-1. inspect the machine honestly
+1. inspect the machine accurately
 2. detect installed local runtimes and models
 3. detect which remote provider credentials are actually present
 4. recommend a supported provider stack
@@ -84,7 +84,7 @@ Installer must:
 - support explicit non-interactive selection flags
 - support interactive selection when the user wants it
 - pull missing Ollama models automatically
-- refuse unsupported stacks honestly
+- refuse unsupported stacks cleanly
 
 ### 4. Runtime Provider Registration
 
@@ -180,12 +180,12 @@ Every slice must be tested cumulatively:
 - Tether/QVAC are not real supported providers yet
 - there is no single machine/provider probe command the user can trust before install
 
-## Honest Beta Bar For This Lane
+## Beta Bar For This Lane
 
 This lane is ready when a new machine can:
 
 1. run one command
-2. see an honest machine and provider report
+2. see an accurate machine and provider report
 3. choose a supported stack
 4. let NULLA install and configure it
 5. open OpenClaw successfully

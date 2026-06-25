@@ -6,7 +6,7 @@ This document is the operator runbook for a real overnight readiness pass on Dec
 
 It is not meant to prove hostile public-internet readiness.
 
-It is meant to answer a narrower and more honest question:
+It is meant to answer a narrower and more precise question:
 
 Can NULLA behave like a stable local-first agent and trusted multi-machine runtime over one long uninterrupted session without wedging, silently drifting, poisoning memory, or hiding failures?
 

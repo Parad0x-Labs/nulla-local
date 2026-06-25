@@ -124,7 +124,7 @@ Record a live failure run showing:
 
 ### Why It Matters
 
-This validates that the system no longer pretends agreement equals truth and can handle disagreement honestly.
+This validates that the system no longer pretends agreement equals truth and can handle disagreement accurately.
 
 ### Expected Behavior
 
@@ -302,7 +302,7 @@ Run and record an explicit tamper proof:
 
 ## What This Report Proves Today
 
-Today this report supports the following honest claim:
+Today this report supports the following accurate claim:
 
 Decentralized NULLA has real local proof for verdict handling, sandbox boundary enforcement, fraud trigger activation, and local replay-safe ledger behavior, with partial proof for chunk integrity and explicit readiness for live LAN and tamper-evidence validation.
 
@@ -327,7 +327,7 @@ Those are the next runtime proof targets.
 
 ## Release Gate Interpretation
 
-The system can now be described honestly as:
+The system can now be described accurately as:
 
 - a real standalone local intelligence,
 - a real LAN-capable distributed agent platform,

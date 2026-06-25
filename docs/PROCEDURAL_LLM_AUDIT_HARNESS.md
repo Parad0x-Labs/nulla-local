@@ -9,7 +9,7 @@ Lean v1 live audit for NULLA. The point is simple: stop proving only the prompts
 - `core/llm_eval/procedural_runner.py`
   Executes the pack through the real `/api/chat` surface with fresh workspaces, fixtures, and runtime event capture.
 - `core/llm_eval/procedural_scorer.py`
-  Scores the run with deterministic checks first: exact file state, grounded readback, stale-term contamination, blocked-path honesty, and recovery after failure.
+  Scores the run with deterministic checks first: exact file state, grounded readback, stale-term contamination, blocked-path accuracy, and recovery after failure.
 - `core/llm_eval/procedural.py`
   Orchestrates generation, execution, scoring, comparison against the previous passing baseline, and markdown failure output.
 

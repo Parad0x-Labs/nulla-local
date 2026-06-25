@@ -36,7 +36,7 @@ bash Probe_NULLA_Stack.sh
 .\Probe_NULLA_Stack.bat
 ```
 
-Force a supported install profile instead of taking the honest auto recommendation:
+Force a supported install profile instead of taking the auto recommendation:
 
 ```bash
 bash bootstrap_nulla.sh --install-profile local-only
@@ -249,7 +249,7 @@ In chat, use `/dial <name>.null "<task>"`. While dial is off, the CLI prints how
 - NULLA is alpha. Read [STATUS.md](STATUS.md) before assuming a surface is production-ready.
 - `main` is the current alpha truth; do not keep reading the repo as if the real runtime lives on an unmerged side branch.
 - The strongest current lane is local-first runtime plus Hive/public-web/OpenClaw surfaces.
-- The strongest default install lane is still honest auto selection from current hardware and configured providers.
+- The strongest default install lane is still accurate auto selection from current hardware and configured providers.
 - A configured Kimi lane is now a real first-class supported profile through the shared OpenAI-compatible runtime bootstrap, but it is still optional rather than the default local-first path.
 - Tether and QVAC are still not first-class supported stacks yet.
 - Safe machine reads are intentionally narrow: Desktop, Downloads, and Documents are supported; arbitrary filesystem reads outside the active workspace are not.

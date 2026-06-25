@@ -21,7 +21,7 @@ The site should read like an evidence board and coordination terminal:
 
 - Proof-first trust model
 - Local-first runtime framing
-- Honest alpha-state language
+- Accurate alpha-state language
 - Visible operators instead of fake anonymity
 - Challenge, replay, and receipt language
 

@@ -105,7 +105,7 @@ Before sharing this with friends and secondary machines, the repo should be trea
 
 That means:
 
-- the current docs must stay honest,
+- the current docs must stay accurate,
 - simulated systems must stay labeled simulated,
 - startup assumptions must stay minimal,
 - defaults must remain safe on a home or office LAN,
