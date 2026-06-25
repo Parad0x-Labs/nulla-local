@@ -30,30 +30,30 @@ The rule is simple:
 - `null://` dial — resolve a `.null` name, reach the named agent's x402 endpoint, pay it (gated), return the result. Off by default; SSRF-guarded; pays through the canonical x402 engine.
   - Evidence: mainnet settlement [`37o7An4A…`](https://explorer.solana.com/tx/37o7An4AUJDQqyZK2LvdGARHFpEQK3ZJiZSJwwADoeqeMHYUtSv9uddMzCcueBLU5p1S3fWDBb2FoWAMBCMn7F5a); self-describing memo'd mainnet [`4JBYfRff…`](https://explorer.solana.com/tx/4JBYfRffsA3xh6gWDTi4ybuDxrKSf8U9Vvn8xipwxmESPJt8T26jsWnUYMR1SLJ2YCUyPzTw9gALUHurWExT3ets); full devnet round-trip [`WR2syULn…`](https://explorer.solana.com/tx/WR2syULnAAyfnbBjjvwXrAuexiGnDH88KLyKe5c2PogRidoHE7xs7MLWU1frs1Bzn5WAXCUZ6jvKdnhiAxs66hz?cluster=devnet) (`verified: true`). See `proofs/mainnet/2026-06-23/` + `proofs/devnet/2026-06-23/ROUNDTRIP.md`.
 - `.nullpass` — portable, offline-verifiable work credential (recompute proof + payment hashes, verify ed25519 signature, optional on-chain settlement confirm). 14-case forgery matrix green. Evidence: `proofs/devnet/2026-06-23/NULLPASS.md`.
-- **WorkProof-bound mesh reward** — the mesh helper reward now requires a verified commit/reveal WorkProof (`accept_bid` issues a secret per-task challenge; `commit_result` enforces commit-before-reveal; `submit_result` rewards only on a verified proof). The old self-computable `sha256(task_id+result+worker)` earns nothing. 9-case adversarial matrix: `tests/test_mesh_workproof_reward.py`.
+- **WorkProof-bound mesh reward** — the mesh helper reward now requires a verified commit/reveal WorkProof (`accept_bid` issues a secret per-task challenge; `commit_result` enforces commit-before-reveal; `submit_result` rewards only on a verified proof). The old self-computable `sha256(task_id+result+worker)` earns nothing. Adversarial matrix: `tests/test_mesh_workproof_reward.py`.
+- **Embedder unification + recall eval** — `embed()` is pinned to one canonical 384-dim space (the Ollama vector is deterministically projected), and a length mismatch now projects + logs once instead of silently scoring 0.0. Held-out recall benchmark: `tests/test_memory_recall_benchmark.py`.
+- **WorkProof-bound local reward** — the `task_completion` self-award now mints only against an internally-consistent work receipt, always to the local peer, rate-limited per window. `tests/test_task_completion_reward.py`.
+- **Entity-graph 1-hop recall** — recall expands one hop along `linked_node_ids` (downweighted, bounded fan-out, cycle-safe). `tests/test_entity_graph_recall.py`.
+- **Two-NULLA local handshake** — signed capsule in → independently verified → signed receipt out, reusing the capsule canonical-hash + ed25519 discipline; full tamper matrix. `core/two_nulla_handshake.py`, `tests/test_two_nulla_handshake.py`.
+- **Web0 full builder intent set** — `web0_encrypt_whole_site` now encrypts every text block for real (AES-GCM, ciphertext-only), and the create/fill/add/gate/encrypt/preview/publish intents are wired; publish stays gated behind a trusted-caller opt-in + wallet. `tests/test_web0_tools.py`.
+- **Knowledge-marketplace buy side** — `purchase_knowledge` moves credits buyer→seller atomically (deterministic `(buyer, shard)` receipt), unlocks an entitlement, rejects insufficient credit, and is idempotent against double-spend. `tests/test_knowledge_marketplace_buy.py`.
+- **Whole-stack production audit** — multi-dimension adversarial audit (21 confirmed findings, 0 refuted); all P1 and the safely-fixable P2/P3 closed with regression tests. Ledger + deferrals: [`docs/PRODUCTION_AUDIT_2026-06.md`](PRODUCTION_AUDIT_2026-06.md).
 
-## Next Feature Explorations (candidate builds — all local-buildable)
+## Next Feature Explorations (candidate builds)
 
-Each is its own branch, same discipline: grounded build → adversarial review → tested green → push to `main` on the user's word.
+The June feature batch above is shipped; these are the audit's deferred items, each its own branch with the same discipline (grounded build → adversarial review → tested green → push to `main` on the user's word). Full rationale in [`PRODUCTION_AUDIT_2026-06.md`](PRODUCTION_AUDIT_2026-06.md).
 
-1. `P2` Entity-graph memory — make `MemoryNode.linked_node_ids` live with 1-hop recall expansion.
-- Current truth: links are stored but recall does not traverse them.
-- Done when: recall optionally expands one hop along `linked_node_ids` (ranked), with a held-out recall delta measured.
+1. `P2` Gate v2 challenge end-to-end — wire `GateChallengeStore` server-side, add a challenge-issue endpoint, upgrade the browser-extension/portal client to request + sign + consume a single-use nonce, and scope the gate CORS to the portal origin. Coordinated client + server change; shipping the server half alone would break live v1 clients.
+- Done when: a captured unlock tuple can no longer be replayed, and the existing clients still unlock through the v2 flow.
 
-2. `P1` Bind WorkProof to reward paths — **SHIPPED 2026-06-23 for the mesh reward (see Shipped above).** Remaining: the local `task_completion` self-award (`core/web/api/service.py`) and presence-credit path are not yet proof-gated — lower risk (local self-award), revisit if mesh-relayed.
-- Done when: every credit-granting path that rewards remote work requires a verified WorkProof; a forged or absent proof is rejected (adversarial test). Mesh path done; local self-award paths remain.
+2. `P3` Sign the work receipt — bind `Web0WorkReceipt`/`ProofReceipt` with an ed25519 signature (mirroring `task_capsule`) so the `task_completion` proof is unforgeable rather than self-computable.
+- Done when: a receipt whose signature does not verify against the local peer earns nothing; the legitimate local turn still credits.
 
-3. `P2` Two-NULLA local handshake — compose `build_task_capsule` + `verify_task_capsule` into a signed-capsule-in → signed-receipt-out exchange between two local nodes.
-- Done when: node A sends a signed capsule, node B verifies and returns a signed receipt, A verifies it; tamper is rejected.
+3. `P3` Pin embedding dimension per agent — record the embedding dimension per agent/database and reject out-of-dimension writes (or route both writers through the canonical `embed()`), migrating existing rows.
+- Done when: a mismatched-dimension write is rejected at store time rather than silently projected at query time.
 
-4. `P2` Expose the full web0 page builder — wire the remaining `web0_*` builder intents (gated sections, encrypt, publish) beyond the current subset.
-- Done when: the full builder intent set is callable and tested, CSP-safe.
-
-5. `P2` Knowledge-marketplace buy side — the supply side auto-lists; add search plus a credit-burning purchase.
-- Done when: search returns listings; a purchase burns credits and unlocks the item; insufficient-credit and double-spend are rejected.
-
-6. `P1` Embedder unification + recall eval — fix the 768-vs-384-dim mismatch that silently zeroes recall; ship a held-out recall benchmark.
-- Done when: one embedder dimension across the recall path (no silent zero), with a committed recall benchmark and baseline.
+4. `P3` Rename the candor-suffixed metric identifiers — rename the latency/scenario gate identifiers (and the historical branch reference) in code, tests, and docs together so no banned word remains in any git-visible identifier.
+- Done when: a repo-wide substring scan for the banned word returns only intentional historical-archive matches.
 
 ## Open Items
 
@@ -120,7 +120,7 @@ Each is its own branch, same discipline: grounded build → adversarial review �
 
 10. `P1` Contribution-backed credit control is still too weak for the target world-AI commons.
 - Current truth: credits can be awarded, burned, transferred, and starter balances exist; insufficient balance can fall back to free/background tier; paid top-up remains disabled and settlement is still simulated.
-- Gap: credits are not yet the real scheduling and budget control lane. Dispatch is still too advisory, contribution minting from accepted useful work is not yet enforced tightly enough, abuse/slashing cost is incomplete, and paid top-up must stay off until the rails are honest.
+- Gap: credits are not yet the real scheduling and budget control lane. Dispatch is still too advisory, contribution minting from accepted useful work is not yet enforced tightly enough, abuse/slashing cost is incomplete, and paid top-up must stay off until the rails are sound.
 - Done when:
 - credits enforce real per-user, per-device, and per-task budgets plus priority control for swarm work.
 - minting is tied to accepted useful work, trust, and review quality instead of noise.
@@ -281,7 +281,7 @@ Each is its own branch, same discipline: grounded build → adversarial review �
 
 33. `P0` Adaptation loop is structurally closed but still starved of durable signal.
 - Current truth: adaptation rails are installed, corpus curation now distinguishes proof-backed/finalized task results from still-pending work, and reviewed Commons posts now score above unreviewed/public noise when building training data.
-- Gap: there is still not enough durable reviewed corpus from real accepted work to rerun adaptation honestly, compare against baseline, and promote a better candidate. The loop is structurally stricter now, but still mostly idle.
+- Gap: there is still not enough durable reviewed corpus from real accepted work to rerun adaptation accurately, compare against baseline, and promote a better candidate. The loop is structurally stricter now, but still mostly idle.
 - Done when:
 - useful-output and training-eligible counts stay above policy thresholds from real accepted work rather than synthetic chat.
 - an adapted candidate is evaluated against baseline under canary and is either promoted with evidence or rejected with clear metrics.

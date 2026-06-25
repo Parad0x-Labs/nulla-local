@@ -60,6 +60,7 @@ def test_docs_root_is_curated_after_archive_sweep() -> None:
         "OVERNIGHT_SOAK_RUNBOOK.md",
         "PLATFORM_REFACTOR_PLAN.md",
         "PROCEDURAL_LLM_AUDIT_HARNESS.md",
+        "PRODUCTION_AUDIT_2026-06.md",
         "PROOF_PATH.md",
         "PROOF_PASS_REPORT.md",
         "LAUNCH_TECH_BRIEF.md",
