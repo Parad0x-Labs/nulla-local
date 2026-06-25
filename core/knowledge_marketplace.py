@@ -8,6 +8,7 @@ Peers can:
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from dataclasses import dataclass
@@ -56,11 +57,10 @@ def ensure_marketplace_table() -> None:
                 updated_at TEXT NOT NULL
             )
         """)
-        # Defensive migration: add rating_count to a table created before it existed.
-        try:
+        # Defensive migration: add rating_count to a table created before it existed
+        # (no-op once the column is present).
+        with contextlib.suppress(Exception):
             conn.execute("ALTER TABLE knowledge_marketplace ADD COLUMN rating_count INTEGER DEFAULT 0")
-        except Exception:
-            pass  # column already present
         conn.commit()
     finally:
         conn.close()
