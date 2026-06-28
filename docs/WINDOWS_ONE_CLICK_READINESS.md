@@ -6,6 +6,7 @@ This is the current readiness contract for a Windows-first NULLA/OpenClaw fork.
 
 - `Install_And_Run_NULLA.ps1` provides a guided Windows front-end with profile selection, runtime-home selection, probe action, log path, and headless `-AutoYes` mode.
 - `Install_And_Run_NULLA.bat` remains the plain double-click fallback and forwards install-profile arguments into the Windows installer.
+- `installer/build_windows_package.ps1` creates a checksumed Windows zip package and optionally Authenticode-signs PowerShell scripts when `NULLA_WINDOWS_SIGNING_CERT_THUMBPRINT` or `-SigningCertificateThumbprint` is supplied.
 - `installer/install_nulla.bat` detects hardware, selects the local install profile, ranks mounted drives for `OLLAMA_MODELS`, pulls the recommended local model bundle, and registers OpenClaw when enabled.
 - `installer/provider_probe.py` reports CPU, RAM, all detected GPU candidates, selected accelerator, installed/missing Ollama models, drive headroom, exact pull commands, and the recommended model store path.
 - `python installer\provider_probe.py --benchmark --benchmark-timeout 240` performs an opt-in live local generation check for the selected Ollama model.
@@ -16,10 +17,10 @@ This is the current readiness contract for a Windows-first NULLA/OpenClaw fork.
 
 - There is no signed `.exe` or MSIX package. The current one-click path is still PowerShell/batch, not a signed native Windows package.
 - The installer has a guided PowerShell UI, but not a full native desktop installer with progress telemetry, rollback, or Windows app identity.
-- The local model live check proves routing and generation. Exact-marker API responses are clamped at the compatibility boundary, but broader instruction-following quality still depends on the selected local model.
+- The guided installer runs the live local model check by default after install; use `-SkipBenchmark` only for intentionally offline or slow validation runs.
+- Exact-marker API responses are clamped at the compatibility boundary, but broader instruction-following quality still depends on the selected local model.
 - Multi-GPU inventory is detection and recommendation logic. It does not yet implement explicit per-model GPU placement, parallel scheduling, or mixed-GPU load balancing.
 - The optional benchmark is warmup-oriented and includes model-load time. It is useful for first-run validation, not stable throughput ranking.
-- GitHub push depends on valid user authentication. Local commits can be prepared without it, but updating the remote fork requires a working token/session.
 
 ## Windows PR bar
 
@@ -29,6 +30,7 @@ Before proposing the Windows fork PR, run the full cumulative checks:
 python -m pytest tests\test_hardware_tier.py tests\test_model_store_planner.py tests\test_provider_probe.py tests\test_install_script_contract.py tests\test_install_surface_contracts.py tests\test_provider_probe_contract.py
 python installer\provider_probe.py --json
 python installer\provider_probe.py --benchmark --benchmark-timeout 240
+powershell -NoProfile -ExecutionPolicy Bypass -File installer\build_windows_package.ps1 -PackageVersion local-test
 ```
 
 For a real host acceptance run, also verify:

@@ -4,7 +4,8 @@ param(
     [string]$InstallProfile = "auto-recommended",
     [string]$NullaHome = "",
     [switch]$NoStart,
-    [switch]$AutoYes
+    [switch]$AutoYes,
+    [switch]$SkipBenchmark
 )
 
 $ErrorActionPreference = "Stop"
@@ -63,13 +64,19 @@ function Invoke-NullaBatchInstaller {
 }
 
 function Invoke-ProviderProbe {
+    param([bool]$Benchmark)
+    $python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+    $probe = Join-Path $ProjectRoot "installer\provider_probe.py"
+    if ($Benchmark -and (Test-Path -LiteralPath $python) -and (Test-Path -LiteralPath $probe)) {
+        Write-InstallLog "Running live local model check: $probe --benchmark --benchmark-timeout 240"
+        & $python $probe --benchmark --benchmark-timeout 240 | Tee-Object -FilePath $LogPath -Append
+        return
+    }
     if (Test-Path -LiteralPath $ProbeBat) {
         Write-InstallLog "Running provider probe: $ProbeBat"
         & $ProbeBat | Tee-Object -FilePath $LogPath -Append
         return
     }
-    $python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-    $probe = Join-Path $ProjectRoot "installer\provider_probe.py"
     if ((Test-Path -LiteralPath $python) -and (Test-Path -LiteralPath $probe)) {
         Write-InstallLog "Running provider probe: $probe"
         & $python $probe | Tee-Object -FilePath $LogPath -Append
@@ -78,7 +85,7 @@ function Invoke-ProviderProbe {
 
 if ($AutoYes -or $env:NULLA_HEADLESS -eq "1") {
     Invoke-NullaBatchInstaller -StartAfter:(-not $NoStart)
-    Invoke-ProviderProbe
+    Invoke-ProviderProbe -Benchmark:(-not $SkipBenchmark)
     exit 0
 }
 
@@ -89,7 +96,7 @@ try {
 catch {
     Write-InstallLog "Windows Forms is unavailable; falling back to headless install."
     Invoke-NullaBatchInstaller -StartAfter:(-not $NoStart)
-    Invoke-ProviderProbe
+    Invoke-ProviderProbe -Benchmark:(-not $SkipBenchmark)
     exit 0
 }
 
@@ -163,11 +170,19 @@ $startCheck.Width = 320
 $startCheck.Checked = (-not $NoStart)
 $form.Controls.Add($startCheck)
 
+$benchmarkCheck = New-Object System.Windows.Forms.CheckBox
+$benchmarkCheck.Text = "Run live local model check after install"
+$benchmarkCheck.Left = 170
+$benchmarkCheck.Top = 172
+$benchmarkCheck.Width = 340
+$benchmarkCheck.Checked = (-not $SkipBenchmark)
+$form.Controls.Add($benchmarkCheck)
+
 $statusBox = New-Object System.Windows.Forms.TextBox
 $statusBox.Left = 24
-$statusBox.Top = 192
+$statusBox.Top = 202
 $statusBox.Width = 556
-$statusBox.Height = 78
+$statusBox.Height = 68
 $statusBox.Multiline = $true
 $statusBox.ReadOnly = $true
 $statusBox.Text = "Ready. Logs will be written to $LogPath"
@@ -180,7 +195,7 @@ $probeButton.Top = 300
 $probeButton.Width = 100
 $probeButton.Add_Click({
     try {
-        Invoke-ProviderProbe
+        Invoke-ProviderProbe -Benchmark:([bool]$benchmarkCheck.Checked)
         $statusBox.Text = "Probe complete. Log: $LogPath"
     }
     catch {
@@ -201,7 +216,7 @@ $installButton.Add_Click({
     $form.Refresh()
     try {
         Invoke-NullaBatchInstaller -StartAfter:([bool]$startCheck.Checked)
-        Invoke-ProviderProbe
+        Invoke-ProviderProbe -Benchmark:([bool]$benchmarkCheck.Checked)
         $statusBox.Text = "Install complete. Desktop shortcut should be available. Log: $LogPath"
         [System.Windows.Forms.MessageBox]::Show($form, "NULLA install completed.", "NULLA Windows Installer") | Out-Null
     }

@@ -175,6 +175,7 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     ps_bootstrap = (REPO_ROOT / "installer" / "bootstrap_nulla.ps1").read_text(encoding="utf-8")
     ps_launcher = (REPO_ROOT / "Install_And_Run_NULLA.ps1").read_text(encoding="utf-8")
     ps_one_click = (REPO_ROOT / "installer" / "windows_one_click.ps1").read_text(encoding="utf-8")
+    ps_package = (REPO_ROOT / "installer" / "build_windows_package.ps1").read_text(encoding="utf-8")
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     install_doc = (REPO_ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
 
@@ -186,10 +187,19 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "Install_And_Run_NULLA.ps1" in ps_bootstrap
     assert "-AutoYes" in ps_bootstrap
     assert "installer\\windows_one_click.ps1" in ps_launcher
+    assert "-SkipBenchmark" in ps_launcher
     assert "System.Windows.Forms" in ps_one_click
     assert "Probe PC" in ps_one_click
+    assert "Run live local model check after install" in ps_one_click
+    assert "--benchmark --benchmark-timeout 240" in ps_one_click
+    assert "$SkipBenchmark" in ps_one_click
     assert "/INSTALLPROFILE=$batchProfile" in ps_one_click
+    assert "Set-AuthenticodeSignature" in ps_package
+    assert "NULLA_WINDOWS_SIGNING_CERT_THUMBPRINT" in ps_package
+    assert "Get-FileHash -Algorithm SHA256" in ps_package
+    assert "schema = \"nulla.windows_package.v1\"" in ps_package
     assert "powershell -ExecutionPolicy Bypass -File .\\Install_And_Run_NULLA.ps1" in install_doc
+    assert "installer\\build_windows_package.ps1" in install_doc
     assert "install-profile --set ollama-only" in sh_installer
     assert "install-profile --set ollama-max" in sh_installer
     assert "install-profile --set ollama-only" in readme

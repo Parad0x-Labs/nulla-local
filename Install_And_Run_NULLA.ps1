@@ -4,7 +4,8 @@ param(
     [string]$InstallProfile = "auto-recommended",
     [string]$NullaHome = "",
     [switch]$NoStart,
-    [switch]$AutoYes
+    [switch]$AutoYes,
+    [switch]$SkipBenchmark
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +26,9 @@ if ($NoStart) {
 }
 if ($AutoYes) {
     $forward += "-AutoYes"
+}
+if ($SkipBenchmark) {
+    $forward += "-SkipBenchmark"
 }
 
 & $OneClick @forward

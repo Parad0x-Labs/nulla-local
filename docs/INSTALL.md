@@ -32,6 +32,18 @@ Local Windows checkout with guided installer:
 powershell -ExecutionPolicy Bypass -File .\Install_And_Run_NULLA.ps1
 ```
 
+Build a checksumed Windows zip package from a checkout:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\installer\build_windows_package.ps1 -PackageVersion local-test
+```
+
+To Authenticode-sign the PowerShell entrypoints during packaging, provide a real certificate thumbprint:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\installer\build_windows_package.ps1 -SigningCertificateThumbprint "<thumbprint>"
+```
+
 Probe the machine and provider reality before or after install:
 
 ```bash
