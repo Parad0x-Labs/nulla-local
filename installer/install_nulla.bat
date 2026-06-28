@@ -482,8 +482,15 @@ echo Step 9/14: Setting up Ollama (local AI runtime)...
 REM Resolve drive letter from installer location for model storage
 set "INSTALL_DRIVE=%~d0"
 if "%INSTALL_DRIVE%"=="" set "INSTALL_DRIVE=C:"
-set "OLLAMA_INSTALL_DIR=%INSTALL_DRIVE%\Ollama"
-set "OLLAMA_MODELS_DIR=%OLLAMA_INSTALL_DIR%\models"
+set "OLLAMA_MODELS_DIR="
+"%VENV_DIR%\Scripts\python.exe" -c "from core.model_store_planner import DEFAULT_OPENCLAW_MEMORY_MODEL, build_model_store_drive_plan; models=[m.strip() for m in r'%RECOMMENDED_BUNDLE_MODELS%'.split(',') if m.strip()]; print(build_model_store_drive_plan(required_models=models, support_models=(DEFAULT_OPENCLAW_MEMORY_MODEL,))['recommended_model_store_path'])" 2>nul > "%TEMP%\nulla_ollama_models_dir.txt"
+if exist "%TEMP%\nulla_ollama_models_dir.txt" (
+  set /p OLLAMA_MODELS_DIR=<"%TEMP%\nulla_ollama_models_dir.txt"
+  del /f /q "%TEMP%\nulla_ollama_models_dir.txt" >nul 2>&1
+)
+if "%OLLAMA_MODELS_DIR%"=="" set "OLLAMA_MODELS_DIR=%INSTALL_DRIVE%\Ollama\models"
+for %%I in ("%OLLAMA_MODELS_DIR%\..") do set "OLLAMA_INSTALL_DIR=%%~fI"
+echo Recommended Ollama model store: %OLLAMA_MODELS_DIR%
 
 REM Set permanent env vars so models never land on C: unexpectedly
 echo Setting OLLAMA_MODELS=%OLLAMA_MODELS_DIR% (permanent)...

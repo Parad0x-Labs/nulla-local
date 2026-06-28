@@ -78,6 +78,8 @@ MODEL_STORAGE_GB: dict[str, float] = {
     "qwen2.5:14b-gguf": 18.0,
     "qwen2.5:32b": 36.0,
     "qwen2.5:72b": 80.0,
+    "nomic-embed-text": 0.3,
+    "nomic-embed-text:latest": 0.3,
 }
 
 MODEL_METADATA: dict[str, dict[str, Any]] = {

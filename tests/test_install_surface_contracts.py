@@ -193,6 +193,8 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "Recommended profile: ${recommended_install_profile_display}" in sh_installer
     assert "Install profile: ${install_profile_display}" in sh_installer
     assert "from core.install_recommendations import build_install_recommendation_truth" in bat_installer
+    assert "from core.model_store_planner import DEFAULT_OPENCLAW_MEMORY_MODEL, build_model_store_drive_plan" in bat_installer
+    assert "Recommended Ollama model store: %OLLAMA_MODELS_DIR%" in bat_installer
     assert "RECOMMENDED_BUNDLE_MODELS" in bat_installer
     assert "for %%M in (!MODELS_TO_PULL:,= !) do" in bat_installer
     assert "local_plus_llamacpp" in readme

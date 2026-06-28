@@ -21,6 +21,7 @@ from core.install_recommendations import (
     local_multi_llm_fit,
 )
 from core.local_model_bundles import model_storage_gb
+from core.model_store_planner import DEFAULT_OPENCLAW_MEMORY_MODEL, build_model_store_drive_plan
 from core.provider_routing import ProviderCapabilityTruth
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import (
@@ -349,6 +350,10 @@ def build_probe_report(
         free_disk_gb=recommendation.free_disk_gb,
         safe_disk_floor_gb=recommendation.safe_disk_floor_gb,
     )
+    model_store_drive_plan = build_model_store_drive_plan(
+        required_models=recommended_bundle_models,
+        support_models=(DEFAULT_OPENCLAW_MEMORY_MODEL,),
+    )
     local_only_ready = bool(binary) and not model_pull_plan["missing_recommended_models"]
     local_only_needs_space = bool(binary) and model_pull_plan["status"] == "needs_space"
     stacks.append(
@@ -472,6 +477,7 @@ def build_probe_report(
         "recommended_install_profile_summary": profile_truth.summary,
         "install_recommendation": recommendation.to_dict(),
         "local_model_plan": model_pull_plan,
+        "model_store_drive_plan": model_store_drive_plan,
         "recommended_stack_id": str(recommended.get("stack_id") or ""),
         "stacks": stacks,
     }
@@ -503,6 +509,37 @@ def render_probe_report(report: dict[str, Any]) -> str:
     installed = [str(item.get("name") or "").strip() for item in list(ollama.get("installed_models") or []) if str(item.get("name") or "").strip()]
     lines.append(f"- installed local models: {', '.join(installed) if installed else 'none'}")
     model_plan = dict(report.get("local_model_plan") or {})
+    drive_plan = dict(report.get("model_store_drive_plan") or {})
+    if drive_plan:
+        recommended_drive = dict(drive_plan.get("recommended_drive") or {})
+        current_drive = dict(drive_plan.get("current_drive") or {})
+        lines.append(f"- current model store: {drive_plan.get('current_model_store_path') or 'unknown'}")
+        if recommended_drive:
+            lines.append(
+                "- recommended model store: "
+                f"{drive_plan.get('recommended_model_store_path')} "
+                f"({recommended_drive.get('drive') or 'unknown'}, "
+                f"{recommended_drive.get('free_gb')} GB free)"
+            )
+        if current_drive and str(drive_plan.get("status") or "") == "move_recommended":
+            lines.append(
+                "- current model-store drive: "
+                f"{current_drive.get('drive') or 'unknown'} "
+                f"({current_drive.get('free_gb')} GB free)"
+            )
+            if str(drive_plan.get("set_env_command") or "").strip():
+                lines.append(f"- model-store action: {drive_plan.get('set_env_command')}")
+        drive_rows = [
+            dict(item)
+            for item in list(drive_plan.get("drives") or [])
+            if isinstance(item, dict)
+        ]
+        if drive_rows:
+            drive_summary = "; ".join(
+                f"{row.get('drive')} {row.get('free_gb')} GB {row.get('status')}"
+                for row in drive_rows[:6]
+            )
+            lines.append(f"- mounted drive space: {drive_summary}")
     if model_plan:
         missing_models = [
             str(item).strip()
