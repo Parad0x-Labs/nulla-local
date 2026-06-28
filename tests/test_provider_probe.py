@@ -4,9 +4,15 @@ import json
 import subprocess
 from unittest import mock
 
-from core.hardware_tier import MachineProbe
+from core.hardware_tier import GPUDevice, MachineProbe
 from core.provider_routing import ProviderCapabilityTruth
-from installer.provider_probe import build_probe_report, list_ollama_models, remote_env_statuses, render_probe_report
+from installer.provider_probe import (
+    build_probe_report,
+    list_ollama_models,
+    remote_env_statuses,
+    render_probe_report,
+    run_ollama_benchmark,
+)
 
 
 def test_probe_report_prefers_bundle_local_stack_on_24gb_mps_host_with_required_models() -> None:
@@ -204,6 +210,89 @@ def test_render_probe_report_surfaces_installed_models_and_recommendation() -> N
     assert "local_plus_remote_openai_compatible" not in rendered
     assert "local_plus_tether" not in rendered
     assert "ollama+tether (hybrid-tether)" not in rendered
+
+
+def test_probe_report_surfaces_gpu_inventory_and_optional_live_check(monkeypatch) -> None:
+    def fake_benchmark(**kwargs) -> dict[str, object]:
+        return {
+            "schema": "nulla.local_model_benchmark.v1",
+            "status": "ok",
+            "model": kwargs["model_name"],
+            "elapsed_seconds": 2.5,
+            "rough_output_tokens_per_second": 0.4,
+        }
+
+    monkeypatch.setattr("installer.provider_probe.run_ollama_benchmark", fake_benchmark)
+
+    with mock.patch("core.install_recommendations._free_gb", return_value=120.0):
+        report = build_probe_report(
+            machine=MachineProbe(
+                cpu_cores=16,
+                ram_gb=32.0,
+                gpu_name="NVIDIA GeForce RTX 4090",
+                vram_gb=24.0,
+                accelerator="cuda",
+                accelerator_status="usable",
+                gpu_devices=(
+                    GPUDevice(
+                        index=0,
+                        name="NVIDIA GeForce RTX 4090",
+                        vendor="nvidia",
+                        vram_gb=24.0,
+                        backend="cuda",
+                        status="usable",
+                        source="nvidia-smi",
+                    ),
+                ),
+            ),
+            ollama_binary="/usr/local/bin/ollama",
+            ollama_models=[],
+            env_statuses={
+                "kimi": {"configured": False},
+                "generic_remote": {"configured": False},
+                "tether": {"configured": False},
+                "qvac": {"configured": False},
+            },
+            run_benchmark=True,
+        )
+
+    rendered = render_probe_report(report)
+
+    assert report["local_model_benchmark"]["status"] == "ok"
+    assert "detected GPUs: [0] NVIDIA GeForce RTX 4090 24.0 GB cuda usable active" in rendered
+    assert "local model live check: ok on" in rendered
+    assert "2.5s wall-clock" in rendered
+    assert "rough output tokens/sec: 0.4" in rendered
+
+
+def test_run_ollama_benchmark_records_marker_and_elapsed(monkeypatch) -> None:
+    clock = mock.Mock(side_effect=[10.0, 12.5])
+    monkeypatch.setattr("installer.provider_probe.time.perf_counter", clock)
+
+    def fake_run(*args, **kwargs) -> subprocess.CompletedProcess[str]:
+        assert args[0][:3] == ["ollama", "run", "gemma3:4b"]
+        assert kwargs["timeout"] == 9
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout="NULLA_BENCH_OK",
+            stderr="",
+        )
+
+    monkeypatch.setattr("installer.provider_probe.subprocess.run", fake_run)
+
+    result = run_ollama_benchmark(
+        model_name="gemma3:4b",
+        ollama_binary="ollama",
+        timeout_seconds=9,
+    )
+
+    assert result["status"] == "ok"
+    assert result["marker_seen"] is True
+    assert result["elapsed_seconds"] == 2.5
+    assert result["rough_output_tokens_per_second"] == 0.4
 
 
 def test_probe_report_surfaces_accelerator_warning_and_model_pull_plan() -> None:

@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from typing import Any
 from urllib import request
 
@@ -29,6 +30,9 @@ from core.runtime_install_profiles import (
     default_ollama_models_path,
     format_install_profile_id,
 )
+
+
+BENCHMARK_MARKER = "NULLA_BENCH_OK"
 
 
 def detect_ollama_binary() -> str:
@@ -74,6 +78,8 @@ def _list_ollama_models_via_api(api_url: str | None = None) -> list[dict[str, st
                 [curl_binary, "-fsS", url],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=3,
                 check=False,
             )
@@ -170,6 +176,8 @@ def list_ollama_models(ollama_binary: str | None = None, ollama_api_url: str | N
             [binary, "list"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15,
             check=False,
         )
@@ -189,6 +197,85 @@ def list_ollama_models(ollama_binary: str | None = None, ollama_api_url: str | N
         modified = " ".join(parts[3:])
         rows.append({"name": name, "id": model_id, "size": size, "modified": modified})
     return rows
+
+
+def run_ollama_benchmark(
+    *,
+    model_name: str,
+    ollama_binary: str | None = None,
+    timeout_seconds: int = 180,
+) -> dict[str, Any]:
+    """Run an opt-in local generation smoke check for the selected Ollama model."""
+    model = str(model_name or "").strip()
+    binary = str(ollama_binary or "").strip() or detect_ollama_binary()
+    base: dict[str, Any] = {
+        "schema": "nulla.local_model_benchmark.v1",
+        "model": model,
+        "ollama_binary": binary,
+        "marker": BENCHMARK_MARKER,
+        "timeout_seconds": int(timeout_seconds),
+        "note": "CLI wall-clock includes model load time; treat this as a local smoke and warmup check, not lab throughput.",
+    }
+    if not binary:
+        return base | {"status": "skipped", "reason": "ollama binary missing"}
+    if not model:
+        return base | {"status": "skipped", "reason": "model missing"}
+
+    prompt = (
+        f"Return exactly this marker and no other text: {BENCHMARK_MARKER}"
+    )
+    started = time.perf_counter()
+    try:
+        completed = subprocess.run(
+            [binary, "run", model, prompt],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=max(1, int(timeout_seconds)),
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        elapsed = max(0.0, time.perf_counter() - started)
+        output = str(getattr(exc, "stdout", "") or "")
+        stderr = str(getattr(exc, "stderr", "") or "")
+        return base | {
+            "status": "timeout",
+            "elapsed_seconds": round(elapsed, 2),
+            "output_excerpt": output[:400],
+            "stderr_excerpt": stderr[:400],
+            "reason": f"ollama run exceeded {int(timeout_seconds)} seconds",
+        }
+    except Exception as exc:
+        elapsed = max(0.0, time.perf_counter() - started)
+        return base | {
+            "status": "failed",
+            "elapsed_seconds": round(elapsed, 2),
+            "reason": str(exc),
+        }
+
+    elapsed = max(0.0, time.perf_counter() - started)
+    stdout = str(completed.stdout or "").strip()
+    stderr = str(completed.stderr or "").strip()
+    output_tokens = len(stdout.split())
+    rough_tps = round(output_tokens / elapsed, 2) if elapsed > 0 and output_tokens else 0.0
+    marker_seen = BENCHMARK_MARKER in stdout
+    status = "ok" if completed.returncode == 0 and marker_seen else "bad_output" if completed.returncode == 0 else "failed"
+    result = base | {
+        "status": status,
+        "returncode": int(completed.returncode),
+        "elapsed_seconds": round(elapsed, 2),
+        "output_tokens": output_tokens,
+        "rough_output_tokens_per_second": rough_tps,
+        "marker_seen": marker_seen,
+        "output_excerpt": stdout[:400],
+        "stderr_excerpt": stderr[:400],
+    }
+    if status == "bad_output":
+        result["reason"] = "ollama returned successfully, but the expected marker was not present"
+    elif status == "failed":
+        result["reason"] = "ollama run exited non-zero"
+    return result
 
 
 def remote_env_statuses() -> dict[str, dict[str, Any]]:
@@ -303,6 +390,8 @@ def build_probe_report(
     env_statuses: dict[str, dict[str, Any]] | None = None,
     provider_capability_truth: tuple[ProviderCapabilityTruth, ...] | None = None,
     show_unsupported: bool = False,
+    run_benchmark: bool = False,
+    benchmark_timeout_seconds: int = 180,
 ) -> dict[str, Any]:
     probe = machine
     if probe is None:
@@ -483,6 +572,12 @@ def build_probe_report(
     }
     if unsupported_stacks:
         report["unsupported_stacks"] = unsupported_stacks
+    if run_benchmark:
+        report["local_model_benchmark"] = run_ollama_benchmark(
+            model_name=recommendation.primary_local_model,
+            ollama_binary=binary,
+            timeout_seconds=benchmark_timeout_seconds,
+        )
     return report
 
 
@@ -506,6 +601,19 @@ def render_probe_report(report: dict[str, Any]) -> str:
         lines.append(f"- accelerator status: {accelerator_status}")
     if accelerator_advice:
         lines.append(f"- accelerator advice: {accelerator_advice}")
+    gpu_rows = [dict(item) for item in list(machine.get("gpu_devices") or []) if isinstance(item, dict)]
+    if gpu_rows:
+        rendered_gpus = []
+        for row in gpu_rows[:8]:
+            vram = row.get("vram_gb")
+            vram_label = f"{vram} GB" if vram is not None else "unknown VRAM"
+            active = " active" if row.get("active_accelerator") else ""
+            selected = " selected" if row.get("selected") and not active else ""
+            rendered_gpus.append(
+                f"[{row.get('index')}] {row.get('name')} {vram_label} "
+                f"{row.get('backend')} {row.get('status')}{active}{selected}"
+            )
+        lines.append(f"- detected GPUs: {'; '.join(rendered_gpus)}")
     installed = [str(item.get("name") or "").strip() for item in list(ollama.get("installed_models") or []) if str(item.get("name") or "").strip()]
     lines.append(f"- installed local models: {', '.join(installed) if installed else 'none'}")
     model_plan = dict(report.get("local_model_plan") or {})
@@ -586,6 +694,19 @@ def render_probe_report(report: dict[str, Any]) -> str:
         if optional_profile:
             lines.append(f"- optional stronger profile: {optional_profile}")
             lines.append(f"- optional secondary model: {recommendation.get('secondary_local_model') or 'unknown'}")
+    benchmark = dict(report.get("local_model_benchmark") or {})
+    if benchmark:
+        status = str(benchmark.get("status") or "unknown")
+        elapsed = benchmark.get("elapsed_seconds")
+        elapsed_label = f", {elapsed}s wall-clock" if elapsed is not None else ""
+        lines.append(
+            f"- local model live check: {status} on {benchmark.get('model') or 'unknown'}{elapsed_label}"
+        )
+        if benchmark.get("rough_output_tokens_per_second"):
+            lines.append(f"- rough output tokens/sec: {benchmark.get('rough_output_tokens_per_second')}")
+        reason = str(benchmark.get("reason") or "").strip()
+        if reason:
+            lines.append(f"- live check reason: {reason}")
     lines.append(f"- recommended stack: {report.get('recommended_stack_id') or 'unknown'}")
     lines.append("- stack status:")
     for stack in stacks:
@@ -607,9 +728,24 @@ def main() -> int:
         action="store_true",
         help="Include unsupported remote ideas like Tether or QVAC in a separate section.",
     )
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Run an Ollama generation smoke/warmup check for the recommended local model.",
+    )
+    parser.add_argument(
+        "--benchmark-timeout",
+        type=int,
+        default=180,
+        help="Maximum seconds to wait for the optional Ollama generation check.",
+    )
     args = parser.parse_args()
 
-    report = build_probe_report(show_unsupported=bool(args.show_unsupported))
+    report = build_probe_report(
+        show_unsupported=bool(args.show_unsupported),
+        run_benchmark=bool(args.benchmark),
+        benchmark_timeout_seconds=max(1, int(args.benchmark_timeout)),
+    )
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:

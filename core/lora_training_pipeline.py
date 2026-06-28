@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import io
 import json
 import math
 import os
+import sys
 import warnings
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
@@ -98,7 +100,7 @@ class AdaptationCollator:
 
 
 def dependency_status() -> DependencyStatus:
-    modules = {name: importlib.util.find_spec(name) is not None for name in _REQUIRED_DEPS}
+    modules = {name: _dependency_importable(name) for name in _REQUIRED_DEPS}
     return DependencyStatus(ok=all(modules.values()), modules=modules, device=_resolve_device())
 
 
@@ -494,7 +496,11 @@ def _normalize_model_ref(model_ref: str) -> str:
 
 
 def _resolve_device() -> str:
-    import torch
+    try:
+        import torch
+    except Exception:
+        sys.modules.pop("torch", None)
+        return "unavailable"
 
     if torch.cuda.is_available():
         return "cuda"
@@ -502,6 +508,17 @@ def _resolve_device() -> str:
     if mps is not None and torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+def _dependency_importable(module_name: str) -> bool:
+    if importlib.util.find_spec(module_name) is None:
+        return False
+    try:
+        importlib.import_module(module_name)
+        return True
+    except Exception:
+        sys.modules.pop(module_name, None)
+        return False
 
 
 def _infer_target_modules(model: Any) -> list[str]:

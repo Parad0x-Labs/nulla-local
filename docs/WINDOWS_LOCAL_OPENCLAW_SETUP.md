@@ -38,14 +38,24 @@ Use the provider probe before pulling more models:
 python installer\provider_probe.py
 ```
 
+To also prove that the recommended local model can actually generate through Ollama, run the opt-in live check:
+
+```bat
+python installer\provider_probe.py --benchmark --benchmark-timeout 240
+```
+
+The benchmark output is a smoke/warmup check, not lab-grade throughput. It includes model-load time, so the wall-clock number is useful for first-run pain and gross performance failures, not for comparing tuned inference engines.
+
 The probe is the local source of truth for:
 
 - CPU, RAM, GPU, VRAM, accelerator status, and acceleration advice
+- multi-GPU inventory, including the selected active accelerator and blocked legacy CUDA devices
 - recommended install profile and local model bundle
 - installed local models versus missing recommended models
 - exact `ollama pull ...` commands for the current PC
 - safe disk floor for the recommended local bundle, measured against the Ollama model store volume
 - mounted local drives ranked by free space, with a recommended `OLLAMA_MODELS` path for the full local model stack
+- optional live Ollama generation status for the selected local model when `--benchmark` is used
 
 On Windows legacy NVIDIA CUDA devices such as GTX 10-series cards, the scanner keeps the GPU visible but sizes local models as CPU-only unless `NULLA_ALLOW_LEGACY_CUDA=1` is set after a successful Ollama warmup. This prevents dead CUDA VRAM from making the installer recommend a bundle that looks good on paper but fails or crashes at runtime.
 
@@ -88,6 +98,8 @@ This pass hardens the Windows local path in these areas:
 - launchers repair stale `OLLAMA_MODELS`, set `OLLAMA_API_KEY`, preserve the selected `NULLA_OLLAMA_MODEL`, and prefer direct OpenClaw gateway startup
 - OpenClaw registration writes schema-valid local-only config, disables hosted web search, removes stale missing-plugin entries, and configures local Ollama memory embeddings
 - hardware/model scanning reports accelerator viability, ignores CPU-fallback GPU VRAM for sizing, ranks mounted drives for the full local model stack, skips stale missing-drive env paths, and emits exact missing-model pull commands
+- hardware/model scanning keeps a structured multi-GPU inventory and marks the selected active accelerator separately from visible but blocked adapters
+- the provider probe has an opt-in live Ollama generation check so installers can distinguish "model exists" from "model can actually run"
 - installers pull the recommended local model bundle and the OpenClaw memory embedding model when OpenClaw is enabled
 - runtime path handling accepts Windows absolute paths while preserving POSIX-style relative workspace paths in tool output
 - sandbox/job execution resolves Windows executables and path separators correctly

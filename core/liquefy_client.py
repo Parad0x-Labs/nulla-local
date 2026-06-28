@@ -19,7 +19,9 @@ _GENERIC_SCHEMA = "liquefy.cli.v1"
 
 class LiquefyClientV1:
     def __init__(self, *, env: dict[str, str] | None = None):
-        self._env = dict(os.environ if env is None else env)
+        self._env = dict(os.environ)
+        if env is not None:
+            self._env.update(env)
         self._generic_bin = self._resolve_bin("NULLA_LIQUEFY_BIN", ("liquefy",))
         self._pack_bin = self._resolve_bin("NULLA_LIQUEFY_PACK_BIN", ("liquefy-pack",))
         self._restore_bin = self._resolve_bin("NULLA_LIQUEFY_RESTORE_BIN", ("liquefy-restore",))
@@ -167,11 +169,12 @@ class LiquefyClientV1:
         explicit = str(self._env.get(env_name) or "").strip()
         if explicit:
             return explicit
+        path = str(self._env.get("PATH") or "")
         if env_name == "NULLA_LIQUEFY_BIN":
-            generic = shutil.which(names[0])
+            generic = shutil.which(names[0], path=path)
             return generic or ""
         for name in names:
-            found = shutil.which(name)
+            found = shutil.which(name, path=path)
             if found:
                 return found
         return ""
@@ -179,7 +182,14 @@ class LiquefyClientV1:
     def _run_json(self, argv: list[str], *, accept_exit_codes: set[int]) -> dict[str, Any]:
         run_argv = self._execution_argv(argv)
         try:
-            result = subprocess.run(run_argv, capture_output=True, text=True, env=self._env)
+            result = subprocess.run(
+                run_argv,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=self._env,
+            )
         except FileNotFoundError:
             return {"ok": False, "exit_code": 127, "error": f"Missing Liquefy executable: {argv[0]}", "payload": {}}
         stdout = str(result.stdout or "").strip()
