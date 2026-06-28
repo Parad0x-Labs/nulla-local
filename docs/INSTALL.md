@@ -26,6 +26,12 @@ Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind
 powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1
 ```
 
+Local Windows checkout with guided installer:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Install_And_Run_NULLA.ps1
+```
+
 Probe the machine and provider reality before or after install:
 
 ```bash

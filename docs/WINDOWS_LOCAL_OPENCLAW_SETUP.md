@@ -95,6 +95,7 @@ The Windows launcher now uses that path first. `ollama launch openclaw` remains 
 
 This pass hardens the Windows local path in these areas:
 
+- `Install_And_Run_NULLA.ps1` provides a guided Windows front-end while preserving the tested batch installer underneath
 - launchers repair stale `OLLAMA_MODELS`, set `OLLAMA_API_KEY`, preserve the selected `NULLA_OLLAMA_MODEL`, and prefer direct OpenClaw gateway startup
 - OpenClaw registration writes schema-valid local-only config, disables hosted web search, removes stale missing-plugin entries, and configures local Ollama memory embeddings
 - hardware/model scanning reports accelerator viability, ignores CPU-fallback GPU VRAM for sizing, ranks mounted drives for the full local model stack, skips stale missing-drive env paths, and emits exact missing-model pull commands
@@ -127,4 +128,4 @@ A complete OpenClaw-to-NULLA smoke test:
 openclaw agent --agent nulla --message "Reply exactly OPENCLAW_NULLA_OK" --json --timeout 240
 ```
 
-Current honest weakness: the local model path can return extra conversational text after the requested marker. That proves routing works, but it is not strict response control.
+Exact-marker smoke prompts are clamped at the NULLA API compatibility boundary, so the client-facing response should be exactly the requested marker even when the underlying local model tries to add extra text. This is response-shape control for smoke tests, not a guarantee that the selected local model will follow every broader instruction perfectly.

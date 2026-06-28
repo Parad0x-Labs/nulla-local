@@ -133,6 +133,7 @@ function Write-BuildMetadata {
 }
 
 function Run-Installer {
+    $psLauncher = Join-Path $InstallDir "Install_And_Run_NULLA.ps1"
     $launcher = Join-Path $InstallDir "Install_And_Run_NULLA.bat"
     $guided = Join-Path $InstallDir "Install_NULLA.bat"
     $canonical = Join-Path $InstallDir "installer\\install_nulla.bat"
@@ -144,6 +145,17 @@ function Run-Installer {
     $profileArgs = @()
     if (-not [string]::IsNullOrWhiteSpace($InstallProfile)) {
         $profileArgs = @("/INSTALLPROFILE=$InstallProfile")
+    }
+    if (Test-Path -LiteralPath $psLauncher) {
+        $psArgs = @("-AutoYes")
+        if (-not [string]::IsNullOrWhiteSpace($InstallProfile)) {
+            $psArgs += @("-InstallProfile", $InstallProfile)
+        }
+        if ($NoStart) {
+            $psArgs += "-NoStart"
+        }
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $psLauncher @psArgs
+        return
     }
     if ($NoStart) {
         if (Test-Path -LiteralPath $guided) {

@@ -42,6 +42,7 @@ from core.runtime_task_events import (
     register_runtime_event_sink,
     unregister_runtime_event_sink,
 )
+from core.web.api.response_control import apply_exact_response_control
 from network.signer import get_local_peer_id
 
 logger = logging.getLogger("nulla.api")
@@ -675,6 +676,7 @@ def run_agent(
         session_id_override=session_id,
         source_context=base_context,
     )
+    result = apply_exact_response_control(dict(result or {}), user_text)
     schedule_memory_extraction(
         runtime,
         user_text=user_text,

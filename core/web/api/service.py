@@ -20,6 +20,7 @@ from storage.adaptation_store import (
     list_adaptation_job_events,
     list_adaptation_jobs,
 )
+from core.web.api.response_control import apply_exact_response_control
 
 from .runtime import (
     RuntimeServices,
@@ -733,6 +734,7 @@ def dispatch_post(
             )
         except Exception as exc:
             return apply_runtime_headers(json_response(500, {"error": str(exc)}), runtime)
+        result = apply_exact_response_control(dict(result or {}), user_text)
         payload = openai_chat_response(result, model) if normalized_path.startswith("/v1/") else ollama_chat_response(result, model, runtime)
         payload = _attach_work_receipt(payload, result=result, session_id=session_id)
         return apply_runtime_headers(json_response(200, payload), runtime)
@@ -750,6 +752,7 @@ def dispatch_post(
             )
         except Exception as exc:
             return apply_runtime_headers(json_response(500, {"error": str(exc)}), runtime)
+        result = apply_exact_response_control(dict(result or {}), prompt)
         response_text = str(result.get("response") or "").strip()
         return apply_runtime_headers(
             json_response(

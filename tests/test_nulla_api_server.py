@@ -315,6 +315,64 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertEqual(source_context["workspace_root"], "/tmp/nested-workspace")
         self.assertEqual(source_context["subject"], "openclaw integration")
 
+    def test_dispatch_post_clamps_explicit_exact_reply_for_openclaw_smoke(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+
+        def fake_run_agent(
+            user_text: str,
+            *,
+            session_id: str | None = None,
+            source_context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            return {"response": "OPENCLAW_NULLA_OK\nExtra model chatter.", "confidence": 1.0}
+
+        with mock.patch("apps.nulla_api_server._run_agent", side_effect=fake_run_agent):
+            response = _dispatch_post(
+                path="/v1/chat/completions",
+                body={
+                    "model": "nulla",
+                    "messages": [{"role": "user", "content": "Reply exactly OPENCLAW_NULLA_OK"}],
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp",
+            )
+
+        payload = json.loads(response.body.decode("utf-8"))
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["choices"][0]["message"]["content"], "OPENCLAW_NULLA_OK")
+
+    def test_dispatch_post_does_not_clamp_file_read_exactly_requests_without_target(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+
+        def fake_run_agent(
+            user_text: str,
+            *,
+            session_id: str | None = None,
+            source_context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            return {"response": "file body\nline two", "confidence": 1.0}
+
+        with mock.patch("apps.nulla_api_server._run_agent", side_effect=fake_run_agent):
+            response = _dispatch_post(
+                path="/api/chat",
+                body={
+                    "model": "nulla",
+                    "messages": [{"role": "user", "content": "Now read the whole file back exactly."}],
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp",
+            )
+
+        payload = json.loads(response.body.decode("utf-8"))
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["message"]["content"], "file body\nline two")
+
     def test_dispatch_post_rehydrates_history_from_session_log_when_client_history_is_sparse(self) -> None:
         runtime = RuntimeServices(display_name="NULLA")
         seen_contexts: list[dict[str, Any]] = []

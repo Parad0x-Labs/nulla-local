@@ -97,6 +97,8 @@ def test_powershell_bootstrap_falls_back_to_canonical_installer() -> None:
     assert 'function Resolve-DirtyState' in script
     assert 'function Write-BuildMetadata' in script
     assert 'build-source.json' in script
+    assert '$psLauncher = Join-Path $InstallDir "Install_And_Run_NULLA.ps1"' in script
+    assert '& powershell -NoProfile -ExecutionPolicy Bypass -File $psLauncher @psArgs' in script
     assert '/INSTALLPROFILE=$InstallProfile' in script
     assert 'install_nulla.bat' in script
     assert 'installer\\\\install_nulla.bat' in script

@@ -173,6 +173,8 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     bat_installer = (REPO_ROOT / "installer" / "install_nulla.bat").read_text(encoding="utf-8")
     sh_bootstrap = (REPO_ROOT / "installer" / "bootstrap_nulla.sh").read_text(encoding="utf-8")
     ps_bootstrap = (REPO_ROOT / "installer" / "bootstrap_nulla.ps1").read_text(encoding="utf-8")
+    ps_launcher = (REPO_ROOT / "Install_And_Run_NULLA.ps1").read_text(encoding="utf-8")
+    ps_one_click = (REPO_ROOT / "installer" / "windows_one_click.ps1").read_text(encoding="utf-8")
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     install_doc = (REPO_ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
 
@@ -181,6 +183,13 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "--install-profile <id>" in sh_bootstrap
     assert '-InstallProfile local-max' in install_doc
     assert '/INSTALLPROFILE=$InstallProfile' in ps_bootstrap
+    assert "Install_And_Run_NULLA.ps1" in ps_bootstrap
+    assert "-AutoYes" in ps_bootstrap
+    assert "installer\\windows_one_click.ps1" in ps_launcher
+    assert "System.Windows.Forms" in ps_one_click
+    assert "Probe PC" in ps_one_click
+    assert "/INSTALLPROFILE=$batchProfile" in ps_one_click
+    assert "powershell -ExecutionPolicy Bypass -File .\\Install_And_Run_NULLA.ps1" in install_doc
     assert "install-profile --set ollama-only" in sh_installer
     assert "install-profile --set ollama-max" in sh_installer
     assert "install-profile --set ollama-only" in readme
