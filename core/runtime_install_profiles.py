@@ -233,9 +233,10 @@ def build_install_profile_truth(
         requested = str(installed_record.get("profile_id") or "")
         if requested:
             requested_source = "installed_record"
+    model_store_path = default_ollama_models_path(env_map)
     bundle_recommendation = resolve_local_bundle_recommendation(
         probe=active_probe,
-        free_disk_gb=_disk_free_gb(_nearest_existing_path(Path(runtime_home).expanduser().resolve())) if runtime_home else _disk_free_gb(_nearest_existing_path(Path.home() / ".nulla_runtime")),
+        free_disk_gb=_disk_free_gb(_nearest_existing_path(model_store_path)),
         secondary_local_model_name=secondary_local_model(env_map),
         selected_model=str(selected_model or installed_record.get("selected_model") or "").strip(),
     )
@@ -319,14 +320,33 @@ def build_install_profile_truth(
 
 def default_ollama_models_path(env: Mapping[str, str] | None = None) -> Path:
     env_map = os.environ if env is None else env
-    override = str(env_map.get("OLLAMA_MODELS") or "").strip()
-    if override:
-        return Path(override).expanduser().resolve()
     home = Path.home()
     system = platform.system().lower()
+    candidates: list[Path] = []
+    override = str(env_map.get("OLLAMA_MODELS") or "").strip()
+    if override:
+        candidates.append(Path(override).expanduser())
     if system == "windows":
-        return (home / ".ollama" / "models").resolve()
-    return (home / ".ollama" / "models").resolve()
+        candidates.extend(_windows_ollama_models_env_paths())
+        for drive in "DEFGHIJKLMNOPQRSTUVWXYZC":
+            candidates.append(Path(f"{drive}:\\Ollama\\models"))
+    candidates.append(home / ".ollama" / "models")
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate.absolute()
+        key = str(resolved).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(resolved)
+    for candidate in deduped:
+        if _path_target_available(candidate):
+            return candidate
+    return deduped[0] if deduped else (home / ".ollama" / "models").resolve()
 
 
 def normalize_install_profile_id(profile_id: str | None, *, allow_auto: bool = True) -> str:
@@ -685,13 +705,10 @@ def required_ollama_models_for_profile(
     normalized_profile = normalize_install_profile_id(profile_id, allow_auto=False)
     active_probe = probe or probe_machine()
     env_map = os.environ if env is None else env
+    model_store_path = default_ollama_models_path(env_map)
     recommendation = resolve_local_bundle_recommendation(
         probe=active_probe,
-        free_disk_gb=_disk_free_gb(
-            _nearest_existing_path(
-                Path(runtime_home).expanduser().resolve() if runtime_home else (Path.home() / ".nulla_runtime")
-            )
-        ),
+        free_disk_gb=_disk_free_gb(_nearest_existing_path(model_store_path)),
         secondary_local_model_name=secondary_local_model(env_map),
         selected_model=str(model_tag or "").strip(),
     )
@@ -1215,7 +1232,40 @@ def _nearest_existing_path(path: Path) -> Path:
     current = path
     while not current.exists() and current != current.parent:
         current = current.parent
-    return current.resolve()
+    if current.exists():
+        return current.resolve()
+    return Path.home().resolve()
+
+
+def _path_target_available(path: Path) -> bool:
+    current = path
+    while not current.exists() and current != current.parent:
+        current = current.parent
+    return current.exists()
+
+
+def _windows_ollama_models_env_paths() -> tuple[Path, ...]:
+    if platform.system().lower() != "windows":
+        return ()
+    try:
+        import winreg  # type: ignore
+    except Exception:
+        return ()
+    paths: list[Path] = []
+    locations = (
+        (winreg.HKEY_CURRENT_USER, "Environment"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+    )
+    for hive, subkey in locations:
+        try:
+            with winreg.OpenKey(hive, subkey) as key:
+                raw, _value_type = winreg.QueryValueEx(key, "OLLAMA_MODELS")
+        except OSError:
+            continue
+        value = str(raw or "").strip()
+        if value:
+            paths.append(Path(value).expanduser())
+    return tuple(paths)
 
 
 def _volume_id(path: Path) -> str:

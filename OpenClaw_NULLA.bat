@@ -19,6 +19,7 @@ if not exist "%SCRIPT_DIR%.venv\Scripts\python.exe" (
 set "MODEL_TAG=qwen2.5:7b"
 for /f "tokens=*" %%A in ('"%SCRIPT_DIR%.venv\Scripts\python.exe" -c "import json, os; from pathlib import Path; p=Path(os.environ.get('NULLA_PROJECT_ROOT',''))/'install_receipt.json'; data=json.loads(p.read_text(encoding='utf-8')) if p.is_file() else {}; print(data.get('selected_model','qwen2.5:7b'))" 2^>nul') do set "MODEL_TAG=%%A"
 if "%NULLA_OLLAMA_MODEL%"=="" set "NULLA_OLLAMA_MODEL=%MODEL_TAG%"
+if not "%NULLA_OLLAMA_MODEL%"=="" set "MODEL_TAG=%NULLA_OLLAMA_MODEL%"
 set "DISPLAY_NAME=NULLA"
 for /f "tokens=*" %%A in ('"%SCRIPT_DIR%.venv\Scripts\python.exe" -c "import json, os; from pathlib import Path; p=Path(os.environ.get('NULLA_HOME',''))/'data'/'owner_identity.json'; data=json.loads(p.read_text(encoding='utf-8')) if p.is_file() else {}; print(data.get('agent_name','NULLA'))" 2^>nul') do set "DISPLAY_NAME=%%A"
 "%SCRIPT_DIR%.venv\Scripts\python.exe" "%SCRIPT_DIR%installer\register_openclaw_agent.py" "%SCRIPT_DIR%" "%NULLA_HOME%" "%MODEL_TAG%" "%DISPLAY_NAME%" >"%TEMP%\nulla_openclaw_register.log" 2>&1

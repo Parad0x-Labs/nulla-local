@@ -104,6 +104,8 @@ def runtime_tool_contracts() -> list[RuntimeToolContract]:
                 "gpu_name": "string optional",
                 "vram_gb": "number optional",
                 "accelerator": "string",
+                "accelerator_status": "string",
+                "accelerator_advice": "string optional",
                 "recommended_model": "string",
             },
             side_effect_class="read_only",

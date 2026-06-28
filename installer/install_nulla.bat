@@ -258,10 +258,17 @@ if exist "%TEMP%\nulla_agent_name.txt" (
 
 echo Step 6/14: Detecting hardware and recommended model...
 set "MODEL_TAG="
-"%VENV_DIR%\Scripts\python.exe" -c "from core.hardware_tier import probe_machine, select_qwen_tier; print(select_qwen_tier(probe_machine()).ollama_tag)" 2>nul > "%TEMP%\nulla_model_tag.txt"
+"%VENV_DIR%\Scripts\python.exe" -c "from core.install_recommendations import build_install_recommendation_truth; print(build_install_recommendation_truth().primary_local_model)" 2>nul > "%TEMP%\nulla_model_tag.txt"
 set /p MODEL_TAG=<"%TEMP%\nulla_model_tag.txt"
 del /f /q "%TEMP%\nulla_model_tag.txt" >nul 2>&1
 if "%MODEL_TAG%"=="" set "MODEL_TAG=qwen2.5:7b"
+set "RECOMMENDED_BUNDLE_MODELS="
+"%VENV_DIR%\Scripts\python.exe" -c "from core.install_recommendations import build_install_recommendation_truth; print(','.join(build_install_recommendation_truth().recommended_bundle_models))" 2>nul > "%TEMP%\nulla_bundle_models.txt"
+if exist "%TEMP%\nulla_bundle_models.txt" (
+  set /p RECOMMENDED_BUNDLE_MODELS=<"%TEMP%\nulla_bundle_models.txt"
+  del /f /q "%TEMP%\nulla_bundle_models.txt" >nul 2>&1
+)
+if "%RECOMMENDED_BUNDLE_MODELS%"=="" set "RECOMMENDED_BUNDLE_MODELS=%MODEL_TAG%"
 "%VENV_DIR%\Scripts\python.exe" -c "import json; from core.hardware_tier import tier_summary; print(json.dumps(tier_summary(), ensure_ascii=False))" 2>nul > "%TEMP%\nulla_hw.txt"
 set "HARDWARE_SUMMARY="
 set /p HARDWARE_SUMMARY=<"%TEMP%\nulla_hw.txt"
@@ -299,6 +306,7 @@ if exist "%TEMP%\nulla_selected_install_profile.txt" (
 set "NULLA_INSTALL_PROFILE=%INSTALL_PROFILE%"
 echo Detected: %HARDWARE_SUMMARY%
 echo Selected model: %MODEL_TAG%
+echo Recommended local bundle: %RECOMMENDED_BUNDLE_MODELS%
 echo Recommended profile: %RECOMMENDED_INSTALL_PROFILE%
 echo Install profile: %INSTALL_PROFILE%
 echo Profile summary: %INSTALL_PROFILE_SUMMARY%
@@ -541,18 +549,24 @@ if "%OPENCLAW_ENABLED%"=="1" (
 
 echo Step 12/14: Pulling AI model (this may take a while)...
 
-REM Check if model already pulled
-"%OLLAMA_EXE%" list 2>nul | findstr /i "%MODEL_TAG%" >nul 2>&1
-if %errorlevel% neq 0 (
-  echo Downloading %MODEL_TAG% to %OLLAMA_MODELS_DIR%...
-  "%OLLAMA_EXE%" pull %MODEL_TAG%
-  if %errorlevel% neq 0 (
-    echo WARNING: Model pull failed. You can run this manually later:
-    echo   set OLLAMA_MODELS=%OLLAMA_MODELS_DIR%
-    echo   "%OLLAMA_EXE%" pull %MODEL_TAG%
+set "MODELS_TO_PULL=%RECOMMENDED_BUNDLE_MODELS%"
+if "!MODELS_TO_PULL!"=="" set "MODELS_TO_PULL=%MODEL_TAG%"
+for %%M in (!MODELS_TO_PULL:,= !) do (
+  set "PULL_MODEL=%%~M"
+  if not "!PULL_MODEL!"=="" (
+    "%OLLAMA_EXE%" list 2>nul | findstr /i /c:"!PULL_MODEL!" >nul 2>&1
+    if !errorlevel! neq 0 (
+      echo Downloading !PULL_MODEL! to %OLLAMA_MODELS_DIR%...
+      "%OLLAMA_EXE%" pull !PULL_MODEL!
+      if !errorlevel! neq 0 (
+        echo WARNING: Model pull failed. You can run this manually later:
+        echo   set OLLAMA_MODELS=%OLLAMA_MODELS_DIR%
+        echo   "%OLLAMA_EXE%" pull !PULL_MODEL!
+      )
+    ) else (
+      echo Model !PULL_MODEL! already available.
+    )
   )
-) else (
-  echo Model %MODEL_TAG% already available.
 )
 
 if "%OPENCLAW_ENABLED%"=="1" (

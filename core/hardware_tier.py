@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 from dataclasses import dataclass
 
 
@@ -35,6 +36,8 @@ class MachineProbe:
     gpu_name: str | None
     vram_gb: float | None
     accelerator: str  # cuda | mps | directml | cpu
+    accelerator_status: str = ""
+    accelerator_advice: str = ""
 
 
 @dataclass
@@ -68,13 +71,15 @@ MPS_TIERS: list[QwenTier] = [
 def probe_machine() -> MachineProbe:
     cpu_cores = os.cpu_count() or 2
     ram_gb = _detect_ram_gb()
-    gpu_name, vram_gb, accelerator = _detect_gpu()
+    gpu_name, vram_gb, accelerator, accelerator_status, accelerator_advice = _detect_gpu()
     return MachineProbe(
         cpu_cores=cpu_cores,
         ram_gb=ram_gb,
         gpu_name=gpu_name,
         vram_gb=vram_gb,
         accelerator=accelerator,
+        accelerator_status=accelerator_status,
+        accelerator_advice=accelerator_advice,
     )
 
 
@@ -97,8 +102,9 @@ def select_qwen_tier(probe: MachineProbe | None = None) -> QwenTier:
                 return tier
         return MPS_TIERS[-1]
 
+    discrete_accelerator = normalized_accelerator in {"cuda", "directml"}
     for tier in TIERS:
-        if probe.vram_gb is not None and probe.vram_gb >= tier.min_vram_gb:
+        if discrete_accelerator and probe.vram_gb is not None and probe.vram_gb >= tier.min_vram_gb:
             return tier
         if probe.ram_gb >= tier.min_ram_gb:
             return tier
@@ -115,12 +121,18 @@ def tier_summary(probe: MachineProbe | None = None) -> dict:
     if probe is None:
         probe = probe_machine()
     tier = select_qwen_tier(probe)
+    accelerator = str(probe.accelerator or "").strip().lower()
+    accelerator_status = str(getattr(probe, "accelerator_status", "") or "").strip()
+    if not accelerator_status:
+        accelerator_status = "cpu" if accelerator == "cpu" else "usable"
     return {
         "cpu_cores": probe.cpu_cores,
         "ram_gb": round(probe.ram_gb, 1),
         "gpu": probe.gpu_name or "none",
         "vram_gb": round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
         "accelerator": probe.accelerator,
+        "accelerator_status": accelerator_status,
+        "accelerator_advice": str(getattr(probe, "accelerator_advice", "") or "").strip(),
         "selected_tier": tier.tier_name,
         "ollama_model": tier.ollama_tag,
         "param_billions": tier.param_billions,
@@ -167,8 +179,8 @@ def _override_model_tag() -> str | None:
     return raw or None
 
 
-def _detect_gpu() -> tuple[str | None, float | None, str]:
-    """Returns (gpu_name, vram_gb, accelerator)."""
+def _detect_gpu() -> tuple[str | None, float | None, str, str, str]:
+    """Returns (gpu_name, vram_gb, accelerator, accelerator_status, accelerator_advice)."""
 
     # CUDA path (Windows + Linux NVIDIA)
     gpu = _try_cuda()
@@ -185,16 +197,16 @@ def _detect_gpu() -> tuple[str | None, float | None, str]:
     if gpu[0] is not None:
         return gpu
 
-    return None, None, "cpu"
+    return None, None, "cpu", "cpu", ""
 
 
-def _try_cuda() -> tuple[str | None, float | None, str]:
+def _try_cuda() -> tuple[str | None, float | None, str, str, str]:
     try:
         import torch  # type: ignore
         if torch.cuda.is_available():
             name = torch.cuda.get_device_name(0)
             _free, total = torch.cuda.mem_get_info(0)
-            return name, float(total) / (1024.0 ** 3), "cuda"
+            return _cuda_probe_result(name, float(total) / (1024.0 ** 3))
     except Exception:
         pass
     # nvidia-smi fallback
@@ -211,34 +223,34 @@ def _try_cuda() -> tuple[str | None, float | None, str]:
             if len(parts) >= 2:
                 name = parts[0]
                 vram_mb = float(parts[1])
-                return name, vram_mb / 1024.0, "cuda"
+                return _cuda_probe_result(name, vram_mb / 1024.0)
     except Exception:
         pass
-    return None, None, "cpu"
+    return None, None, "cpu", "cpu", ""
 
 
-def _try_mps() -> tuple[str | None, float | None, str]:
+def _try_mps() -> tuple[str | None, float | None, str, str, str]:
     if platform.system().lower() != "darwin":
-        return None, None, "cpu"
+        return None, None, "cpu", "cpu", ""
     if platform.machine().lower() not in {"arm64", "aarch64"}:
-        return None, None, "cpu"
+        return None, None, "cpu", "cpu", ""
     try:
         import torch  # type: ignore
         if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
             # MPS shares unified memory; report total RAM as proxy
             ram = _detect_ram_gb()
-            return "Apple Silicon (MPS)", ram, "mps"
+            return "Apple Silicon (MPS)", ram, "mps", "usable", ""
     except Exception:
         pass
     # Even without torch, Apple Silicon has unified memory
     ram = _detect_ram_gb()
-    return "Apple Silicon", ram, "mps"
+    return "Apple Silicon", ram, "mps", "usable", ""
 
 
-def _try_directml() -> tuple[str | None, float | None, str]:
+def _try_directml() -> tuple[str | None, float | None, str, str, str]:
     """Detect AMD/Intel GPUs on Windows via WMI."""
     if platform.system().lower() != "windows":
-        return None, None, "cpu"
+        return None, None, "cpu", "cpu", ""
     try:
         import subprocess
         result = subprocess.run(
@@ -256,7 +268,37 @@ def _try_directml() -> tuple[str | None, float | None, str]:
                         continue
                     name = parts[2]
                     if vram_bytes > 512 * 1024 * 1024:  # >512 MB = real GPU
-                        return name, float(vram_bytes) / (1024.0 ** 3), "directml"
+                        return name, float(vram_bytes) / (1024.0 ** 3), "directml", "usable", ""
     except Exception:
         pass
-    return None, None, "cpu"
+    return None, None, "cpu", "cpu", ""
+
+
+def _cuda_probe_result(gpu_name: str, vram_gb: float) -> tuple[str | None, float | None, str, str, str]:
+    if _windows_legacy_cuda_cpu_fallback(gpu_name):
+        return (
+            gpu_name,
+            vram_gb,
+            "cpu",
+            "legacy_cuda_cpu_recommended",
+            (
+                "Legacy NVIDIA CUDA device on Windows; NULLA sizes local models as CPU-only "
+                "unless NULLA_ALLOW_LEGACY_CUDA=1 is set after a successful Ollama warmup."
+            ),
+        )
+    return gpu_name, vram_gb, "cuda", "usable", ""
+
+
+def _windows_legacy_cuda_cpu_fallback(gpu_name: str) -> bool:
+    if platform.system().lower() != "windows":
+        return False
+    if _env_truthy("NULLA_ALLOW_LEGACY_CUDA"):
+        return False
+    clean = re.sub(r"[^a-z0-9]+", " ", str(gpu_name or "").strip().lower())
+    if not clean:
+        return False
+    return bool(re.search(r"\bgtx\s*(?:10|9|7|6|5)\d{2}\b", clean))
+
+
+def _env_truthy(name: str) -> bool:
+    return str(os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}

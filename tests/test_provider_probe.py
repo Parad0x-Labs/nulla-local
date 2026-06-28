@@ -206,6 +206,75 @@ def test_render_probe_report_surfaces_installed_models_and_recommendation() -> N
     assert "ollama+tether (hybrid-tether)" not in rendered
 
 
+def test_probe_report_surfaces_accelerator_warning_and_model_pull_plan() -> None:
+    with mock.patch("core.install_recommendations._free_gb", return_value=120.0):
+        report = build_probe_report(
+            machine=MachineProbe(
+                cpu_cores=8,
+                ram_gb=8.0,
+                gpu_name="NVIDIA GeForce GTX 1080",
+                vram_gb=8.0,
+                accelerator="cpu",
+                accelerator_status="legacy_cuda_cpu_recommended",
+                accelerator_advice="Legacy CUDA fallback active.",
+            ),
+            ollama_binary="/usr/local/bin/ollama",
+            ollama_models=[{"name": "qwen2.5:7b", "id": "b", "size": "4.7 GB", "modified": "today"}],
+            env_statuses={
+                "kimi": {"configured": False},
+                "generic_remote": {"configured": False},
+                "tether": {"configured": False},
+                "qvac": {"configured": False},
+            },
+        )
+
+    assert report["machine"]["accelerator"] == "cpu"
+    assert report["machine"]["accelerator_status"] == "legacy_cuda_cpu_recommended"
+    assert report["local_model_plan"]["recommended_models"] == ["gemma3:4b"]
+    assert report["local_model_plan"]["missing_recommended_models"] == ["gemma3:4b"]
+    assert report["local_model_plan"]["pull_commands"] == ["ollama pull gemma3:4b"]
+    assert report["local_model_plan"]["status"] == "needs_setup"
+    assert report["stacks"][0]["status"] == "needs_setup"
+
+    rendered = render_probe_report(report)
+
+    assert "accelerator status: legacy_cuda_cpu_recommended" in rendered
+    assert "missing recommended models: gemma3:4b" in rendered
+    assert "ollama pull gemma3:4b" in rendered
+
+
+def test_probe_report_blocks_pull_plan_when_safe_disk_floor_is_not_met() -> None:
+    with mock.patch("core.install_recommendations._free_gb", return_value=27.0):
+        report = build_probe_report(
+            machine=MachineProbe(
+                cpu_cores=8,
+                ram_gb=8.0,
+                gpu_name="NVIDIA GeForce GTX 1080",
+                vram_gb=8.0,
+                accelerator="cpu",
+                accelerator_status="legacy_cuda_cpu_recommended",
+                accelerator_advice="Legacy CUDA fallback active.",
+            ),
+            ollama_binary="/usr/local/bin/ollama",
+            ollama_models=[{"name": "qwen2.5:7b", "id": "b", "size": "4.7 GB", "modified": "today"}],
+            env_statuses={
+                "kimi": {"configured": False},
+                "generic_remote": {"configured": False},
+                "tether": {"configured": False},
+                "qvac": {"configured": False},
+            },
+        )
+
+    assert report["local_model_plan"]["status"] == "needs_space"
+    assert report["local_model_plan"]["minimum_space_to_free_gb"] == 1.3
+    assert report["stacks"][0]["status"] == "needs_space"
+
+    rendered = render_probe_report(report)
+
+    assert "disk action: free at least 1.3 GB before pulling" in rendered
+    assert "target volume is below the safe disk floor" in rendered
+
+
 def test_default_probe_report_hides_unsupported_remote_ideas() -> None:
     report = build_probe_report(
         machine=MachineProbe(cpu_cores=8, ram_gb=12.0, gpu_name=None, vram_gb=None, accelerator="cpu"),

@@ -192,5 +192,16 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "detect_install_profile_display" in sh_installer
     assert "Recommended profile: ${recommended_install_profile_display}" in sh_installer
     assert "Install profile: ${install_profile_display}" in sh_installer
+    assert "from core.install_recommendations import build_install_recommendation_truth" in bat_installer
+    assert "RECOMMENDED_BUNDLE_MODELS" in bat_installer
+    assert "for %%M in (!MODELS_TO_PULL:,= !) do" in bat_installer
     assert "local_plus_llamacpp" in readme
     assert "first-class installer/runtime lane yet" not in readme
+
+
+def test_windows_openclaw_launcher_prefers_env_selected_model_over_receipt() -> None:
+    launcher = (REPO_ROOT / "OpenClaw_NULLA.bat").read_text(encoding="utf-8")
+
+    assert 'if "%NULLA_OLLAMA_MODEL%"=="" set "NULLA_OLLAMA_MODEL=%MODEL_TAG%"' in launcher
+    assert 'if not "%NULLA_OLLAMA_MODEL%"=="" set "MODEL_TAG=%NULLA_OLLAMA_MODEL%"' in launcher
+    assert 'register_openclaw_agent.py" "%SCRIPT_DIR%" "%NULLA_HOME%" "%MODEL_TAG%" "%DISPLAY_NAME%"' in launcher

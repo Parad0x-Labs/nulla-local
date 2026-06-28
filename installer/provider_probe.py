@@ -20,6 +20,7 @@ from core.install_recommendations import (
     install_recommendation_machine_summary,
     local_multi_llm_fit,
 )
+from core.local_model_bundles import model_storage_gb
 from core.provider_routing import ProviderCapabilityTruth
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import (
@@ -247,6 +248,52 @@ def _probe_env_for_install_profile(env_statuses: dict[str, dict[str, Any]]) -> d
     return env
 
 
+def _model_installed(model_name: str, installed_names: set[str]) -> bool:
+    clean = str(model_name or "").strip()
+    if not clean:
+        return False
+    if clean in installed_names:
+        return True
+    if ":" not in clean and f"{clean}:latest" in installed_names:
+        return True
+    if clean.endswith(":latest") and clean.removesuffix(":latest") in installed_names:
+        return True
+    return False
+
+
+def _local_model_pull_plan(
+    *,
+    recommended_models: tuple[str, ...],
+    fallback_models: tuple[str, ...],
+    installed_names: set[str],
+    free_disk_gb: float,
+    safe_disk_floor_gb: float,
+) -> dict[str, Any]:
+    recommended = tuple(str(item).strip() for item in recommended_models if str(item).strip())
+    fallback = tuple(str(item).strip() for item in fallback_models if str(item).strip())
+    installed_recommended = tuple(item for item in recommended if _model_installed(item, installed_names))
+    missing = tuple(item for item in recommended if not _model_installed(item, installed_names))
+    estimated_download_gb = round(sum(model_storage_gb(item) for item in missing), 1)
+    free_gb = round(float(free_disk_gb or 0.0), 1)
+    safe_floor_gb = round(float(safe_disk_floor_gb or 0.0), 1)
+    disk_margin_gb = round(free_gb - safe_floor_gb, 1)
+    needs_space = bool(missing) and disk_margin_gb < 0.0
+    status = "ready" if recommended and not missing else "needs_space" if needs_space else "needs_setup"
+    return {
+        "recommended_models": list(recommended),
+        "fallback_models": list(fallback),
+        "installed_recommended_models": list(installed_recommended),
+        "missing_recommended_models": list(missing),
+        "pull_commands": [f"ollama pull {item}" for item in missing],
+        "estimated_missing_download_gb": estimated_download_gb,
+        "free_disk_gb": free_gb,
+        "safe_disk_floor_gb": safe_floor_gb,
+        "disk_margin_gb": disk_margin_gb,
+        "minimum_space_to_free_gb": round(max(0.0, safe_floor_gb - free_gb), 1),
+        "status": status,
+    }
+
+
 def build_probe_report(
     *,
     machine: MachineProbe | None = None,
@@ -295,7 +342,15 @@ def build_probe_report(
         for item in list(recommendation.recommended_bundle_models)
         if str(item).strip()
     )
-    local_only_ready = bool(binary) and all(model_name in model_names for model_name in recommended_bundle_models)
+    model_pull_plan = _local_model_pull_plan(
+        recommended_models=recommended_bundle_models,
+        fallback_models=recommendation.fallback_bundle_models,
+        installed_names=model_names,
+        free_disk_gb=recommendation.free_disk_gb,
+        safe_disk_floor_gb=recommendation.safe_disk_floor_gb,
+    )
+    local_only_ready = bool(binary) and not model_pull_plan["missing_recommended_models"]
+    local_only_needs_space = bool(binary) and model_pull_plan["status"] == "needs_space"
     stacks.append(
         {
             "stack_id": "local_only",
@@ -303,6 +358,8 @@ def build_probe_report(
             "status": (
                 "ready"
                 if local_only_ready
+                else "needs_space"
+                if local_only_needs_space
                 else "needs_setup"
                 if binary
                 else "needs_install"
@@ -311,6 +368,10 @@ def build_probe_report(
             "reason": (
                 "The recommended local Ollama bundle is installed and ready."
                 if local_only_ready
+                else (
+                    "Ollama is present, but the target volume is below the safe disk floor for the missing recommended bundle."
+                )
+                if local_only_needs_space
                 else "Ollama is present, but the recommended local bundle is not fully pulled yet."
                 if binary
                 else "Ollama is missing; installer must provision it before the default local bundle is usable."
@@ -410,6 +471,7 @@ def build_probe_report(
         "recommended_install_profile_label": profile_truth.label,
         "recommended_install_profile_summary": profile_truth.summary,
         "install_recommendation": recommendation.to_dict(),
+        "local_model_plan": model_pull_plan,
         "recommended_stack_id": str(recommended.get("stack_id") or ""),
         "stacks": stacks,
     }
@@ -432,8 +494,41 @@ def render_probe_report(report: dict[str, Any]) -> str:
         f"- capacity bucket: {report.get('capacity_bucket') or 'unknown'}",
         f"- ollama present: {'yes' if ollama.get('binary_present') else 'no'}",
     ]
+    accelerator_status = str(machine.get("accelerator_status") or "").strip()
+    accelerator_advice = str(machine.get("accelerator_advice") or "").strip()
+    if accelerator_status and accelerator_status not in {"usable", "cpu"}:
+        lines.append(f"- accelerator status: {accelerator_status}")
+    if accelerator_advice:
+        lines.append(f"- accelerator advice: {accelerator_advice}")
     installed = [str(item.get("name") or "").strip() for item in list(ollama.get("installed_models") or []) if str(item.get("name") or "").strip()]
     lines.append(f"- installed local models: {', '.join(installed) if installed else 'none'}")
+    model_plan = dict(report.get("local_model_plan") or {})
+    if model_plan:
+        missing_models = [
+            str(item).strip()
+            for item in list(model_plan.get("missing_recommended_models") or [])
+            if str(item).strip()
+        ]
+        if missing_models:
+            lines.append(f"- missing recommended models: {', '.join(missing_models)}")
+            pull_commands = [
+                str(item).strip()
+                for item in list(model_plan.get("pull_commands") or [])
+                if str(item).strip()
+            ]
+            if pull_commands:
+                lines.append(f"- pull commands: {'; '.join(pull_commands)}")
+            lines.append(f"- estimated missing model download: {model_plan.get('estimated_missing_download_gb')} GB")
+            lines.append(
+                "- model disk headroom: "
+                f"{model_plan.get('free_disk_gb')} GB free, "
+                f"{model_plan.get('safe_disk_floor_gb')} GB safe floor, "
+                f"{model_plan.get('disk_margin_gb')} GB margin"
+            )
+            if str(model_plan.get("status") or "") == "needs_space":
+                lines.append(f"- disk action: free at least {model_plan.get('minimum_space_to_free_gb')} GB before pulling")
+        else:
+            lines.append("- recommended model bundle installed: yes")
     display_profile_id = str(report.get("recommended_install_profile_display_id") or "").strip()
     lines.append(
         f"- recommended install profile: {display_profile_id or report.get('recommended_install_profile_id') or 'unknown'}"

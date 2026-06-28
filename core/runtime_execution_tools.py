@@ -1704,6 +1704,15 @@ def _inspect_machine_specs() -> RuntimeExecutionResult:
         f"- Accelerator: {probe.accelerator or 'cpu'}",
         f"- GPU: {probe.gpu_name or 'none'}",
     ]
+    accelerator = str(probe.accelerator or "").strip().lower()
+    accelerator_status = str(getattr(probe, "accelerator_status", "") or "").strip()
+    if not accelerator_status:
+        accelerator_status = "cpu" if accelerator == "cpu" else "usable"
+    accelerator_advice = str(getattr(probe, "accelerator_advice", "") or "").strip()
+    if accelerator_status and accelerator_status not in {"usable", "cpu"}:
+        response_lines.append(f"- Accelerator status: {accelerator_status}")
+    if accelerator_advice:
+        response_lines.append(f"- Accelerator advice: {accelerator_advice}")
     if probe.vram_gb is not None:
         label = "Unified memory" if str(probe.accelerator or "").strip().lower() == "mps" else "VRAM"
         response_lines.append(f"- {label}: {round(probe.vram_gb, 1)} GiB")
@@ -1731,6 +1740,8 @@ def _inspect_machine_specs() -> RuntimeExecutionResult:
         gpu_name=probe.gpu_name or "",
         vram_gb=round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
         accelerator=probe.accelerator,
+        accelerator_status=accelerator_status,
+        accelerator_advice=accelerator_advice,
         recommended_model=recommended_model,
         selected_tier=selected_tier,
         capacity_bucket=capacity_bucket,
@@ -1754,6 +1765,8 @@ def _inspect_machine_specs() -> RuntimeExecutionResult:
             "gpu_name": probe.gpu_name or "",
             "vram_gb": round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
             "accelerator": probe.accelerator,
+            "accelerator_status": accelerator_status,
+            "accelerator_advice": accelerator_advice,
             "recommended_model": recommended_model,
             "selected_tier": selected_tier,
             "capacity_bucket": capacity_bucket,

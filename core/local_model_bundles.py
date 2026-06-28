@@ -398,14 +398,9 @@ def bundle_spec(bundle_id: str) -> LocalBundleSpec:
 
 
 def local_multi_llm_fit_from_probe(probe: MachineProbe | Mapping[str, Any]) -> str:
-    if isinstance(probe, Mapping):
-        ram_gb = float(probe.get("ram_gb") or 0.0)
-        accelerator = str(probe.get("accelerator") or "").strip().lower()
-        vram_gb = float(probe.get("vram_gb") or 0.0) if probe.get("vram_gb") is not None else 0.0
-    else:
-        ram_gb = float(probe.ram_gb or 0.0)
-        accelerator = str(probe.accelerator or "").strip().lower()
-        vram_gb = float(probe.vram_gb or 0.0) if probe.vram_gb is not None else 0.0
+    ram_gb = _probe_ram_gb(probe)
+    accelerator = _probe_accelerator(probe)
+    vram_gb = _probe_effective_vram_gb(probe)
     if accelerator == "mps":
         if ram_gb >= 48.0:
             return "comfortable"
@@ -420,15 +415,9 @@ def local_multi_llm_fit_from_probe(probe: MachineProbe | Mapping[str, Any]) -> s
 
 
 def capacity_bucket_for_machine(*, probe: MachineProbe | Mapping[str, Any], free_disk_gb: float) -> str:
-    if isinstance(probe, Mapping):
-        ram_gb = float(probe.get("ram_gb") or 0.0)
-        accelerator = str(probe.get("accelerator") or "").strip().lower()
-        raw_vram = probe.get("vram_gb")
-        vram_gb = float(raw_vram or 0.0) if raw_vram is not None else 0.0
-    else:
-        ram_gb = float(probe.ram_gb or 0.0)
-        accelerator = str(probe.accelerator or "").strip().lower()
-        vram_gb = float(probe.vram_gb or 0.0) if probe.vram_gb is not None else 0.0
+    ram_gb = _probe_ram_gb(probe)
+    accelerator = _probe_accelerator(probe)
+    vram_gb = _probe_effective_vram_gb(probe)
     effective_vram = ram_gb if accelerator == "mps" else vram_gb
     free_gb = float(free_disk_gb or 0.0)
     if ram_gb < 16.0 or effective_vram < 6.0 or free_gb < 20.0:
@@ -604,6 +593,22 @@ def _probe_ram_gb(probe: MachineProbe | Mapping[str, Any]) -> float:
     if isinstance(probe, Mapping):
         return float(probe.get("ram_gb") or 0.0)
     return float(probe.ram_gb or 0.0)
+
+
+def _probe_accelerator(probe: MachineProbe | Mapping[str, Any]) -> str:
+    if isinstance(probe, Mapping):
+        return str(probe.get("accelerator") or "").strip().lower()
+    return str(probe.accelerator or "").strip().lower()
+
+
+def _probe_effective_vram_gb(probe: MachineProbe | Mapping[str, Any]) -> float:
+    accelerator = _probe_accelerator(probe)
+    if accelerator not in {"cuda", "directml"}:
+        return 0.0
+    if isinstance(probe, Mapping):
+        raw_vram = probe.get("vram_gb")
+        return float(raw_vram or 0.0) if raw_vram is not None else 0.0
+    return float(probe.vram_gb or 0.0) if probe.vram_gb is not None else 0.0
 
 
 __all__ = [

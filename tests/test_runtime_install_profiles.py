@@ -9,6 +9,7 @@ from core.hardware_tier import MachineProbe, QwenTier
 from core.provider_routing import ProviderCapabilityTruth
 from core.runtime_install_profiles import (
     build_install_profile_truth,
+    default_ollama_models_path,
     format_install_profile_id,
     install_profile_display_choices,
     normalize_install_profile_id,
@@ -20,6 +21,52 @@ def _fake_disk_usage_with_free_gb(free_gb: float) -> mock.Mock:
     fake_usage = mock.Mock()
     fake_usage.free = int(free_gb * 1024**3)
     return fake_usage
+
+
+def test_auto_profile_bundle_sizing_uses_ollama_model_store_disk(monkeypatch, tmp_path) -> None:
+    model_store = (tmp_path / "ollama" / "models").resolve()
+    model_store.mkdir(parents=True)
+    seen_paths: list[Path] = []
+
+    def fake_disk_usage(path: str | Path) -> mock.Mock:
+        seen_paths.append(Path(path).resolve())
+        return _fake_disk_usage_with_free_gb(222.0)
+
+    probe = MachineProbe(
+        cpu_cores=8,
+        ram_gb=8.0,
+        gpu_name=None,
+        vram_gb=None,
+        accelerator="cpu",
+    )
+    tier = QwenTier("lite", "qwen2.5:3b", 3.0, 2.0, 6.0)
+    monkeypatch.setenv("OLLAMA_MODELS", str(model_store))
+    monkeypatch.setattr("core.runtime_install_profiles.shutil.disk_usage", fake_disk_usage)
+
+    profile = build_install_profile_truth(
+        requested_profile="auto-recommended",
+        probe=probe,
+        tier=tier,
+        env={"NULLA_INSTALLED_OLLAMA_MODELS": "[]", "OLLAMA_MODELS": str(model_store)},
+        runtime_home=str(tmp_path / "nulla-runtime"),
+    )
+
+    assert model_store in seen_paths
+    assert profile.capacity_bucket == "A"
+    assert profile.profile_id == "local-only"
+
+
+def test_default_ollama_models_path_skips_missing_windows_override(tmp_path) -> None:
+    model_store = (tmp_path / "Ollama" / "models").resolve()
+    model_store.mkdir(parents=True)
+
+    with mock.patch("core.runtime_install_profiles.platform.system", return_value="Windows"), mock.patch(
+        "core.runtime_install_profiles._windows_ollama_models_env_paths",
+        return_value=(model_store,),
+    ):
+        path = default_ollama_models_path({"OLLAMA_MODELS": "F:\\.ollama\\models"})
+
+    assert path == model_store
 
 
 def test_normalize_install_profile_id_accepts_user_friendly_ollama_aliases() -> None:
