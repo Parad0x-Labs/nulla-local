@@ -86,6 +86,8 @@ def test_install_script_hardens_openclaw_launcher_bootstrap() -> None:
     assert 'say "ERROR: launchd installed NULLA, but the API did not stay healthy long enough to verify /v1/models within 240 seconds."' in script
     assert 'exec "${PROJECT_ROOT}/OpenClaw_NULLA.sh"' in script
     assert 'pull_models "${ollama_exe}" "${install_profile}" "${model_tag}"' in script
+    assert 'pull_models "${ollama_exe}" "${install_profile}" "${model_tag}" "${runtime_home}" "${openclaw_enabled}"' in script
+    assert 'required_model="nomic-embed-text"' in script
 
 
 def test_install_script_launch_agent_enables_supervised_runtime() -> None:
@@ -114,6 +116,10 @@ def test_windows_launchers_use_module_entrypoint_for_api_server() -> None:
     install_bat_script = (PROJECT_ROOT / "installer" / "install_nulla.bat").read_text(encoding="utf-8")
 
     assert '"%VENV_DIR%\\Scripts\\python.exe" -m apps.nulla_api_server' in install_bat_script
+    assert "where openclaw" in install_bat_script
+    assert "gateway run --force --port 18789" in install_bat_script
+    assert "Trying Ollama OpenClaw bootstrap" in install_bat_script
+    assert "OPENCLAW_MEMORY_MODEL=nomic-embed-text" in install_bat_script
 
 
 def test_install_script_surfaces_machine_probe_command() -> None:

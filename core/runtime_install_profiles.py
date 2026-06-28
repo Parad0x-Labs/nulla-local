@@ -1204,7 +1204,10 @@ def _volume_checks(
 
 
 def _disk_free_gb(path: Path) -> float:
-    usage = shutil.disk_usage(path)
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:
+        return 0.0
     return float(usage.free) / (1024.0 ** 3)
 
 

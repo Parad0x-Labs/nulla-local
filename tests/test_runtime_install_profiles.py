@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from pathlib import Path
 from unittest import mock
 
 from core.hardware_tier import MachineProbe, QwenTier
@@ -622,7 +623,10 @@ def test_local_max_budgets_for_secondary_llamacpp_lane_even_when_primary_ollama_
         accelerator="mps",
     )
     tier = QwenTier("mid", "qwen2.5:14b", 14.0, 10.0, 24.0)
-    with mock.patch("core.runtime_install_profiles.shutil.disk_usage", return_value=_fake_disk_usage_with_free_gb(23.0)):
+    with mock.patch("core.runtime_install_profiles.shutil.disk_usage", return_value=_fake_disk_usage_with_free_gb(23.0)), mock.patch(
+        "core.runtime_install_profiles.default_ollama_models_path",
+        return_value=Path("/tmp/.ollama/models").resolve(),
+    ):
         profile = build_install_profile_truth(
             requested_profile="local-max",
             probe=probe,

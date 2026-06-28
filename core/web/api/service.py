@@ -240,6 +240,15 @@ def capability_snapshot_with_runtime(
     return payload
 
 
+def _health_capability_snapshot(
+    runtime: RuntimeServices,
+    capability_snapshot_provider: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    if capability_snapshot_provider is runtime_capability_snapshot:
+        return capability_snapshot_with_runtime(runtime, lambda: {})
+    return capability_snapshot_with_runtime(runtime, capability_snapshot_provider)
+
+
 def _augment_history_from_session_log(
     history: list[dict[str, str]],
     *,
@@ -343,7 +352,6 @@ def dispatch_get(
     capability_snapshot_provider: Callable[[], dict[str, Any]] = runtime_capability_snapshot,
 ) -> ApiResponse:
     normalized_path = path.rstrip("/") or "/"
-    capability_snapshot = capability_snapshot_with_runtime(runtime, capability_snapshot_provider)
 
     if normalized_path in {"/task-rail", "/trace"}:
         return apply_runtime_headers(
@@ -362,14 +370,17 @@ def dispatch_get(
         return apply_runtime_headers(text_response(200, "Ollama is running"), runtime)
 
     if normalized_path == "/api/tags":
+        capability_snapshot = capability_snapshot_with_runtime(runtime, capability_snapshot_provider)
         payload = _ollama_tag_payload(capability_snapshot=capability_snapshot, model_name=model_name, runtime=runtime)
         return apply_runtime_headers(json_response(200, payload), runtime)
 
     if normalized_path == "/v1/models":
+        capability_snapshot = capability_snapshot_with_runtime(runtime, capability_snapshot_provider)
         payload = _openai_models_payload(capability_snapshot=capability_snapshot, model_name=model_name)
         return apply_runtime_headers(json_response(200, payload), runtime)
 
     if normalized_path in {"/healthz", "/v1/healthz"}:
+        capability_snapshot = _health_capability_snapshot(runtime, capability_snapshot_provider)
         payload = {
             "ok": True,
             "agent": runtime.display_name,
@@ -383,6 +394,7 @@ def dispatch_get(
         return apply_runtime_headers(json_response(200, dict(runtime.runtime_version_stamp or {})), runtime)
 
     if normalized_path in {"/api/runtime/capabilities", "/v1/runtime/capabilities"}:
+        capability_snapshot = capability_snapshot_with_runtime(runtime, capability_snapshot_provider)
         return apply_runtime_headers(json_response(200, capability_snapshot), runtime)
 
     if normalized_path == "/api/runtime/sessions":

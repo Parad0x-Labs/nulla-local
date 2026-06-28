@@ -3,6 +3,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from tests.platform_helpers import bash_script_args
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -19,14 +21,13 @@ def _render_openclaw_launcher(tmp_path: Path) -> str:
         encoding="utf-8",
     )
     subprocess.run(
-        [
-            "bash",
-            str(harness),
+        bash_script_args(
+            harness,
             str(output),
             "/tmp/nulla-runtime-home",
             "qwen2.5:14b",
             "/tmp/.openclaw-default",
-        ],
+        ),
         check=True,
         cwd=PROJECT_ROOT,
     )

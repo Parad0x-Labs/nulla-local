@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -509,6 +510,13 @@ class RuntimeExecutionToolsTests(unittest.TestCase):
         self.assertEqual(
             _trusted_local_network_mode(
                 "python3 -m compileall -q generated/telegram-bot/src",
+                arguments={"_trusted_local_only": True},
+            ),
+            "heuristic_only",
+        )
+        self.assertEqual(
+            _trusted_local_network_mode(
+                f"{sys.executable!r} -m pytest -q tests",
                 arguments={"_trusted_local_only": True},
             ),
             "heuristic_only",

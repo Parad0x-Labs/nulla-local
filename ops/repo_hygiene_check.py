@@ -45,7 +45,7 @@ def _license_placeholder_hints() -> list[str]:
         except Exception:
             continue
         if "placeholder" in body or "replace this file" in body:
-            hints.append(str(path.relative_to(PROJECT_ROOT)))
+            hints.append(path.relative_to(PROJECT_ROOT).as_posix())
     return hints
 
 
@@ -58,7 +58,7 @@ def _repo_key_artifacts() -> list[str]:
             relative = path.relative_to(PROJECT_ROOT)
             if any(relative == root or root in relative.parents for root in _IGNORED_KEY_ARTIFACT_ROOTS):
                 continue
-            matches.append(str(relative))
+            matches.append(relative.as_posix())
     return sorted(matches)
 
 
@@ -68,7 +68,7 @@ def _legacy_root_clutter() -> list[str]:
         if (PROJECT_ROOT / name).exists():
             issues.append(name)
     for path in sorted(PROJECT_ROOT.glob("test_*.py")):
-        issues.append(str(path.relative_to(PROJECT_ROOT)))
+        issues.append(path.relative_to(PROJECT_ROOT).as_posix())
     return issues
 
 

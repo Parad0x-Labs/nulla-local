@@ -314,6 +314,10 @@ echo Step 7/14: Creating launchers...
   echo @echo off
   echo set "NULLA_HOME=%NULLA_HOME%"
   echo set "NULLA_INSTALL_PROFILE=%INSTALL_PROFILE%"
+  echo if "%%NULLA_OLLAMA_MODEL%%"=="" set "NULLA_OLLAMA_MODEL=%MODEL_TAG%"
+  echo if "%%OLLAMA_MODELS%%"=="" if exist "%%~d0\Ollama\models" set "OLLAMA_MODELS=%%~d0\Ollama\models"
+  echo if not "%%OLLAMA_MODELS%%"=="" if not exist "%%OLLAMA_MODELS%%" if exist "%%~d0\Ollama\models" set "OLLAMA_MODELS=%%~d0\Ollama\models"
+  echo if "%%OLLAMA_API_KEY%%"=="" set "OLLAMA_API_KEY=ollama-local"
   echo set "PLAYWRIGHT_ENABLED=1"
   echo set "ALLOW_BROWSER_FALLBACK=1"
   echo set "BROWSER_ENGINE=%DEFAULT_BROWSER_ENGINE%"
@@ -332,6 +336,10 @@ echo Step 7/14: Creating launchers...
   echo @echo off
   echo set "NULLA_HOME=%NULLA_HOME%"
   echo set "NULLA_INSTALL_PROFILE=%INSTALL_PROFILE%"
+  echo if "%%NULLA_OLLAMA_MODEL%%"=="" set "NULLA_OLLAMA_MODEL=%MODEL_TAG%"
+  echo if "%%OLLAMA_MODELS%%"=="" if exist "%%~d0\Ollama\models" set "OLLAMA_MODELS=%%~d0\Ollama\models"
+  echo if not "%%OLLAMA_MODELS%%"=="" if not exist "%%OLLAMA_MODELS%%" if exist "%%~d0\Ollama\models" set "OLLAMA_MODELS=%%~d0\Ollama\models"
+  echo if "%%OLLAMA_API_KEY%%"=="" set "OLLAMA_API_KEY=ollama-local"
   echo set "PLAYWRIGHT_ENABLED=1"
   echo set "ALLOW_BROWSER_FALLBACK=1"
   echo set "BROWSER_ENGINE=%DEFAULT_BROWSER_ENGINE%"
@@ -349,6 +357,10 @@ echo Step 7/14: Creating launchers...
   echo set "NULLA_HOME=%NULLA_HOME%"
   echo set "NULLA_INSTALL_PROFILE=%INSTALL_PROFILE%"
   echo set "MODEL_TAG=%MODEL_TAG%"
+  echo if "%%NULLA_OLLAMA_MODEL%%"=="" set "NULLA_OLLAMA_MODEL=%%MODEL_TAG%%"
+  echo if "%%OLLAMA_MODELS%%"=="" if exist "%%~d0\Ollama\models" set "OLLAMA_MODELS=%%~d0\Ollama\models"
+  echo if not "%%OLLAMA_MODELS%%"=="" if not exist "%%OLLAMA_MODELS%%" if exist "%%~d0\Ollama\models" set "OLLAMA_MODELS=%%~d0\Ollama\models"
+  echo if "%%OLLAMA_API_KEY%%"=="" set "OLLAMA_API_KEY=ollama-local"
   echo set "PLAYWRIGHT_ENABLED=1"
   echo set "ALLOW_BROWSER_FALLBACK=1"
   echo set "BROWSER_ENGINE=%DEFAULT_BROWSER_ENGINE%"
@@ -376,8 +388,23 @@ echo Step 7/14: Creating launchers...
   echo.
   echo powershell -NoProfile -Command "try { $null = Invoke-WebRequest -Uri 'http://127.0.0.1:18789' -UseBasicParsing -TimeoutSec 2; exit 0 } catch { exit 1 }" ^>nul 2^>^&1
   echo if %%errorlevel%% neq 0 ^(
+  echo   set "OPENCLAW_CMD="
+  echo   for /f "tokens=*" %%%%C in ^('where openclaw 2^^^>nul'^) do if "^^!OPENCLAW_CMD^^!"=="" set "OPENCLAW_CMD=%%%%C"
+  echo   if not "^^!OPENCLAW_CMD^^!"=="" ^(
+  echo     start "" /B "^^!OPENCLAW_CMD^^!" gateway run --force --port 18789
+  echo     for /L %%%%j in ^(1,1,30^) do ^(
+  echo       timeout /t 1 /nobreak ^>nul
+  echo       powershell -NoProfile -Command "try { $null = Invoke-WebRequest -Uri 'http://127.0.0.1:18789' -UseBasicParsing -TimeoutSec 2; exit 0 } catch { exit 1 }" ^>nul 2^>^&1
+  echo       if ^^!errorlevel^^! equ 0 goto open_openclaw
+  echo     ^)
+  echo   ^)
+  echo ^)
+  echo.
+  echo powershell -NoProfile -Command "try { $null = Invoke-WebRequest -Uri 'http://127.0.0.1:18789' -UseBasicParsing -TimeoutSec 2; exit 0 } catch { exit 1 }" ^>nul 2^>^&1
+  echo if %%errorlevel%% neq 0 ^(
   echo   set "OLLAMA_EXE="
   echo   where ollama ^>nul 2^>^&1 ^&^& set "OLLAMA_EXE=ollama"
+  echo   if "^^!OLLAMA_EXE^^!"=="" if exist "%%~d0\Ollama\ollama.exe" set "OLLAMA_EXE=%%~d0\Ollama\ollama.exe"
   echo   if "^^!OLLAMA_EXE^^!"=="" if exist "%%LOCALAPPDATA%%\Programs\Ollama\ollama.exe" set "OLLAMA_EXE=%%LOCALAPPDATA%%\Programs\Ollama\ollama.exe"
   echo   if "^^!OLLAMA_EXE^^!"=="" if exist "%%SystemDrive%%\Ollama\ollama.exe" set "OLLAMA_EXE=%%SystemDrive%%\Ollama\ollama.exe"
   echo   if not "^^!OLLAMA_EXE^^!"=="" ^(
@@ -500,10 +527,14 @@ if %errorlevel% neq 0 (
 )
 
 if "%OPENCLAW_ENABLED%"=="1" (
-  echo Step 11/14: Configuring OpenClaw through Ollama...
-  "%OLLAMA_EXE%" launch openclaw --yes --config --model "%MODEL_TAG%" >nul 2>&1
+  echo Step 11/14: Configuring OpenClaw for NULLA...
+  where openclaw >nul 2>&1
   if %errorlevel% neq 0 (
-    echo WARNING: OpenClaw auto-config via Ollama failed. Reapplying NULLA registration directly.
+    echo OpenClaw CLI not found on PATH. Trying Ollama OpenClaw bootstrap...
+    "%OLLAMA_EXE%" launch openclaw --yes --config --model "%MODEL_TAG%" >nul 2>&1
+    if %errorlevel% neq 0 (
+      echo WARNING: OpenClaw auto-config via Ollama failed. NULLA registration will still be written locally.
+    )
   )
   "%VENV_DIR%\Scripts\python.exe" "%SCRIPT_DIR%register_openclaw_agent.py" "%PROJECT_ROOT%" "%NULLA_HOME%" "%MODEL_TAG%" "%AGENT_NAME%" >nul 2>&1
 )
@@ -522,6 +553,22 @@ if %errorlevel% neq 0 (
   )
 ) else (
   echo Model %MODEL_TAG% already available.
+)
+
+if "%OPENCLAW_ENABLED%"=="1" (
+  set "OPENCLAW_MEMORY_MODEL=nomic-embed-text"
+  "%OLLAMA_EXE%" list 2>nul | findstr /i "!OPENCLAW_MEMORY_MODEL!" >nul 2>&1
+  if !errorlevel! neq 0 (
+    echo Downloading OpenClaw memory embedding model !OPENCLAW_MEMORY_MODEL! to %OLLAMA_MODELS_DIR%...
+    "%OLLAMA_EXE%" pull !OPENCLAW_MEMORY_MODEL!
+    if !errorlevel! neq 0 (
+      echo WARNING: OpenClaw memory embedding model pull failed. You can run this manually later:
+      echo   set OLLAMA_MODELS=%OLLAMA_MODELS_DIR%
+      echo   "%OLLAMA_EXE%" pull !OPENCLAW_MEMORY_MODEL!
+    )
+  ) else (
+    echo OpenClaw memory embedding model !OPENCLAW_MEMORY_MODEL! already available.
+  )
 )
 
 :skip_ollama_model

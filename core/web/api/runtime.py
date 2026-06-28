@@ -266,6 +266,7 @@ def ensure_default_provider(
 def log_prewarm_results(
     registry: ModelRegistry,
     *,
+    model_tag: str | None = None,
     runtime_home: str | None = None,
     requested_profile: str | None = None,
 ) -> None:
@@ -275,6 +276,7 @@ def log_prewarm_results(
     try:
         snapshot = build_provider_registry_snapshot(
             registry,
+            model_tag=model_tag,
             runtime_home=runtime_home,
             requested_profile=requested_profile,
             honor_install_profile=bool(requested_profile or runtime_home),
@@ -326,6 +328,7 @@ def log_prewarm_results(
 def startup_provider_capability_truth(
     registry: ModelRegistry,
     *,
+    model_tag: str | None = None,
     runtime_home: str | None = None,
     requested_profile: str | None = None,
     env: dict[str, str] | None = None,
@@ -333,6 +336,7 @@ def startup_provider_capability_truth(
     try:
         snapshot = build_provider_registry_snapshot(
             registry,
+            model_tag=model_tag,
             runtime_home=runtime_home,
             requested_profile=requested_profile,
             honor_install_profile=bool(requested_profile or runtime_home),
@@ -464,6 +468,7 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
         logger.warning("Model warning: %s", warning)
     log_prewarm_results(
         model_registry,
+        model_tag=runtime_model_tag,
         runtime_home=runtime_home,
         requested_profile=requested_profile,
     )
@@ -515,6 +520,7 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
         public_hive_auth=auth_snapshot,
         provider_capability_truth=startup_provider_capability_truth(
             model_registry,
+            model_tag=runtime_model_tag,
             runtime_home=runtime_home,
             requested_profile=requested_profile,
             env=provider_env,

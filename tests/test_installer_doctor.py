@@ -21,7 +21,9 @@ def test_install_receipt_exposes_doctor_report_path() -> None:
         ollama_binary="/tmp/ollama",
     )
 
-    assert receipt["doctor_report_path"].endswith("/nulla/install_doctor.json")
+    doctor_report_path = Path(receipt["doctor_report_path"])
+    assert doctor_report_path.name == "install_doctor.json"
+    assert doctor_report_path.parent.name == "nulla"
     assert receipt["install_profile"]["schema"] == "nulla.install_profile.v1"
 
 

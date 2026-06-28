@@ -151,19 +151,27 @@ def candidate_cleanup_roots(
         if is_temp_cleanup_path_fn(target):
             roots.insert(0, target)
 
-    deduped: list[Path] = []
+    deduped: list[tuple[Path, Path]] = []
     seen: set[str] = set()
     for root in roots:
-        key = str(root.resolve()) if root.exists() else str(root)
+        resolved = root.resolve() if root.exists() else root
+        key = str(resolved)
         if key in seen:
             continue
         if not root.exists() or not root.is_dir():
             continue
         if not is_temp_cleanup_path_fn(root):
             continue
+        if any(existing_resolved.is_relative_to(resolved) for _existing_root, existing_resolved in deduped):
+            continue
+        deduped = [
+            (existing_root, existing_resolved)
+            for existing_root, existing_resolved in deduped
+            if not resolved.is_relative_to(existing_resolved)
+        ]
         seen.add(key)
-        deduped.append(root)
-    return deduped[:6]
+        deduped.append((root, resolved))
+    return [root for root, _resolved in deduped[:6]]
 
 
 def is_temp_cleanup_path(

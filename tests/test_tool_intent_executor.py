@@ -618,6 +618,21 @@ class ToolIntentExecutorTests(unittest.TestCase):
         self.assertEqual(second.next_payload["arguments"]["path"], "artifacts/planner-desktop-path/nulla_test_01.txt")
         self.assertEqual(second.next_payload["arguments"]["content"], "ALPHA-LOCAL-FILE-01")
 
+    def test_workflow_planner_routes_named_file_create_in_workspace_root_path(self) -> None:
+        workspace = Path.cwd().resolve()
+        first = plan_tool_workflow(
+            user_text=f"Create a file named nulla_test_01.txt in {workspace} with exactly this content: ALPHA-LOCAL-FILE-01",
+            task_class="unknown",
+            executed_steps=[],
+            source_context={"surface": "api", "platform": "api", "workspace": str(workspace)},
+        )
+
+        self.assertTrue(first.handled)
+        self.assertEqual(first.reason, "planned_workspace_write_file")
+        self.assertEqual(first.next_payload["intent"], "workspace.write_file")
+        self.assertEqual(first.next_payload["arguments"]["path"], "nulla_test_01.txt")
+        self.assertEqual(first.next_payload["arguments"]["content"], "ALPHA-LOCAL-FILE-01")
+
     def test_workflow_planner_routes_explicit_file_create_to_workspace_write(self) -> None:
         first = plan_tool_workflow(
             user_text="Create a file named nulla_test_01.txt in the current workspace with exactly this content: ALPHA-LOCAL-FILE-01",

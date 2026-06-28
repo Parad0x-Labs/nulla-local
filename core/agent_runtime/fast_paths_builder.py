@@ -187,6 +187,10 @@ def extract_requested_builder_root(query_text: str) -> str:
         "files",
     }
     patterns = (
+        re.compile(
+            r"\b(?:in|under|inside)\s+[`\"']?(?P<path>[A-Za-z]:[^\r\n]+?)(?=\s+(?:create|make|write|add|put|place|save|read|list|with)\b|$)",
+            re.IGNORECASE,
+        ),
         re.compile(r"\bnam(?:e|ed)\s+it\s+[`\"']?(?P<path>[A-Za-z0-9_./-]+(?:/[A-Za-z0-9_./-]+)*)", re.IGNORECASE),
         re.compile(r"\b(?:folder|directory|dir|path)\s+(?:called|named)\s+[`\"']?(?P<path>[A-Za-z0-9_./-]+)", re.IGNORECASE),
         re.compile(r"\b(?:called|named)\s+[`\"']?(?P<path>[A-Za-z0-9_][A-Za-z0-9_./-]*(?:/[A-Za-z0-9_./-]+)*)", re.IGNORECASE),

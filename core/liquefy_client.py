@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -176,8 +177,9 @@ class LiquefyClientV1:
         return ""
 
     def _run_json(self, argv: list[str], *, accept_exit_codes: set[int]) -> dict[str, Any]:
+        run_argv = self._execution_argv(argv)
         try:
-            result = subprocess.run(argv, capture_output=True, text=True, env=self._env)
+            result = subprocess.run(run_argv, capture_output=True, text=True, env=self._env)
         except FileNotFoundError:
             return {"ok": False, "exit_code": 127, "error": f"Missing Liquefy executable: {argv[0]}", "payload": {}}
         stdout = str(result.stdout or "").strip()
@@ -197,6 +199,25 @@ class LiquefyClientV1:
         if not ok:
             error = stderr or stdout or f"Liquefy command failed with exit code {int(result.returncode)}."
         return {"ok": ok, "exit_code": int(result.returncode), "error": error, "payload": payload}
+
+    def _execution_argv(self, argv: list[str]) -> list[str]:
+        if os.name != "nt" or not argv:
+            return argv
+        executable = Path(str(argv[0] or ""))
+        if executable.suffix.lower() in {".exe", ".bat", ".cmd", ".com"}:
+            return argv
+        if not executable.exists() or not executable.is_file():
+            return argv
+        try:
+            first_line = executable.read_text(encoding="utf-8", errors="ignore").splitlines()[:1]
+        except OSError:
+            first_line = []
+        looks_like_python = executable.suffix.lower() in {".py", ".pyw"} or (
+            bool(first_line) and "python" in first_line[0].lower()
+        )
+        if looks_like_python:
+            return [sys.executable, *argv]
+        return argv
 
     def _stage_bundle_input(self, input_dir: Path, metadata: dict[str, Any]):
         if not metadata:

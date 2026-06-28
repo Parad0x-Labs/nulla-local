@@ -226,7 +226,7 @@ class JobRunner:
         # isolation, so bwrap is the preferred backend when present.
         cmd: list[str] = [bwrap, "--unshare-net", "--ro-bind", "/", "/", "--tmpfs", "/tmp"]
         for root in allowed_roots:
-            resolved = str(Path(root).resolve())
+            resolved = str(root.resolve() if isinstance(root, Path) else Path(root).resolve())
             cmd += ["--bind", resolved, resolved]
         cmd += ["--", *list(argv)]
         return cmd

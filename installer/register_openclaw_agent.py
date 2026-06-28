@@ -18,6 +18,13 @@ from core.openclaw_locator import OpenClawPaths, discover_openclaw_paths
 NULLA_AGENT_ID = "nulla"
 NULLA_PROVIDER_ID = "nulla"
 NULLA_MODEL_ID = "nulla"
+OPENCLAW_MEMORY_EMBEDDING_MODEL = "nomic-embed-text"
+OPENCLAW_MEMORY_README = """# NULLA Local Memory
+
+Workspace memory notes for OpenClaw live here.
+
+Keep secrets, private keys, API tokens, and machine-local credentials out of this directory.
+"""
 
 
 def _nulla_api_url() -> str:
@@ -132,6 +139,7 @@ def _base_openclaw_config(default_workspace: str) -> dict[str, Any]:
                 "subagents": {
                     "maxConcurrent": 8,
                 },
+                "memorySearch": _build_ollama_memory_search_config(),
             },
             "list": [],
         },
@@ -171,6 +179,13 @@ def _base_openclaw_config(default_workspace: str) -> dict[str, Any]:
                 "ollama": _build_ollama_provider(_detect_best_model()),
             }
         },
+        "tools": {
+            "web": {
+                "search": {
+                    "enabled": False,
+                },
+            },
+        },
     }
 
 
@@ -191,6 +206,7 @@ def _ensure_config_defaults(cfg: dict[str, Any], *, paths: OpenClawPaths) -> dic
     agent_defaults.setdefault("compaction", {"mode": "safeguard"})
     agent_defaults.setdefault("maxConcurrent", 4)
     agent_defaults.setdefault("subagents", {"maxConcurrent": 8})
+    _ensure_ollama_memory_search_config(cfg)
     if not isinstance(agents.get("list"), list):
         agents["list"] = []
 
@@ -223,6 +239,8 @@ def _ensure_config_defaults(cfg: dict[str, Any], *, paths: OpenClawPaths) -> dic
     models = cfg.setdefault("models", {})
     models.setdefault("providers", {})
     _ensure_ollama_provider(cfg, _detect_best_model())
+    _ensure_local_only_tools_config(cfg)
+    _remove_stale_ollama_plugin_config(cfg)
 
     cfg.setdefault("auth", {"profiles": {}})
     return cfg
@@ -389,6 +407,53 @@ def _ensure_ollama_provider(cfg: dict[str, Any], model_tag: str) -> None:
     current = providers.get("ollama")
     if current is None or _provider_looks_like_broken_ollama_alias(current):
         providers["ollama"] = _build_ollama_provider(model_tag)
+
+
+def _build_ollama_memory_search_config() -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "provider": "ollama",
+        "model": OPENCLAW_MEMORY_EMBEDDING_MODEL,
+        "fallback": "none",
+        "remote": {
+            "baseUrl": _ollama_api_url(),
+            "apiKey": "ollama-local",
+        },
+    }
+
+
+def _ensure_ollama_memory_search_config(cfg: dict[str, Any]) -> None:
+    agents = cfg.setdefault("agents", {})
+    defaults = agents.setdefault("defaults", {})
+    memory_search = defaults.setdefault("memorySearch", {})
+    if not isinstance(memory_search, dict):
+        memory_search = {}
+        defaults["memorySearch"] = memory_search
+    memory_search.update(_build_ollama_memory_search_config())
+
+
+def _ensure_local_only_tools_config(cfg: dict[str, Any]) -> None:
+    tools = cfg.setdefault("tools", {})
+    web = tools.setdefault("web", {})
+    search = web.setdefault("search", {})
+    if not isinstance(search, dict):
+        search = {}
+        web["search"] = search
+    search["enabled"] = False
+    search.pop("provider", None)
+
+
+def _remove_stale_ollama_plugin_config(cfg: dict[str, Any]) -> None:
+    plugins = cfg.get("plugins")
+    if not isinstance(plugins, dict):
+        return
+    entries = plugins.get("entries")
+    if isinstance(entries, dict):
+        entries.pop("ollama", None)
+        if not entries:
+            plugins.pop("entries", None)
+    if not plugins:
+        cfg.pop("plugins", None)
 
 
 def _apply_gateway_bind_overrides(cfg: dict[str, Any]) -> None:
@@ -562,6 +627,20 @@ def _write_compat_bridge(
     _create_models_json(bridge_agent_dir, model_tag)
 
 
+def _ensure_workspace_memory_seed(project_root: str) -> None:
+    root = str(project_root or "").strip()
+    if not root:
+        return
+    try:
+        memory_dir = Path(root) / "memory"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        readme = memory_dir / "README.md"
+        if not readme.exists():
+            readme.write_text(OPENCLAW_MEMORY_README, encoding="utf-8")
+    except OSError:
+        return
+
+
 def _backup_existing_config(config_path: Path) -> None:
     if not config_path.is_file():
         return
@@ -651,6 +730,7 @@ def register(
         display_name=normalized_display_name,
         paths=paths,
     )
+    _ensure_workspace_memory_seed(project_root)
     print(f"Agent directory created at {_openclaw_agent_dir(paths)}")
     return True
 

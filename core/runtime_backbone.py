@@ -79,6 +79,7 @@ class RuntimeBackbone:
 def build_provider_registry_snapshot(
     registry: ModelRegistry | None = None,
     *,
+    model_tag: str | None = None,
     runtime_home: str | None = None,
     requested_profile: str | None = None,
     honor_install_profile: bool = False,
@@ -95,6 +96,7 @@ def build_provider_registry_snapshot(
         )
     ensure_default_runtime_providers(
         active_registry,
+        model_tag=model_tag,
         env=env_map,
         install_profile=install_profile,
         runtime_home=runtime_home,
@@ -118,6 +120,7 @@ def build_provider_registry_snapshot(
         visible_provider_ids = _visible_provider_ids_for_install_profile(
             capability_truth=capability_truth,
             requested_profile=install_profile or None,
+            selected_model=model_tag,
             runtime_home=runtime_home,
             env=env_map,
         )
@@ -198,6 +201,7 @@ def _visible_provider_ids_for_install_profile(
     *,
     capability_truth: tuple[ProviderCapabilityTruth, ...],
     requested_profile: str | None,
+    selected_model: str | None = None,
     runtime_home: str | None,
     env: dict[str, str],
 ) -> tuple[str, ...]:
@@ -205,6 +209,7 @@ def _visible_provider_ids_for_install_profile(
         return tuple()
     install_profile = build_install_profile_truth(
         requested_profile=requested_profile,
+        selected_model=selected_model,
         provider_capability_truth=capability_truth,
         runtime_home=runtime_home,
         env=env,

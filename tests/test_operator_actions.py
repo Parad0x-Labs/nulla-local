@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,6 +30,7 @@ from core.operator import (
 from core.operator import (
     parse_operator_action_intent as extracted_parse_operator_action_intent,
 )
+from core.operator import storage as operator_storage
 from core.persistent_memory import maybe_handle_memory_command
 from core.runtime_paths import data_path
 from core.user_preferences import maybe_handle_preference_command
@@ -121,6 +123,22 @@ class OperatorActionTests(unittest.TestCase):
                 "Create a folder named alpha inside /tmp/openclaw_workspace_truth_live."
             )
         )
+
+    def test_candidate_cleanup_roots_keeps_nested_target_over_parent_temp_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            target = temp_root / "nested"
+            target.mkdir()
+
+            roots = operator_storage.candidate_cleanup_roots(
+                str(target),
+                env={"TEMP": str(temp_root), "TMP": str(temp_root)},
+                gettempdir_fn=lambda: str(temp_root),
+                is_temp_cleanup_path_fn=lambda _path: True,
+                expandvars_fn=lambda value: value,
+            )
+
+        self.assertEqual([str(target.resolve())], [str(root.resolve()) for root in roots])
 
     def test_cleanup_temp_files_executes_and_promotes_learning_shard(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
@@ -246,9 +264,15 @@ class OperatorActionTests(unittest.TestCase):
     def test_inspect_processes_reports_top_rows(self) -> None:
         agent = NullaAgent(backend_name="test-backend", device="openclaw-test", persona_id="default")
         agent.start()
+        stdout = (
+            '"python.exe","10","Console","1","1,024 K"\n'
+            '"chrome.exe","99","Console","1","2,048 K"\n'
+            if os.name == "nt"
+            else "  10 15.0  2.5 python\n  99  4.0 10.0 chrome\n"
+        )
         fake_completed = mock.Mock(
             returncode=0,
-            stdout="  10 15.0  2.5 python\n  99  4.0 10.0 chrome\n",
+            stdout=stdout,
         )
         with mock.patch("core.local_operator_actions.subprocess.run", return_value=fake_completed):
             result = agent.run_once(

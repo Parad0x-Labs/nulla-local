@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +19,10 @@ def test_build_llamacpp_local_config_uses_runtime_home_defaults(tmp_path: Path) 
     assert config.model_id == "qwen2.5:14b-gguf"
     assert config.repo_id == "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF"
     assert config.filename == "qwen2.5-coder-14b-instruct-q4_k_m.gguf"
-    assert config.model_path.endswith("/models/llamacpp/qwen2.5-coder-14b-instruct-q4_k_m.gguf")
+    model_path = Path(config.model_path)
+    assert model_path.name == "qwen2.5-coder-14b-instruct-q4_k_m.gguf"
+    assert model_path.parent.name == "llamacpp"
+    assert model_path.parent.parent.name == "models"
     assert config.base_url == "http://127.0.0.1:8090/v1"
     assert config.port == 8090
     assert config.cache is True
@@ -42,7 +46,7 @@ def test_write_llamacpp_local_config_persists_json(tmp_path: Path) -> None:
 def test_provision_llamacpp_local_script_emits_shell_env(tmp_path: Path) -> None:
     completed = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(PROJECT_ROOT / "installer" / "provision_llamacpp_local.py"),
             "--runtime-home",
             str(tmp_path),

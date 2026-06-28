@@ -138,7 +138,7 @@ def _launch_agent_status(launch_agent_path: str) -> dict[str, Any]:
     if sys.platform != "darwin":
         return _status(True, "launch agent file present", path=str(candidate), loaded=None, running=None)
 
-    uid = os.getuid()
+    uid = getattr(os, "getuid", lambda: 0)()
     label = candidate.stem
     try:
         result = subprocess.run(

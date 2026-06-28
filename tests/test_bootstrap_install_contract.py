@@ -4,6 +4,8 @@ import subprocess
 import tarfile
 from pathlib import Path
 
+from tests.platform_helpers import bash_path, bash_script_args
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -50,7 +52,7 @@ def test_shell_bootstrap_handles_flat_git_archive_without_stripping_root_files(t
     (source_root / "Install_And_Run_NULLA.sh").write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        f'printf "%s\\n" "$@" > "{marker_path}"\n',
+        f'printf "%s\\n" "$@" > "{bash_path(marker_path)}"\n',
         encoding="utf-8",
     )
     (source_root / "Install_And_Run_NULLA.sh").chmod(0o755)
@@ -69,14 +71,13 @@ def test_shell_bootstrap_handles_flat_git_archive_without_stripping_root_files(t
         tar.add(installer_dir, arcname="installer")
 
     subprocess.run(
-        [
-            "bash",
-            str(PROJECT_ROOT / "installer" / "bootstrap_nulla.sh"),
+        bash_script_args(
+            PROJECT_ROOT / "installer" / "bootstrap_nulla.sh",
             "--archive-url",
             archive_path.resolve().as_uri(),
             "--dir",
             str(install_dir),
-        ],
+        ),
         check=True,
         cwd=PROJECT_ROOT,
     )
@@ -116,7 +117,7 @@ def test_shell_bootstrap_executes_launcher_without_profile_override(tmp_path: Pa
     (archive_root / "Install_And_Run_NULLA.sh").write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        f'printf "%s\\n" "$@" > "{marker_path}"\n',
+        f'printf "%s\\n" "$@" > "{bash_path(marker_path)}"\n',
         encoding="utf-8",
     )
     (archive_root / "Install_And_Run_NULLA.sh").chmod(0o755)
@@ -125,14 +126,13 @@ def test_shell_bootstrap_executes_launcher_without_profile_override(tmp_path: Pa
         tar.add(archive_root, arcname=archive_root.name)
 
     subprocess.run(
-        [
-            "bash",
-            str(PROJECT_ROOT / "installer" / "bootstrap_nulla.sh"),
+        bash_script_args(
+            PROJECT_ROOT / "installer" / "bootstrap_nulla.sh",
             "--archive-url",
             archive_path.resolve().as_uri(),
             "--dir",
             str(install_dir),
-        ],
+        ),
         check=True,
         cwd=PROJECT_ROOT,
     )
@@ -157,7 +157,7 @@ def test_shell_bootstrap_records_explicit_source_commit_for_custom_archive(tmp_p
     (archive_root / "Install_And_Run_NULLA.sh").write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        f'printf "%s\\n" "$@" > "{marker_path}"\n',
+        f'printf "%s\\n" "$@" > "{bash_path(marker_path)}"\n',
         encoding="utf-8",
     )
     (archive_root / "Install_And_Run_NULLA.sh").chmod(0o755)
@@ -166,9 +166,8 @@ def test_shell_bootstrap_records_explicit_source_commit_for_custom_archive(tmp_p
         tar.add(archive_root, arcname=archive_root.name)
 
     subprocess.run(
-        [
-            "bash",
-            str(PROJECT_ROOT / "installer" / "bootstrap_nulla.sh"),
+        bash_script_args(
+            PROJECT_ROOT / "installer" / "bootstrap_nulla.sh",
             "--ref",
             "codex/honest-ollama-prewarm-bootstrap",
             "--archive-url",
@@ -179,7 +178,7 @@ def test_shell_bootstrap_records_explicit_source_commit_for_custom_archive(tmp_p
             "true",
             "--dir",
             str(install_dir),
-        ],
+        ),
         check=True,
         cwd=PROJECT_ROOT,
     )

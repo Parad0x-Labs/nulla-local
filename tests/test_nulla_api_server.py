@@ -860,6 +860,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
 
         log_prewarm.assert_called_once_with(
             model_registry,
+            model_tag="qwen3:8b",
             runtime_home=runtime_home,
             requested_profile="local-only",
         )

@@ -11,6 +11,13 @@ from sandbox.network_guard import parse_command
 from sandbox.resource_limits import ExecutionPolicy
 
 
+def _base_command_name(raw: str) -> str:
+    name = Path(str(raw or "")).name.lower()
+    if os.name == "nt" and name.endswith(".exe"):
+        return name[:-4]
+    return name
+
+
 def _network_isolation_mode_from_env() -> str:
     raw = str(os.environ.get("NULLA_SANDBOX_NETWORK_MODE") or "").strip().lower()
     if raw in {"os_enforced", "heuristic_only"}:
@@ -83,7 +90,7 @@ class SandboxRunner:
         argv = parse_command(cmd)
         if not argv:
             return {"error": "Empty command.", "status": "blocked_by_policy"}
-        base_cmd = Path(str(argv[0] or "")).name.lower()
+        base_cmd = _base_command_name(str(argv[0] or ""))
         if base_cmd == "env":
             index = 1
             while index < len(argv):
@@ -91,7 +98,7 @@ class SandboxRunner:
                 if "=" in token and not token.startswith("-"):
                     index += 1
                     continue
-                base_cmd = Path(str(argv[index] or "")).name.lower() if index < len(argv) else "env"
+                base_cmd = _base_command_name(str(argv[index] or "")) if index < len(argv) else "env"
                 break
         if base_cmd in self.ALLOWED_COMMANDS:
             allowed = True

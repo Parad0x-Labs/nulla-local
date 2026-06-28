@@ -37,9 +37,9 @@ def resolve_workspace_path(raw_path: str | None, *, workspace_root: Path) -> Pat
 
 def relative_path(path: Path, *, workspace_root: Path) -> str:
     try:
-        return str(path.relative_to(workspace_root)) or "."
+        return path.relative_to(workspace_root).as_posix() or "."
     except Exception:
-        return str(path)
+        return path.as_posix()
 
 
 def is_probably_text(path: Path) -> bool:

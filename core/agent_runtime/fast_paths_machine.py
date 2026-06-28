@@ -472,11 +472,11 @@ def _extract_machine_file_read_target(raw: str) -> dict[str, Any] | None:
         )
     ):
         return None
-    quoted_match = re.search(r"[`\"'](?P<path>(?:~|/)[^`\"']+)[`\"']", text)
+    quoted_match = re.search(r"[`\"'](?P<path>(?:~|/|[A-Za-z]:[\\/])[^`\"']+)[`\"']", text)
     if quoted_match:
         path = str(quoted_match.group("path") or "").strip()
     else:
-        plain_match = re.search(r"(?P<path>(?:~|/)[^\s`\"']+\.[A-Za-z0-9_+-]+)", text)
+        plain_match = re.search(r"(?P<path>(?:(?:~|/)[^\s`\"']+|[A-Za-z]:[\\/][^\s`\"']+)\.[A-Za-z0-9_+-]+)", text)
         if not plain_match:
             return None
         path = str(plain_match.group("path") or "").strip()

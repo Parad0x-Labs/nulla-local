@@ -485,7 +485,7 @@ def test_public_hive_bridge_ignores_discovered_region_tokens_for_selected_watch_
     }
 
     def fake_load_json(path: Path) -> dict[str, object]:
-        target = str(path)
+        target = path.as_posix()
         if target.endswith("config/agent-bootstrap.json"):
             return {}
         if target.endswith("do_ip_first_4node/watch-edge-1.json"):

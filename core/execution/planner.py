@@ -54,6 +54,11 @@ from .constants import (
 )
 from .models import WorkflowPlannerDecision
 
+_WINDOWS_PARENT_DIRECTORY_RE = re.compile(
+    r"\b(?:in|under|inside)\s+[`\"']?(?P<path>[A-Za-z]:[^\r\n]+?)(?=\s+(?:create|make|write|add|put|place|save|read|list|with)\b|$)",
+    re.IGNORECASE,
+)
+
 
 def should_attempt_tool_intent(
     user_text: str,
@@ -346,7 +351,7 @@ def _clean_workspace_directory_path(candidate: str, *, workspace_root: str = "")
             if resolved_candidate == resolved_workspace_root:
                 return ""
             if resolved_workspace_root in resolved_candidate.parents:
-                clean = str(resolved_candidate.relative_to(resolved_workspace_root))
+                clean = resolved_candidate.relative_to(resolved_workspace_root).as_posix()
         except Exception:
             clean = ""
     if not clean:
@@ -384,7 +389,7 @@ def _extract_workspace_parent_directory(text: str, *, workspace_root: str = "") 
     raw = str(text or "").strip()
     if not raw:
         return ""
-    match = _INTO_PATH_RE.search(raw)
+    match = _WINDOWS_PARENT_DIRECTORY_RE.search(raw) or _INTO_PATH_RE.search(raw)
     if not match:
         return ""
     return _clean_workspace_directory_path(
@@ -546,7 +551,7 @@ def _clean_workspace_file_path(candidate: str, *, base_dir: str = "", workspace_
             resolved_workspace_root = Path(workspace_root).expanduser().resolve()
             resolved_candidate = Path(raw).expanduser().resolve()
             if resolved_candidate == resolved_workspace_root or resolved_workspace_root in resolved_candidate.parents:
-                clean = str(resolved_candidate.relative_to(resolved_workspace_root))
+                clean = resolved_candidate.relative_to(resolved_workspace_root).as_posix()
         except Exception:
             clean = ""
     if not clean:
