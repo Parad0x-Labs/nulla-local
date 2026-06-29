@@ -24,7 +24,32 @@ This is the current readiness contract for a Windows-first NULLA/OpenClaw fork.
 
 ## Windows PR bar
 
-Before proposing the Windows fork PR, run the full cumulative checks:
+Before proposing the Windows fork PR, run the full cumulative gauntlet on a
+fresh Windows host or VM:
+
+```bat
+Test_NULLA_Windows_Gauntlet.cmd -InstallProfile auto-recommended
+```
+
+For CI or a machine that already has the repo installed, use the non-installing
+mode:
+
+```bat
+Test_NULLA_Windows_Gauntlet.cmd -SkipInstall -SkipBenchmark -Json
+```
+
+The gauntlet writes JSON reports under `dist\windows-gauntlet\` and covers the
+installer, focused Windows regression tests, provider probe, optional live local
+model benchmark, Windows package build, and optional OpenClaw live checks.
+
+To require the OpenClaw live checks on a host that should already have the CLI
+configured:
+
+```bat
+Test_NULLA_Windows_Gauntlet.cmd -RequireOpenClaw
+```
+
+The lower-level checks remain useful for diagnosis:
 
 ```bat
 python -m pytest tests\test_hardware_tier.py tests\test_model_store_planner.py tests\test_provider_probe.py tests\test_install_script_contract.py tests\test_install_surface_contracts.py tests\test_provider_probe_contract.py

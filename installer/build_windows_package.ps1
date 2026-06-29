@@ -38,13 +38,24 @@ function Get-GitOutput {
     }
 }
 
+function Get-GitLines {
+    param([string[]]$Arguments)
+    try {
+        return @(& git -C $ProjectRoot @Arguments 2>$null)
+    }
+    catch {
+        return @()
+    }
+}
+
 function Copy-TrackedFiles {
     New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
-    $files = Get-GitOutput @("ls-files")
-    if ([string]::IsNullOrWhiteSpace($files)) {
+    $files = @(Get-GitLines @("ls-files"))
+    if ($files.Count -eq 0) {
         throw "Cannot build a clean Windows package because git ls-files returned no files."
     }
-    foreach ($relative in ($files -split "`n")) {
+    $copied = 0
+    foreach ($relative in $files) {
         $clean = [string]$relative.Trim()
         if ([string]::IsNullOrWhiteSpace($clean)) {
             continue
@@ -62,6 +73,13 @@ function Copy-TrackedFiles {
             New-Item -ItemType Directory -Path $parent -Force | Out-Null
         }
         Copy-Item -LiteralPath $src -Destination $dest -Force
+        $copied += 1
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $StageDir "Install_And_Run_NULLA.ps1"))) {
+        throw "Staged Windows package is missing Install_And_Run_NULLA.ps1."
+    }
+    if ($copied -lt 50) {
+        throw "Staged Windows package contains only $copied tracked file(s), refusing to create an incomplete package."
     }
 }
 

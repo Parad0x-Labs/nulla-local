@@ -58,6 +58,7 @@ docs/INTERNAL_TAKEOVER*.md
 
 # Personal / operator identity (never publish)
 USER.md
+IDENTITY.md
 MEMORY.md
 SOUL.md
 AGENTS.md

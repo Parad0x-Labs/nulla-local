@@ -198,6 +198,9 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "NULLA_WINDOWS_SIGNING_CERT_THUMBPRINT" in ps_package
     assert "Get-FileHash -Algorithm SHA256" in ps_package
     assert "schema = \"nulla.windows_package.v1\"" in ps_package
+    assert 'Get-GitLines @("ls-files")' in ps_package
+    assert "Staged Windows package is missing Install_And_Run_NULLA.ps1" in ps_package
+    assert "refusing to create an incomplete package" in ps_package
     assert "powershell -ExecutionPolicy Bypass -File .\\Install_And_Run_NULLA.ps1" in install_doc
     assert "installer\\build_windows_package.ps1" in install_doc
     assert "install-profile --set ollama-only" in sh_installer
