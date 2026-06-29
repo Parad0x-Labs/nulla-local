@@ -11,7 +11,7 @@ starlette>=0.37,<1.0
 uvicorn>=0.30,<1.0
 
 # Solana x402 settlement (live devnet/mainnet pay path; the default offline mode needs none of this)
-solders>=0.21
+solders>=0.27.1
 
 # AI / Model backends
 openai>=1.0
