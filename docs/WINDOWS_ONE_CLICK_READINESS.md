@@ -68,3 +68,22 @@ openclaw agents list
 openclaw memory status --deep
 openclaw agent --agent nulla --message "Reply exactly OPENCLAW_NULLA_OK" --json --timeout 240
 ```
+
+## Stack fork handoff
+
+Before copying the Windows branches for fork pushes, run the stack handoff gate
+from this checkout:
+
+```bat
+Test_NULLA_Windows_Stack.cmd
+```
+
+That fast profile validates the Windows entrypoints across the sibling stack
+repos and writes JSON plus command logs under `dist\windows-stack-handoff\`.
+
+For a heavier release pass that reruns the installer/test path for each supported
+repo:
+
+```bat
+Test_NULLA_Windows_Stack.cmd -Profile release
+```
