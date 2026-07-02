@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from core.model_store_planner import DEFAULT_OPENCLAW_MEMORY_MODEL, build_model_store_drive_plan
+
+# The drive planner is Windows-only logic (drive letters, per-volume Ollama stores, setx).
+# These tests mock platform.system()=="Windows", but pathlib cannot emulate Windows drive
+# parsing or "\\" separators on a POSIX runner: PosixPath("D:\\").drive is "" and
+# PosixPath("D:\\") / "Ollama" yields forward slashes. So the assertions are only meaningful
+# on a real Windows host (dev machines + Windows CI), which is exactly where the planner runs.
+pytestmark = pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows-only drive planning; pathlib cannot emulate Windows drive letters on POSIX",
+)
 
 
 def test_model_store_drive_plan_keeps_current_drive_when_it_still_has_enough_room(monkeypatch) -> None:

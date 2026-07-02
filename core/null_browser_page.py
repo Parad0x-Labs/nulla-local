@@ -18,7 +18,7 @@ _PAGE = """\
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>web0.null · NULLA</title>
+<title>web0.null · NULLA .null browser</title>
 <style>
   :root {
     --bg:#0a0a0a; --panel:#111; --panel2:#141414; --border:#222; --accent:#6cf;
