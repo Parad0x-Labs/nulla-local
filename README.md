@@ -23,6 +23,26 @@ local NULLA agent → memory + tools → optional trusted helpers → mesh task 
 
 ---
 
+## ⚡ Install in one command
+
+**Windows** — open **PowerShell**, paste this, done. It installs everything for you — Python if you don't have it, the local AI model, and the chat UI — then opens NULLA in your browser:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1; powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1
+```
+
+**macOS / Linux** — paste this in a terminal (uses your Python 3.10+, or `uv`):
+
+```bash
+curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.sh && bash bootstrap_nulla.sh
+```
+
+No sign-up, no API keys, nothing else to install first. The first run downloads a few GB (the local AI model), so give it a few minutes — then your browser opens to NULLA, ready to chat.
+
+Want to choose a model tier, use the click-through GUI installer, or install from a repo you already cloned? See **[Install options](#install-options)** below.
+
+---
+
 ## What makes NULLA different
 
 ### Tool-use agent loop — not prompt theater
@@ -100,9 +120,13 @@ Parad0x Labs builds Web0 on Solana — money and agents that settle themselves. 
 
 ---
 
-## Install
+## Install options
 
-### Windows (one-click)
+The one-line command at the top of this README is all most people need. This section
+covers the extras: choosing a model tier, the GUI installer, other platforms, and
+installing from a repo you've already cloned.
+
+### Windows (already cloned the repo?)
 
 Double-click **`Install_And_Run_NULLA.bat`** in the repo root. It installs and
 launches everything in one shot — **Python itself if it's missing**, the venv +
