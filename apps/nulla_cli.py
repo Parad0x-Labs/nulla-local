@@ -1530,6 +1530,76 @@ def cmd_wallet_buy_credits(*, usdc: float) -> int:
     return 0
 
 
+def cmd_register(
+    name: str,
+    *,
+    allow_spend: bool = False,
+    max_spend_sol: float = 0.02,
+    mainnet: bool = False,
+    json_mode: bool = False,
+) -> int:
+    """Register a .null name (direct-sign). Preview-only unless --allow-spend AND --mainnet.
+
+    The preview (name validity, availability, exact SOL cost, MAINNET flag) always runs and
+    never signs. A real registration requires both flags, builds the spend gate from these
+    explicit CLI flags (trusted context — never model output), and fires the OS-consent
+    prompt (Windows Hello / CredUI) before signing. 1-3 char names are auction-only and
+    refused here.
+    """
+    from core.null_register_execute import SpendGate, execute_registration, preview_registration
+    from core.null_registrar import validate_registrable_name
+
+    clean = _strip_null_suffix(name)
+    if not clean:
+        print('usage: nulla register <name>.null [--allow-spend --max-spend <sol> --mainnet]')
+        return 2
+
+    ok, reason, _premium = validate_registrable_name(clean)
+    if not ok:
+        if json_mode:
+            _emit_json({"name": clean, "registrable": False, "reason": reason})
+        else:
+            print(reason)
+        return 2
+
+    from core.nulla_wallet import NullaWallet
+
+    candidate = NullaWallet()
+    if not candidate.exists():
+        print("No agent wallet found on this machine — run the installer first.")
+        return 1
+    wallet = candidate.load()
+
+    preview = preview_registration(clean, wallet.pubkey)
+    if json_mode:
+        _emit_json(
+            {
+                "name": clean,
+                "status": preview.status,
+                "message": preview.message,
+                "cost_sol": (preview.plan.total_sol if preview.plan else None),
+            }
+        )
+    else:
+        print(preview.message)
+    if preview.status != "preview":
+        return 1
+
+    if not (allow_spend and mainnet):
+        if not json_mode:
+            print("Dry run. Re-run with --allow-spend --max-spend <sol> --mainnet to register for real.")
+        return 0
+
+    cap_lamports = int(float(max_spend_sol) * 1_000_000_000)
+    gate = SpendGate(allow_spend=True, approve=True, max_spend_lamports=cap_lamports, wallet_present=True)
+    outcome = execute_registration(clean, gate=gate, wallet=wallet)
+    if json_mode:
+        _emit_json({"name": clean, "status": outcome.status, "message": outcome.message, "signature": outcome.signature})
+    else:
+        print(outcome.message)
+    return 0 if outcome.status == "submitted" else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="nulla")
     sub = parser.add_subparsers(dest="command")
@@ -1586,6 +1656,16 @@ def build_parser() -> argparse.ArgumentParser:
     x402pay.add_argument("--memo", default="", metavar="TEXT", help="On-chain memo describing the payment (shown on explorers).")
     x402pay.add_argument("--allow-spend", action="store_true", help="Actually spend. Without it this is a dry run.")
     x402pay.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
+
+    register = sub.add_parser(
+        "register",
+        help="Register a .null name on mainnet (direct-sign). Dry-run preview unless --allow-spend --mainnet.",
+    )
+    register.add_argument("name", help="The .null name to register (4-32 chars; 1-3 char names are auction-only).")
+    register.add_argument("--allow-spend", action="store_true", help="Permit the real registration spend. Without it (or --mainnet) this is a dry-run preview.")
+    register.add_argument("--max-spend", type=float, default=0.02, metavar="SOL", help="Spend cap in SOL (default 0.02; a hard 0.05 ceiling also applies).")
+    register.add_argument("--mainnet", action="store_true", help="Actually register on Solana mainnet (real SOL). Required with --allow-spend for a real registration.")
+    register.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text.")
 
     nullpass = sub.add_parser(
         "nullpass",
@@ -1799,6 +1879,14 @@ def main() -> int:
             asset_mint=str(args.asset or ""),
             memo=str(args.memo or ""),
             allow_spend=bool(args.allow_spend),
+            json_mode=bool(args.json),
+        )
+    if args.command == "register":
+        return cmd_register(
+            str(args.name or ""),
+            allow_spend=bool(args.allow_spend),
+            max_spend_sol=float(args.max_spend),
+            mainnet=bool(args.mainnet),
             json_mode=bool(args.json),
         )
     if args.command == "nullpass":
