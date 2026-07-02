@@ -23,13 +23,17 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.null_registrar import (
+    MAX_NAMES_PER_WALLET,
     NULL_DOMAIN_SIZE,
     OWNER_CAPACITY_SIZE,
     RegisterPlan,
     RegistryConfig,
     build_register_plan,
+    decode_owner_capacity,
     decode_registry_config,
     derive_config_pda,
+    derive_owner_cap_pda,
+    validate_registrable_name,
 )
 from core.null_resolver import NULL_REGISTRAR_MAINNET, derive_domain_pda
 
@@ -138,15 +142,54 @@ def _is_available(name: str, *, program_id: str) -> bool:
         return False
 
 
+def read_owner_name_count(owner_pubkey: str, program_id: str, rpc: Callable[..., Any] | None) -> int | None:
+    """The wallet's lifetime .null name count (for the 3-per-wallet cap). None if unreadable."""
+    cap_pda = derive_owner_cap_pda(owner_pubkey, program_id)
+    if not cap_pda:
+        return None
+    if rpc is None:
+        from core.solana_anchor import _rpc_call as rpc  # type: ignore
+    result = rpc("getAccountInfo", [cap_pda, {"encoding": "base64"}])
+    try:
+        value = (result or {}).get("value")
+    except Exception:
+        return None
+    if not value:
+        return 0  # account absent → wallet has registered nothing yet
+    try:
+        data_field = value.get("data")
+        b64 = data_field[0] if isinstance(data_field, list) else data_field
+        raw = base64.b64decode(b64) if b64 else b""
+    except Exception:
+        return None
+    return decode_owner_capacity(raw)
+
+
 def _plan_with_costs(
     name: str, owner_pubkey: str, program_id: str, rpc: Callable[..., Any] | None
 ) -> tuple[RegisterPlan | None, RegisterOutcome | None]:
-    """Read live config + BOTH rents (domain + owner_cap), guard the fee mode, build the plan.
+    """Validate the name, enforce the per-wallet cap, read live config + BOTH rents, build the plan.
 
-    Returns (plan, None) on success or (None, error_outcome). Quoting the owner_cap rent is
-    conservative (first registration by a wallet creates it); it keeps the cost honest and
-    the cap check safe.
+    Returns (plan, None) on success or (None, error_outcome). These guards mirror the program's
+    own checks so NULLA never broadcasts a Register that reverts (burning the base fee): a 1-3
+    char premium name (auction-only), a name over the wallet's 3-name cap, or a paid-mode config.
     """
+    # 1-3 char names are premium (auction-only); >32 or bad charset can't be registered either.
+    ok, reason, _is_premium = validate_registrable_name(name)
+    if not ok:
+        return None, RegisterOutcome(status="refused", message=reason)
+    # Per-wallet lifetime cap: a 4th direct registration reverts with CapacityExceeded.
+    count = read_owner_name_count(owner_pubkey, program_id, rpc)
+    if count is None:
+        return None, RegisterOutcome(status="error", message="could not verify your wallet's registration count on-chain")
+    if count >= MAX_NAMES_PER_WALLET:
+        return None, RegisterOutcome(
+            status="refused",
+            message=(
+                f"your wallet already holds {count} directly-registered .null names — the cap is "
+                f"{MAX_NAMES_PER_WALLET} (premium/auction names are exempt)"
+            ),
+        )
     config = read_live_config(program_id, rpc=rpc)
     if config is None:
         return None, RegisterOutcome(status="error", message="could not read the registrar config on-chain")

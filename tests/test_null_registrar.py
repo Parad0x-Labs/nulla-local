@@ -5,15 +5,18 @@ import pytest
 from core.null_registrar import (
     CURRENCY_SOL,
     IX_REGISTER,
+    MAX_NAME_LEN,
     NULL_DOMAIN_SIZE,
     SYSTEM_PROGRAM_ID,
     RegistryConfig,
     build_register_accounts,
     build_register_instruction_data,
     build_register_plan,
+    decode_owner_capacity,
     decode_registry_config,
     derive_config_pda,
     derive_owner_cap_pda,
+    validate_registrable_name,
 )
 
 solders = pytest.importorskip("solders")
@@ -79,6 +82,34 @@ def test_owner_cap_pda_derives_and_differs_from_domain() -> None:
     oc = derive_owner_cap_pda(owner)
     assert oc and Pubkey.from_string(oc) is not None
     assert derive_owner_cap_pda(owner) == oc  # deterministic
+
+
+def test_validate_registrable_name_enforces_length_and_charset() -> None:
+    # 4-32 chars register directly.
+    ok, _, premium = validate_registrable_name("parad0x")
+    assert ok and not premium
+    ok, _, premium = validate_registrable_name("test.null")  # trailing .null tolerated
+    assert ok and not premium
+    # 1-3 chars are premium (auction-only) — flagged, not registrable.
+    ok, reason, premium = validate_registrable_name("abc")
+    assert not ok and premium and "auction" in reason.lower()
+    ok, _, premium = validate_registrable_name("x")
+    assert not ok and premium
+    # Too long / bad charset are refused (not premium).
+    assert validate_registrable_name("a" * (MAX_NAME_LEN + 1))[0] is False
+    assert validate_registrable_name("bad_name!")[0] is False
+    assert validate_registrable_name("")[0] is False
+
+
+def test_decode_owner_capacity() -> None:
+    assert decode_owner_capacity(None) == 0  # absent account → 0 names
+    assert decode_owner_capacity(b"") == 0
+    buf = bytearray(36)
+    buf[0] = 0x4B  # 'K'
+    buf[33:35] = (2).to_bytes(2, "little")
+    assert decode_owner_capacity(bytes(buf)) == 2
+    buf[0] = 0x00  # wrong discriminator → fail closed
+    assert decode_owner_capacity(bytes(buf)) is None
 
 
 def test_decode_registry_config_reads_fee_and_treasury() -> None:
