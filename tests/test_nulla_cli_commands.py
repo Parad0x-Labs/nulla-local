@@ -9,6 +9,7 @@ from apps.nulla_cli import (
     _quote_target_to_uri,
     _strip_null_suffix,
     cmd_manifest,
+    cmd_register,
     cmd_resolve,
     cmd_sell_quote,
     cmd_web,
@@ -39,6 +40,28 @@ def _record(
         x402_endpoint=endpoint,
         passport_hash=passport,
     )
+
+
+def test_cmd_register_refuses_premium_and_bad_names(capsys) -> None:
+    # 1-3 char premium names are auction-only; bad charset is refused — both before any wallet/RPC.
+    assert cmd_register("ab.null") == 2
+    assert "auction" in capsys.readouterr().out.lower()
+    assert cmd_register("bad_name!.null") == 2
+    assert "a-z" in capsys.readouterr().out
+
+
+def test_cmd_register_dry_run_never_executes(capsys) -> None:
+    fake_plan = mock.Mock(total_sol=0.0112)
+    preview = mock.Mock(status="preview", message="Register mysite on Solana MAINNET for ~0.0112 SOL", plan=fake_plan)
+    fake_wallet = mock.Mock(pubkey="28hxXaSfXrY2UTEEuHseP1VfRdq3nUyyPaYBMHsWW2VX")
+    wallet_cls = mock.Mock(return_value=mock.Mock(exists=lambda: True, load=lambda: fake_wallet))
+    with mock.patch("core.null_register_execute.preview_registration", return_value=preview), \
+         mock.patch("core.null_register_execute.execute_registration") as exec_mock, \
+         mock.patch("core.nulla_wallet.NullaWallet", wallet_cls):
+        rc = cmd_register("mysite.null")  # 6 chars (valid), no --allow-spend / --mainnet
+    assert rc == 0
+    exec_mock.assert_not_called()  # dry run must never sign/broadcast
+    assert "Dry run" in capsys.readouterr().out
 
 
 def test_strip_null_suffix_trims_trailing_null() -> None:

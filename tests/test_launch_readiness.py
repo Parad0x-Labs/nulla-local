@@ -13,10 +13,32 @@ from __future__ import annotations
 import json
 from unittest import mock
 
+import pytest
+
 from core.meet_and_greet_service import MeetAndGreetService
 from core.web.api.runtime import RuntimeServices
 from core.web.api.service import _attach_work_receipt, dispatch_get, dispatch_post
 from core.web.meet.routes import dispatch_request, resolve_static_route
+
+
+@pytest.fixture(autouse=True)
+def _isolated_nulla_home(tmp_path, monkeypatch):
+    """Give each test its own NULLA_HOME.
+
+    The default test NULLA_HOME (conftest.py) is session-shared, so the agent wallet + its
+    node signing key are global across the process. If any test earlier in the shard
+    regenerates the node key, the shared wallet can no longer be decrypted and these
+    wallet-info tests fail with "Solana wallet decryption failed". A fresh per-test home
+    makes get_or_create_wallet create the wallet + key together, so the tests are
+    order-independent.
+    """
+    monkeypatch.setenv("NULLA_HOME", str(tmp_path))
+    try:
+        from core import runtime_paths
+
+        monkeypatch.setattr(runtime_paths, "_NULLA_HOME_OVERRIDE", None, raising=False)
+    except Exception:
+        pass
 
 # ---------------------------------------------------------------------------
 # Helpers
