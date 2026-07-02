@@ -23,6 +23,35 @@ local NULLA agent → memory + tools → optional trusted helpers → mesh task 
 
 ---
 
+## ⚡ Install in one command
+
+### Windows
+
+1. Press the **Start** button, type **PowerShell**, and open **Windows PowerShell**.
+2. Paste the line below and press **Enter**:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1; powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1
+```
+
+That's the whole install. It sets everything up for you — **including Python if your PC doesn't have it** — downloads the local AI model, and opens a chat window in your browser. No sign-up, no accounts, no API keys.
+
+### macOS / Linux
+
+Open your **Terminal** app (on a Mac: press **Cmd+Space**, type **Terminal**), paste the line below, and press **Enter**:
+
+```bash
+curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.sh && bash bootstrap_nulla.sh
+```
+
+(On macOS/Linux you need **Python 3.10+** already installed — most machines have it.)
+
+**What to expect:** the first run downloads a few gigabytes — the local AI model — so the window can look like it's just sitting there for several minutes. That's normal; leave it open. When it's done, your browser opens by itself with NULLA ready to chat.
+
+Want to pick a model size, use the click-through installer, or install from a repo you already cloned? See **[Install options](#install-options)** below.
+
+---
+
 ## What makes NULLA different
 
 ### Tool-use agent loop — not prompt theater
@@ -100,18 +129,23 @@ Parad0x Labs builds Web0 on Solana — money and agents that settle themselves. 
 
 ---
 
-## Install
+## Install options
 
-### Windows (one-click)
+The one-line command at the top of this README is all most people need. This section
+covers the extras: choosing a model tier, the GUI installer, other platforms, and
+installing from a repo you've already cloned.
+
+### Windows (already cloned the repo?)
 
 Double-click **`Install_And_Run_NULLA.bat`** in the repo root. It installs and
-launches everything in one shot — Python venv + dependencies, Ollama and the model
-for the auto-selected profile, the OpenClaw bridge, DB migrations, and a logon task —
-then opens the OpenClaw UI at `http://127.0.0.1:18789` and the NULLA trace rail at
-`http://127.0.0.1:11435/trace`.
+launches everything in one shot — **Python itself if it's missing**, the venv +
+dependencies, Ollama and the model for the auto-selected profile, the OpenClaw
+bridge, DB migrations, and a logon task — then opens the OpenClaw UI at
+`http://127.0.0.1:18789` and the NULLA trace rail at `http://127.0.0.1:11435/trace`.
 
-Requirements: Python 3.10+ installed, and internet on first run (it downloads Ollama,
-the model, and Playwright).
+Requirements: Windows 10/11 and an internet connection on the first run — nothing
+needs to be pre-installed. If Python 3.10+ isn't already present, the installer sets
+it up per-user (no admin required); it also downloads Ollama, the model, and Playwright.
 
 Pick a profile instead of the auto-recommended one:
 

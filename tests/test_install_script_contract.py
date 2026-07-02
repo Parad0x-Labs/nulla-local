@@ -235,3 +235,43 @@ def test_install_script_runs_public_hive_auth_helper_from_project_root() -> None
     assert 'result_json="$(cd "${PROJECT_ROOT}" && NULLA_HOME="${runtime_home}" \\' in script
     assert '"${VENV_DIR}/bin/python" -m ops.ensure_public_hive_auth \\' in script
     assert "hydrated_from_local_cluster" in script
+
+
+def test_windows_installer_bootstraps_python_when_missing() -> None:
+    # A one-click installer cannot assume Python is pre-installed: it must set Python up
+    # itself so the single documented command works on a bare Windows host. install_nulla.bat
+    # must delegate to ensure_python.ps1 and use the concrete resolved interpreter path (a
+    # freshly-installed Python is not on the current cmd session's PATH), not a bare
+    # `python` / `py -3`, and it must no longer hard-exit when Python is absent.
+    install_bat = (PROJECT_ROOT / "installer" / "install_nulla.bat").read_text(encoding="utf-8")
+
+    assert (PROJECT_ROOT / "installer" / "ensure_python.ps1").exists()
+    assert "ensure_python.ps1" in install_bat
+    assert '-OutFile "%PYFOUND_FILE%"' in install_bat
+    assert 'set PYTHON_CMD="!PYTHON_EXE!"' in install_bat
+    assert "Python was not found. Install Python 3.10+ and retry." not in install_bat
+
+
+def test_ensure_python_helper_uses_winget_then_pythonorg_fallback() -> None:
+    helper = (PROJECT_ROOT / "installer" / "ensure_python.ps1").read_text(encoding="utf-8")
+
+    # winget first (best-effort), official python.org silent installer as the fallback, both
+    # per-user (no admin), with a version check and Microsoft Store execution-alias-stub rejection.
+    assert "Python.Python.3.12" in helper
+    assert "python.org/ftp/python" in helper
+    assert "InstallAllUsers=0" in helper
+    assert "PrependPath=1" in helper
+    assert "WindowsApps" in helper
+    assert "sys.version_info" in helper
+    # winget must be best-effort and non-blocking: non-interactive + a hard timeout so the
+    # Python EXE's UAC self-elevation can't hang a headless run before the python.org fallback.
+    assert "--disable-interactivity" in helper
+    assert "WaitForExit(180000)" in helper
+    # The python.org download must force modern TLS or it fails on older un-patched hosts.
+    assert "Tls12" in helper
+    # Get-Command -All so a real Python behind the Store stub on PATH isn't missed.
+    assert "Get-Command $name -All" in helper
+    # The resolved path is handed back to the .bat via -OutFile in the OEM codepage (so cmd's
+    # for/f reads it intact even with a non-ASCII username), not stdout.
+    assert "$OutFile" in helper
+    assert "Set-Content -LiteralPath $OutFile -Value $found -Encoding Oem" in helper

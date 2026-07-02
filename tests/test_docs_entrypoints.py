@@ -11,7 +11,10 @@ def test_readme_frontloads_product_summary_and_install() -> None:
 
     assert "NULLA is a local-first agent runtime" in early_block
     assert "Current state:" in early_block
-    assert "Windows (one-click)" in early_block
+    # The one-command install must be front-loaded (near the top), not buried under the
+    # feature docs, so a non-technical visitor sees how to install without scrolling.
+    assert "Install in one command" in early_block
+    assert "bootstrap_nulla.ps1" in early_block
     assert "## Try It" in readme
     assert "docs/INSTALL.md" in readme
     assert "docs/STATUS.md" in readme
