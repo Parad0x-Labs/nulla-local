@@ -21,7 +21,7 @@ verified against processor.rs `process_register`:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from core.null_resolver import (
     NULL_REGISTRAR_MAINNET,

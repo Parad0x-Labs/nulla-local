@@ -48,7 +48,7 @@ class SpendPolicy:
         return json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
 
     @classmethod
-    def from_json(cls, text: str) -> "SpendPolicy":
+    def from_json(cls, text: str) -> SpendPolicy:
         data = json.loads(text) if text else {}
         allowed = {f for f in cls.__dataclass_fields__}
         return cls(**{k: v for k, v in data.items() if k in allowed})
