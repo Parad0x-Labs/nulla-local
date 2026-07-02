@@ -31,7 +31,13 @@ function Get-GitOutput {
     param([string[]]$Arguments)
     try {
         $value = & git -C $ProjectRoot @Arguments 2>$null
-        return [string]$value
+        # A native command that produces no output yields AutomationNull, and
+        # [string](AutomationNull) stays "nothing" (not ""), so a caller doing
+        # .Trim() on the result hits InvokeMethodOnNull. This is exactly what
+        # `git status --short` does on a clean tree - i.e. every CI checkout.
+        # Wrapping in @(...) collapses AutomationNull to an empty array, so the
+        # join always produces a real string the caller can .Trim() safely.
+        return (@($value) -join "`n")
     }
     catch {
         return ""
