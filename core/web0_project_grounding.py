@@ -122,7 +122,7 @@ def _named_registration_response(name: str) -> str:
     return (
         f"- I can help you check `{name}`, but I will not sign, spend, or submit a wallet transaction automatically.\n"
         f"- First run `nulla resolve {name}`. If it resolves, it is already owned; if it returns no record, `{name}` is free to register.\n"
-        f"- In the current pilot there is no registration fee to send anywhere — your wallet just needs about 0.003 SOL for the on-chain account rent. Automatic register-and-sign isn't wired into NULLA yet; when it is, it will ask for explicit approval against `null_registrar v2` (`{NULL_REGISTRAR_V2_PROGRAM}`)."
+        f"- In the current pilot there is no registration fee to send anywhere — your wallet just needs about 0.003 SOL for the on-chain account rent. Automatic register-and-sign isn't wired into NULLA yet; when it is, it will ask for explicit approval and a wallet prompt against `null_registrar v2` (`{NULL_REGISTRAR_V2_PROGRAM}`)."
     )
 
 
