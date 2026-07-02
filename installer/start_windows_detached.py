@@ -17,7 +17,12 @@ CREATE_NO_WINDOW = 0x08000000
 def _wrap_command_for_windows(command: list[str]) -> list[str]:
     if os.name != "nt" or not command:
         return command
-    suffix = Path(command[0]).suffix.lower()
+    # Use os.path (string-only) rather than Path(command[0]).suffix here. When a
+    # POSIX test fakes os.name="nt", pathlib.Path resolves to WindowsPath, which
+    # raises NotImplementedError on Python <=3.11 - crashing the test (and pytest's
+    # failure rendering) instead of exercising the wrap logic. splitext is flavour-
+    # agnostic and gives the identical suffix on a real Windows host.
+    suffix = os.path.splitext(command[0])[1].lower()
     if suffix not in {".bat", ".cmd"}:
         return command
     return [os.environ.get("COMSPEC") or "cmd.exe", "/c", *command]
