@@ -207,8 +207,8 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "installer\\build_windows_package.ps1" in install_doc
     assert "install-profile --set ollama-only" in sh_installer
     assert "install-profile --set ollama-max" in sh_installer
-    assert "install-profile --set ollama-only" in readme
-    assert "install-profile --set ollama-max" in readme
+    assert "install-profile --set local-max" in readme
+    assert "--install-profile local-only" in readme
     assert "install-profile --set ollama-only" in install_doc
     assert "install-profile --set ollama-max" in install_doc
     assert "ollama-only" in sh_bootstrap
@@ -222,7 +222,10 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "RECOMMENDED_BUNDLE_MODELS" in bat_installer
     assert "set \"MODELS_TO_PULL_LIST=%MODELS_TO_PULL:,= %\"" in bat_installer
     assert "for %%M in (%MODELS_TO_PULL_LIST%) do" in bat_installer
-    assert "local_plus_llamacpp" in readme
+    # local_plus_llamacpp is a provider stack_id, not a valid --install-profile value; the
+    # README must not advertise it as one (the real public profiles are auto-recommended /
+    # local-only / local-max). A first-class llama.cpp install profile is separate future work.
+    assert "local_plus_llamacpp" not in readme
     assert "first-class installer/runtime lane yet" not in readme
 
 
