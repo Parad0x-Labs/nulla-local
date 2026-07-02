@@ -69,8 +69,8 @@ _EXEC_MARKERS = (
 
 WEB0_NULL_REGISTRATION_RESPONSE = (
     f"- Yes, but not as a normal ICANN/DNS purchase. In this stack, `.null` is a wallet-owned Web0 name on Solana `null_registrar v2` (`{NULL_REGISTRAR_V2_PROGRAM}`).\n"
-    "- In the current pilot, registration is free — there is no fee and no address to send one to. Your wallet just needs a little SOL (about 0.003) for the on-chain account rent, which stays in the account you own. (That is the live on-chain config and can change, so it is read on-chain before any real registration.)\n"
-    "- Local NULLA can check/resolve names now with `nulla resolve <name>.null`; it can't sign or submit a registration for you yet, and any dial/x402 payment stays opt-in and needs explicit spend approval."
+    "- It costs a small amount of SOL — the on-chain registration fee plus the name account's rent (roughly ~0.01 SOL all-in right now; the exact amount is read live from the registrar config before you register). 1-3 character names are premium and are sold through the null-auction, not direct registration.\n"
+    "- Register with `nulla register <name>.null` — it previews the exact live cost and asks for explicit approval and a wallet prompt (Windows Hello) before spending; `nulla resolve <name>.null` checks a name read-only. Any dial/x402 payment stays opt-in and needs explicit spend approval."
 )
 
 
@@ -120,9 +120,9 @@ def _looks_like_registration_fee_or_exec(text: str) -> bool:
 
 def _named_registration_response(name: str) -> str:
     return (
-        f"- I can help you check `{name}`, but I will not sign, spend, or submit a wallet transaction automatically.\n"
-        f"- First run `nulla resolve {name}`. If it resolves, it is already owned; if it returns no record, `{name}` is free to register.\n"
-        f"- In the current pilot there is no registration fee to send anywhere — your wallet just needs about 0.003 SOL for the on-chain account rent. Automatic register-and-sign isn't wired into NULLA yet; when it is, it will ask for explicit approval and a wallet prompt against `null_registrar v2` (`{NULL_REGISTRAR_V2_PROGRAM}`)."
+        f"- I can help you register `{name}`, but I will not sign, spend, or submit a wallet transaction automatically.\n"
+        f"- First run `nulla resolve {name}`. If it resolves, it is already owned; if it returns no record, the name is available. Then `nulla register {name}` previews the exact live cost and, only with your explicit approval and a wallet prompt (Windows Hello), registers it against `null_registrar v2` (`{NULL_REGISTRAR_V2_PROGRAM}`).\n"
+        "- It isn't free: registration costs a small amount of SOL (the on-chain fee + the name account's rent, ~0.01 SOL all-in right now), read live before you commit. 1-3 character names are premium (auction-only)."
     )
 
 
@@ -130,9 +130,9 @@ def _registration_fee_or_exec_response(name: str) -> str:
     resolve_target = name if name else "<name>.null"
     name_phrase = f"`{name}` " if name else ""
     return (
-        f"- There's no registration fee to send anywhere. In the current pilot, registering a {name_phrase}`.null` name is free — no fee, and no recipient address to send one to.\n"
-        "- The only cost is a small amount of SOL (about 0.003) for the on-chain account rent, paid from and held in your own wallet. It's read live from the registrar config before any real registration, since that can change.\n"
-        f"- I can't sign and submit the registration for you yet — right now I resolve/check names (`nulla resolve {resolve_target}`). Automatic register-and-sign is coming, but only behind explicit approval and a wallet confirmation, never automatic."
+        f"- Registering a {name_phrase}`.null` name isn't free — it costs a small amount of SOL: the on-chain fee plus the name account's rent (~0.01 SOL all-in right now), paid from your own wallet and read live before you commit.\n"
+        "- 1-3 character names are premium and are sold through the null-auction (floor-priced), not direct registration.\n"
+        f"- I can register it with `nulla register {resolve_target}` — it previews the exact cost first and asks for explicit approval and a wallet prompt (Windows Hello) before spending; I never sign automatically."
     )
 
 
