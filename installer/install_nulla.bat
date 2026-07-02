@@ -353,7 +353,11 @@ echo Selected model: %MODEL_TAG%
 echo Recommended local bundle: %RECOMMENDED_BUNDLE_MODELS%
 echo Recommended profile: %RECOMMENDED_INSTALL_PROFILE%
 echo Install profile: %INSTALL_PROFILE%
-echo Profile summary: %INSTALL_PROFILE_SUMMARY%
+REM The summary contains an arrow like "... -> qwen3:4b"; echoing it raw makes cmd treat
+REM the ">" as a redirect and write a stray file named after the model (NTFS ADS on the
+REM colon). Strip ">" from the display copy so the echo can't redirect.
+set "INSTALL_PROFILE_SUMMARY_DISPLAY=!INSTALL_PROFILE_SUMMARY:>=!"
+echo Profile summary: !INSTALL_PROFILE_SUMMARY_DISPLAY!
 "%VENV_DIR%\Scripts\python.exe" "%SCRIPT_DIR%validate_install_profile.py" "%NULLA_HOME%" "%MODEL_TAG%" "%INSTALL_PROFILE%" >"%TEMP%\nulla_install_profile_validate.txt" 2>&1
 if !errorlevel! neq 0 (
   type "%TEMP%\nulla_install_profile_validate.txt"
