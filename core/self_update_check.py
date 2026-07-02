@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 DEFAULT_OWNER = "Parad0x-Labs"
 DEFAULT_REPO = "nulla-local"
@@ -63,7 +64,7 @@ class UpdateCheckState:
     dismissed_version: str = ""
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> "UpdateCheckState":
+    def from_dict(cls, data: dict[str, Any] | None) -> UpdateCheckState:
         data = data or {}
         return cls(
             last_check_utc=float(data.get("last_check_utc") or 0.0),
