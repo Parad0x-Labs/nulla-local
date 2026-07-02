@@ -12,8 +12,12 @@ def test_general_null_buy_question_is_grounded() -> None:
     text = result["response"]
     assert "null_registrar v2" in text
     assert "nulla resolve <name>.null" in text
-    # Fee model must be stated correctly: free in pilot, rent-only, no recipient.
-    assert "no fee" in text.lower() or "no address to send" in text.lower()
+    # Cost must be stated honestly: it's NOT free (registry is at go-live pricing), costs SOL,
+    # points to the live-quoting register command, and notes premium/auction names.
+    assert "free" not in text.lower()
+    assert "sol" in text.lower()
+    assert "nulla register <name>.null" in text
+    assert "auction" in text.lower()
 
 
 def test_named_registration_request_refuses_auto_spend_and_points_to_resolve() -> None:
@@ -36,11 +40,11 @@ def test_fee_followup_without_null_token_is_answered_not_dead_ended() -> None:
     assert result is not None
     assert result["intent"] == "web0_null_registration_fee_followup"
     text = result["response"].lower()
-    # Correct the user's mental model: there is no fee to send, and no recipient.
-    assert "no fee" in text or "no registration fee" in text
-    assert "rent" in text
-    # Stay honest about capability: NULLA can't auto-sign a registration yet.
-    assert "can't sign" in text or "cannot sign" in text
+    # Correct the user's mental model: it isn't free, it costs SOL, and NULLA can register it
+    # via the gated `nulla register` command (previews cost, wallet prompt) — never auto.
+    assert "isn't free" in text or "not free" in text
+    assert "sol" in text
+    assert "nulla register" in text
 
 
 def test_registration_word_alone_does_not_over_fire() -> None:
