@@ -20,6 +20,12 @@ _TREASURY = Pubkey.from_string(_OWNER)
 _BLOCKHASH = "11111111111111111111111111111111"  # 32 zero bytes → valid base58 hash for tests
 
 
+from core.null_registrar import derive_config_pda, derive_owner_cap_pda
+
+_CONFIG_PDA = derive_config_pda()
+_OWNER_CAP_PDA = derive_owner_cap_pda(_OWNER)
+
+
 def _config_bytes(sol_fee: int) -> bytes:
     buf = bytearray(122)
     buf[0] = 0x52
@@ -28,10 +34,23 @@ def _config_bytes(sol_fee: int) -> bytes:
     return bytes(buf)
 
 
-def _make_rpc(sol_fee=0, sig="SIG_ABC"):
+def _owner_cap_bytes(count: int) -> bytes:
+    buf = bytearray(36)
+    buf[0] = 0x4B  # 'K'
+    buf[33:35] = int(count).to_bytes(2, "little")  # count u16 LE @33
+    return bytes(buf)
+
+
+def _make_rpc(sol_fee=0, sig="SIG_ABC", owner_count=0):
     def rpc(method, params, **kw):
         if method == "getAccountInfo":
-            return {"value": {"data": [base64.b64encode(_config_bytes(sol_fee)).decode(), "base64"]}}
+            pubkey = params[0]
+            if pubkey == _CONFIG_PDA:
+                return {"value": {"data": [base64.b64encode(_config_bytes(sol_fee)).decode(), "base64"]}}
+            # owner_cap PDA: absent (count 0) or present with the given lifetime count.
+            if owner_count == 0:
+                return {"value": None}
+            return {"value": {"data": [base64.b64encode(_owner_cap_bytes(owner_count)).decode(), "base64"]}}
         if method == "getMinimumBalanceForRentExemption":
             size = params[0]
             return 900_000 if size == 36 else 2_700_000  # owner_cap (36B) vs domain (314B)
@@ -162,3 +181,24 @@ def test_preview_never_signs(monkeypatch):
     assert out.status == "preview"
     assert "MAINNET" in out.message
     assert out.plan is not None and out.plan.total_lamports == 3_600_000
+
+
+def test_execute_refuses_premium_1to3_char_name(monkeypatch):
+    _patch_available(monkeypatch, True)
+    w = _Wallet()
+    out = execute_registration("abc", gate=_full_gate(), wallet=w, rpc=_make_rpc(),
+                               consent=lambda r: True, blockhash_fn=lambda: _BLOCKHASH)
+    assert out.status == "refused"
+    assert "premium" in out.message.lower() and "auction" in out.message.lower()
+    assert w.signed == 0  # never broadcast a Register that would revert with NameTooShort
+
+
+def test_execute_refuses_when_wallet_at_cap(monkeypatch):
+    _patch_available(monkeypatch, True)
+    w = _Wallet()
+    out = execute_registration("newname", gate=_full_gate(), wallet=w,
+                               rpc=_make_rpc(owner_count=3), consent=lambda r: True,
+                               blockhash_fn=lambda: _BLOCKHASH)
+    assert out.status == "refused"
+    assert "cap" in out.message.lower()
+    assert w.signed == 0  # never broadcast a 4th register that would revert with CapacityExceeded

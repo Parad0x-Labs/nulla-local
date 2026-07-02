@@ -51,6 +51,56 @@ NULL_DOMAIN_SIZE = 314
 OWNER_CAPACITY_SIZE = 36
 _ARWEAVE_TXID_LEN = 32
 
+# Name rules (from instruction.rs): direct Register needs 4-32 printable chars in [a-z0-9-].
+# 1-3 char names are PREMIUM and are sold only through the null-auction (never direct Register).
+MIN_NAME_LEN = 4
+MAX_NAME_LEN = 32
+# Per-wallet lifetime cap (processor.rs MAX_NAMES_PER_WALLET) — a 4th direct register reverts
+# with CapacityExceeded. Premium/auction winners are exempt from this cap.
+MAX_NAMES_PER_WALLET = 3
+_ALLOWED_NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
+
+# OwnerCapacity account layout (from state.rs): disc[1]=0x4B | owner[32] | count[2] u16 LE | bump.
+_OC_DISC = 0x4B  # 'K'
+_OC_OFF_COUNT = 33
+
+
+def validate_registrable_name(name: str) -> tuple[bool, str, bool]:
+    """Whether `name` can be DIRECTLY registered. Returns (registrable, reason, is_premium).
+
+    Mirrors the program's validate_name (4-32 chars, [a-z0-9-]). A 1-3 char name is premium
+    (auction-only) — flagged so the caller can point the user to the null-auction instead of
+    broadcasting a Register that reverts with NameTooShort.
+    """
+    clean = str(name or "").strip().lower()
+    if clean.endswith(".null"):
+        clean = clean[: -len(".null")]
+    length = len(clean)
+    if length == 0:
+        return False, "empty name", False
+    if any(c not in _ALLOWED_NAME_CHARS for c in clean):
+        return False, "a .null name may only contain a-z, 0-9, and hyphen", False
+    if length < MIN_NAME_LEN:
+        return (
+            False,
+            f"`{clean}.null` is a premium 1-3 character name — those are sold only through the "
+            "null-auction (an ascending English auction with a floor price), not direct registration",
+            True,
+        )
+    if length > MAX_NAME_LEN:
+        return False, f"a .null name can be at most {MAX_NAME_LEN} characters", False
+    return True, "ok", False
+
+
+def decode_owner_capacity(account_data: bytes | None) -> int | None:
+    """The wallet's lifetime name count. An absent account means 0 (registered nothing yet);
+    a present-but-malformed account returns None so the caller can fail closed."""
+    if not account_data:
+        return 0
+    if len(account_data) < OWNER_CAPACITY_SIZE or account_data[0] != _OC_DISC:
+        return None
+    return int.from_bytes(account_data[_OC_OFF_COUNT : _OC_OFF_COUNT + 2], "little")
+
 
 def _pubkey_to_bytes(pubkey: str) -> bytes | None:
     try:
