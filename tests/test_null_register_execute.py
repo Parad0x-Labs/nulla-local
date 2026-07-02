@@ -4,7 +4,6 @@ import base64
 
 import pytest
 
-import core.null_register_execute as nre
 from core.null_register_execute import (
     MAX_REGISTER_LAMPORTS_CEILING,
     SpendGate,
@@ -29,12 +28,13 @@ def _config_bytes(sol_fee: int) -> bytes:
     return bytes(buf)
 
 
-def _make_rpc(sol_fee=0, rent=2_700_000, sig="SIG_ABC"):
+def _make_rpc(sol_fee=0, sig="SIG_ABC"):
     def rpc(method, params, **kw):
         if method == "getAccountInfo":
             return {"value": {"data": [base64.b64encode(_config_bytes(sol_fee)).decode(), "base64"]}}
         if method == "getMinimumBalanceForRentExemption":
-            return rent
+            size = params[0]
+            return 900_000 if size == 36 else 2_700_000  # owner_cap (36B) vs domain (314B)
         if method == "sendTransaction":
             return sig
         return None
@@ -132,7 +132,7 @@ def test_execute_refuses_over_cap(monkeypatch):
     _patch_available(monkeypatch, True)
     w = _Wallet()
     tiny_cap = SpendGate(allow_spend=True, approve=True, max_spend_lamports=1, wallet_present=True)
-    out = execute_registration("test", gate=tiny_cap, wallet=w, rpc=_make_rpc(rent=2_700_000),
+    out = execute_registration("test", gate=tiny_cap, wallet=w, rpc=_make_rpc(),
                                consent=lambda r: True, blockhash_fn=lambda: _BLOCKHASH)
     assert out.status == "action_required"  # cost exceeds cap
     assert w.signed == 0
@@ -147,7 +147,7 @@ def test_execute_happy_path_signs_and_broadcasts(monkeypatch):
         "parad0x",
         gate=_full_gate(),
         wallet=w,
-        rpc=_make_rpc(sol_fee=0, rent=2_700_000, sig="REALSIG123"),
+        rpc=_make_rpc(sol_fee=0, sig="REALSIG123"),
         consent=lambda r: True,
         blockhash_fn=lambda: _BLOCKHASH,
     )
@@ -158,7 +158,7 @@ def test_execute_happy_path_signs_and_broadcasts(monkeypatch):
 
 def test_preview_never_signs(monkeypatch):
     _patch_available(monkeypatch, True)
-    out = preview_registration("parad0x", _OWNER, rpc=_make_rpc(sol_fee=0, rent=2_700_000))
+    out = preview_registration("parad0x", _OWNER, rpc=_make_rpc(sol_fee=0))
     assert out.status == "preview"
     assert "MAINNET" in out.message
-    assert out.plan is not None and out.plan.total_lamports == 2_700_000
+    assert out.plan is not None and out.plan.total_lamports == 3_600_000

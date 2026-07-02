@@ -24,13 +24,12 @@ from typing import Any
 
 from core.null_registrar import (
     NULL_DOMAIN_SIZE,
+    OWNER_CAPACITY_SIZE,
     RegisterPlan,
     RegistryConfig,
-    build_register_accounts,
-    build_register_instruction_data,
+    build_register_plan,
     decode_registry_config,
     derive_config_pda,
-    build_register_plan,
 )
 from core.null_resolver import NULL_REGISTRAR_MAINNET, derive_domain_pda
 
@@ -139,6 +138,41 @@ def _is_available(name: str, *, program_id: str) -> bool:
         return False
 
 
+def _plan_with_costs(
+    name: str, owner_pubkey: str, program_id: str, rpc: Callable[..., Any] | None
+) -> tuple[RegisterPlan | None, RegisterOutcome | None]:
+    """Read live config + BOTH rents (domain + owner_cap), guard the fee mode, build the plan.
+
+    Returns (plan, None) on success or (None, error_outcome). Quoting the owner_cap rent is
+    conservative (first registration by a wallet creates it); it keeps the cost honest and
+    the cap check safe.
+    """
+    config = read_live_config(program_id, rpc=rpc)
+    if config is None:
+        return None, RegisterOutcome(status="error", message="could not read the registrar config on-chain")
+    # The program rejects a free SOL register when the registry is in paid mode (a NULL fee is
+    # set but the SOL fee is 0) — surface that instead of broadcasting a tx that reverts.
+    if config.sol_fee_lamports == 0 and config.null_fee_amount != 0:
+        return None, RegisterOutcome(
+            status="refused", message="SOL registration is not free under the current registrar config; a fee is required"
+        )
+    domain_rent = read_rent_lamports(NULL_DOMAIN_SIZE, rpc=rpc)
+    owner_cap_rent = read_rent_lamports(OWNER_CAPACITY_SIZE, rpc=rpc)
+    if domain_rent is None or owner_cap_rent is None:
+        return None, RegisterOutcome(status="error", message="could not read the rent cost on-chain")
+    plan = build_register_plan(
+        name=name,
+        owner_pubkey=owner_pubkey,
+        config=config,
+        rent_lamports=domain_rent,
+        owner_cap_rent_lamports=owner_cap_rent,
+        program_id=program_id,
+    )
+    if plan is None:
+        return None, RegisterOutcome(status="error", message="could not assemble the registration")
+    return plan, None
+
+
 def preview_registration(
     name: str,
     owner_pubkey: str,
@@ -151,17 +185,10 @@ def preview_registration(
         return RegisterOutcome(status="error", message=f"'{name}' is not a valid .null name")
     if not _is_available(name, program_id=program_id):
         return RegisterOutcome(status="refused", message=f"{name} is already registered")
-    config = read_live_config(program_id, rpc=rpc)
-    if config is None:
-        return RegisterOutcome(status="error", message="could not read the registrar config on-chain")
-    rent = read_rent_lamports(NULL_DOMAIN_SIZE, rpc=rpc)
-    if rent is None:
-        return RegisterOutcome(status="error", message="could not read the rent cost on-chain")
-    plan = build_register_plan(
-        name=name, owner_pubkey=owner_pubkey, config=config, rent_lamports=rent, program_id=program_id
-    )
-    if plan is None:
-        return RegisterOutcome(status="error", message="could not assemble the registration")
+    plan, err = _plan_with_costs(name, owner_pubkey, program_id, rpc)
+    if err is not None:
+        return err
+    assert plan is not None
     return RegisterOutcome(
         status="preview",
         message=(
@@ -196,17 +223,10 @@ def execute_registration(
     if not _is_available(name, program_id=program_id):
         return RegisterOutcome(status="refused", message=f"{name} is already registered")
 
-    config = read_live_config(program_id, rpc=rpc)
-    if config is None:
-        return RegisterOutcome(status="error", message="could not read the registrar config on-chain")
-    rent = read_rent_lamports(NULL_DOMAIN_SIZE, rpc=rpc)
-    if rent is None:
-        return RegisterOutcome(status="error", message="could not read the rent cost on-chain")
-    plan = build_register_plan(
-        name=name, owner_pubkey=wallet.pubkey, config=config, rent_lamports=rent, program_id=program_id
-    )
-    if plan is None:
-        return RegisterOutcome(status="error", message="could not assemble the registration")
+    plan, err = _plan_with_costs(name, wallet.pubkey, program_id, rpc)
+    if err is not None:
+        return err
+    assert plan is not None
 
     permitted, reason = gate_permits_spend(gate, plan.total_lamports)
     if not permitted:
