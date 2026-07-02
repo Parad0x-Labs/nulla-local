@@ -120,17 +120,28 @@ echo This will set up NULLA in the extracted folder.
 echo ===============================================
 echo.
 
-where py >nul 2>&1
+REM Guarantee a real Python 3.10+ exists, installing one per-user if the host has none, an
+REM old one, or only the Microsoft Store stub. This is what makes the single documented
+REM command truly one-click on a bare Windows box. ensure_python.ps1 writes the resolved
+REM python.exe path to a temp file; we use that concrete path because a Python it just
+REM installed will not be on this cmd session's PATH yet.
+set "PYFOUND_FILE=%TEMP%\nulla_python_path_%RANDOM%_%RANDOM%.txt"
+echo Ensuring Python 3.10+ is available (installing it if needed)...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%ensure_python.ps1" -OutFile "%PYFOUND_FILE%"
 if !errorlevel! neq 0 (
-  where python >nul 2>&1
-  if !errorlevel! neq 0 (
-    echo ERROR: Python was not found. Install Python 3.10+ and retry.
-    exit /b 1
-  )
-  set "PYTHON_CMD=python"
-) else (
-  set "PYTHON_CMD=py -3"
+  echo ERROR: Could not find or automatically install Python 3.10+.
+  echo Install it from https://www.python.org/downloads/windows/ and retry.
+  del /f /q "%PYFOUND_FILE%" >nul 2>&1
+  exit /b 1
 )
+set "PYTHON_EXE="
+for /f "usebackq tokens=*" %%A in ("%PYFOUND_FILE%") do set "PYTHON_EXE=%%A"
+del /f /q "%PYFOUND_FILE%" >nul 2>&1
+if "!PYTHON_EXE!"=="" (
+  echo ERROR: Python was located but its path could not be read.
+  exit /b 1
+)
+set PYTHON_CMD="!PYTHON_EXE!"
 
 for %%I in ("%PROJECT_ROOT%\..\.nulla_runtime") do set "NULLA_HOME_DEFAULT=%%~fI"
 set "AGENT_NAME_DEFAULT=NULLA"

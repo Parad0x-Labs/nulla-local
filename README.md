@@ -105,13 +105,14 @@ Parad0x Labs builds Web0 on Solana — money and agents that settle themselves. 
 ### Windows (one-click)
 
 Double-click **`Install_And_Run_NULLA.bat`** in the repo root. It installs and
-launches everything in one shot — Python venv + dependencies, Ollama and the model
-for the auto-selected profile, the OpenClaw bridge, DB migrations, and a logon task —
-then opens the OpenClaw UI at `http://127.0.0.1:18789` and the NULLA trace rail at
-`http://127.0.0.1:11435/trace`.
+launches everything in one shot — **Python itself if it's missing**, the venv +
+dependencies, Ollama and the model for the auto-selected profile, the OpenClaw
+bridge, DB migrations, and a logon task — then opens the OpenClaw UI at
+`http://127.0.0.1:18789` and the NULLA trace rail at `http://127.0.0.1:11435/trace`.
 
-Requirements: Python 3.10+ installed, and internet on first run (it downloads Ollama,
-the model, and Playwright).
+Requirements: Windows 10/11 and an internet connection on the first run — nothing
+needs to be pre-installed. If Python 3.10+ isn't already present, the installer sets
+it up per-user (no admin required); it also downloads Ollama, the model, and Playwright.
 
 Pick a profile instead of the auto-recommended one:
 
