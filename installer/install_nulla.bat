@@ -121,9 +121,9 @@ echo ===============================================
 echo.
 
 where py >nul 2>&1
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
   where python >nul 2>&1
-  if %errorlevel% neq 0 (
+  if !errorlevel! neq 0 (
     echo ERROR: Python was not found. Install Python 3.10+ and retry.
     exit /b 1
   )
@@ -161,7 +161,7 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
   exit /b 1
 )
 "%VENV_DIR%\Scripts\python.exe" -m pip --version >nul 2>&1
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
   echo Step 1b/14: Repairing virtual environment pip...
   "%VENV_DIR%\Scripts\python.exe" -m ensurepip --upgrade
   if errorlevel 1 (
@@ -187,7 +187,7 @@ if exist "%RUNTIME_REQUIREMENTS%" set "REQUIREMENTS_FILE=%RUNTIME_REQUIREMENTS%"
 if exist "%WHEELHOUSE_DIR%\*" (
   echo Using bundled wheelhouse from %WHEELHOUSE_DIR%...
   "%VENV_DIR%\Scripts\python.exe" -m pip install --no-index --find-links "%WHEELHOUSE_DIR%" -r "%REQUIREMENTS_FILE%"
-  if %errorlevel% neq 0 (
+  if !errorlevel! neq 0 (
     echo WARNING: Bundled wheelhouse install failed. Falling back to online install...
     "%VENV_DIR%\Scripts\python.exe" -m pip install "%PROJECT_ROOT%[runtime,proof]"
   )
@@ -197,14 +197,14 @@ if exist "%WHEELHOUSE_DIR%\*" (
 if exist "%WHEELHOUSE_DIR%\*" (
   "%VENV_DIR%\Scripts\python.exe" -m pip install --no-deps "%PROJECT_ROOT%"
 )
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
   echo ERROR: Core dependency installation failed. Cannot continue.
   exit /b 1
 )
 
 echo Step 3/14: Installing Playwright browser runtime...
 "%VENV_DIR%\Scripts\python.exe" -m playwright install %DEFAULT_BROWSER_ENGINE% >nul 2>"%TEMP%\nulla_playwright_install.log"
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
   echo WARNING: Playwright browser install failed. Browser rendering may stay unavailable until fixed manually.
 ) else (
   echo Playwright %DEFAULT_BROWSER_ENGINE% runtime installed.
@@ -212,15 +212,15 @@ if %errorlevel% neq 0 (
 
 echo Step 4/14: Enabling local XSEARCH ^(SearXNG^)...
 where docker >nul 2>&1
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
   echo WARNING: Docker not found. SearXNG bootstrap skipped.
 ) else (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\scripts\xsearch_up.ps1" >"%TEMP%\nulla_xsearch_install.log" 2>&1
-  if %errorlevel% neq 0 (
+  if !errorlevel! neq 0 (
     echo WARNING: Could not start SearXNG automatically. Docker or docker compose may be unavailable.
   ) else (
     powershell -NoProfile -Command "try { $null = Invoke-WebRequest -Uri '%XSEARCH_URL%/search?q=nulla^&format=json' -UseBasicParsing -TimeoutSec 3; exit 0 } catch { exit 1 }" >nul 2>&1
-    if %errorlevel% neq 0 (
+    if !errorlevel! neq 0 (
       echo WARNING: SearXNG bootstrap ran but readiness check failed at %XSEARCH_URL%.
     ) else (
       echo Local XSEARCH online at %XSEARCH_URL%
@@ -239,7 +239,7 @@ if exist "%BUNDLED_LIQUEFY_DIR%\pyproject.toml" (
 )
 if "%LIQUEFY_DIR%"=="" (
   where git >nul 2>&1
-  if %errorlevel% equ 0 (
+  if !errorlevel! equ 0 (
     set "LIQUEFY_DIR=%PROJECT_ROOT%\..\liquefy-openclaw-integration"
     if not exist "%LIQUEFY_DIR%\pyproject.toml" (
       echo Cloning Liquefy into OpenClaw folder...
@@ -253,7 +253,7 @@ if "%LIQUEFY_DIR%"=="" (
 if not "%LIQUEFY_DIR%"=="" (
   powershell -NoProfile -Command "(Get-Content '%LIQUEFY_DIR%\pyproject.toml') -replace 'setuptools\.backends\._legacy:_Backend','setuptools.build_meta' | Set-Content '%LIQUEFY_DIR%\pyproject.toml'"
   "%VENV_DIR%\Scripts\python.exe" -m pip install "%LIQUEFY_DIR%" >nul 2>&1
-  if %errorlevel% equ 0 (
+  if !errorlevel! equ 0 (
     echo Liquefy installed into NULLA venv from OpenClaw folder.
   ) else (
     echo WARNING: Liquefy installation failed. Continuing without it.
@@ -265,10 +265,10 @@ if not "%LIQUEFY_DIR%"=="" (
 echo Step 5/14: Initializing runtime...
 set "NULLA_HOME=%NULLA_HOME%"
 "%VENV_DIR%\Scripts\python.exe" -m storage.migrations
-if %errorlevel% neq 0 exit /b 1
+if !errorlevel! neq 0 exit /b 1
 echo Step 5b/14: Ensuring public Hive auth/bootstrap...
 "%VENV_DIR%\Scripts\python.exe" -m ops.ensure_public_hive_auth --project-root "%PROJECT_ROOT%" --watch-host "%PUBLIC_HIVE_WATCH_HOST%" --json >"%TEMP%\nulla_public_hive_auth.json" 2>"%TEMP%\nulla_public_hive_auth.err"
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
   echo WARNING: Public Hive auth/bootstrap is incomplete. Public Hive writes and watcher presence/export will stay offline until auth is configured.
   if exist "%TEMP%\nulla_public_hive_auth.json" type "%TEMP%\nulla_public_hive_auth.json"
   if exist "%TEMP%\nulla_public_hive_auth.err" type "%TEMP%\nulla_public_hive_auth.err"
@@ -355,7 +355,7 @@ echo Recommended profile: %RECOMMENDED_INSTALL_PROFILE%
 echo Install profile: %INSTALL_PROFILE%
 echo Profile summary: %INSTALL_PROFILE_SUMMARY%
 "%VENV_DIR%\Scripts\python.exe" "%SCRIPT_DIR%validate_install_profile.py" "%NULLA_HOME%" "%MODEL_TAG%" "%INSTALL_PROFILE%" >"%TEMP%\nulla_install_profile_validate.txt" 2>&1
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
   type "%TEMP%\nulla_install_profile_validate.txt"
   exit /b 1
 )
@@ -371,7 +371,7 @@ for %%L in ("Start_NULLA.bat" "Talk_To_NULLA.bat" "OpenClaw_NULLA.bat" "nulla_ba
 
 set "DESKTOP_SHORTCUT=%USERPROFILE%\Desktop\OpenClaw + NULLA.lnk"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%create_desktop_shortcut.ps1" -TargetPath "%PROJECT_ROOT%\OpenClaw_NULLA.bat" -WorkingDirectory "%PROJECT_ROOT%" -LinkPath "%DESKTOP_SHORTCUT%" >nul 2>&1
-if %errorlevel% equ 0 (
+if !errorlevel! equ 0 (
   echo Desktop shortcut created: %DESKTOP_SHORTCUT%
 ) else (
   set "DESKTOP_SHORTCUT="
@@ -400,7 +400,7 @@ if not "%OPENCLAW_AGENT_DIR%"=="" (
 
 echo Step 8/14: Registering NULLA in OpenClaw...
 "%VENV_DIR%\Scripts\python.exe" "%SCRIPT_DIR%register_openclaw_agent.py" "%PROJECT_ROOT%" "%NULLA_HOME%" "%MODEL_TAG%" "%AGENT_NAME%"
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
   echo WARNING: Could not register NULLA in OpenClaw config. You can register manually later.
 )
 goto done_openclaw
@@ -436,7 +436,7 @@ setx NULLA_REGISTER_INSTALLED_OLLAMA_MODELS "1" >nul 2>&1
 set "NULLA_REGISTER_INSTALLED_OLLAMA_MODELS=1"
 echo Persisting selected model/profile runtime config...
 "%VENV_DIR%\Scripts\python.exe" "%SCRIPT_DIR%persist_windows_runtime_config.py" "%NULLA_HOME%" "%INSTALL_PROFILE%" "%MODEL_TAG%" "%RECOMMENDED_BUNDLE_MODELS%" "%OLLAMA_MODELS_DIR%" >nul 2>&1
-if %errorlevel% neq 0 echo WARNING: Could not persist Windows runtime profile/env config.
+if !errorlevel! neq 0 echo WARNING: Could not persist Windows runtime profile/env config.
 
 REM Check if Ollama is already installed
 set "OLLAMA_EXE="
@@ -474,7 +474,7 @@ if "%OLLAMA_EXE%"=="" (
 echo Step 10/14: Starting Ollama server...
 REM Check if Ollama is already serving
 powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://localhost:11434' -UseBasicParsing -TimeoutSec 3; exit 0 } catch { exit 1 }" >nul 2>&1
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
   start "" /B "%OLLAMA_EXE%" serve
   powershell -NoProfile -Command "Start-Sleep -Seconds 5" >nul 2>&1
 )
@@ -482,10 +482,13 @@ if %errorlevel% neq 0 (
 if "%OPENCLAW_ENABLED%"=="1" (
   echo Step 11/14: Configuring OpenClaw for NULLA...
   where openclaw >nul 2>&1
-  if %errorlevel% neq 0 (
+  REM Delayed expansion is required inside parenthesized blocks: a percent-expanded
+  REM errorlevel here would use the PARSE-time value (from before `where openclaw` ran),
+  REM and a stale 0 silently skipped the whole OpenClaw install on a machine that lacked it.
+  if !errorlevel! neq 0 (
     echo OpenClaw CLI not found on PATH. Installing OpenClaw...
     where npm >nul 2>&1
-    if %errorlevel% neq 0 (
+    if !errorlevel! neq 0 (
       echo WARNING: npm not found on PATH. Cannot install OpenClaw automatically. NULLA registration will still be written locally.
     ) else (
       REM `ollama launch openclaw --config` cannot run headless (it demands an interactive
@@ -563,7 +566,7 @@ if not exist "%BACKGROUND_CMD_PATH%" (
 )
 REM Register with Task Scheduler (runs at logon, no admin required)
 schtasks /create /tn "NULLA_Daemon" /tr "\"%SystemRoot%\System32\wscript.exe\" \"%VBS_PATH%\"" /sc onlogon /rl limited /f >nul 2>&1
-if %errorlevel% equ 0 (
+if !errorlevel! equ 0 (
   echo NULLA registered as startup task.
 ) else (
   echo WARNING: Could not register startup task. You can start NULLA manually.
@@ -571,7 +574,7 @@ if %errorlevel% equ 0 (
 
 echo Step 14/14: Configuring Liquefy...
 "%VENV_DIR%\Scripts\python.exe" -c "import json; from pathlib import Path; d=Path.home()/'.liquefy'; d.mkdir(parents=True,exist_ok=True); p=d/'config.json'; c={'enabled':True,'version':'1.1.0','mode':'auto','vault_dir':str(d/'vault'),'profile':'default','policy_mode':'strict','verify_mode':'full','encrypt':False,'leak_scan':True}; p.write_text(json.dumps(c,indent=2),encoding='utf-8'); print('Liquefy config written to '+str(p))" 2>nul
-if %errorlevel% neq 0 echo WARNING: Could not configure Liquefy.
+if !errorlevel! neq 0 echo WARNING: Could not configure Liquefy.
 
 echo Writing install receipt...
 set "OPENCLAW_CONFIG_PATH_RESOLVED="
@@ -593,10 +596,10 @@ if "%OPENCLAW_ENABLED%"=="1" (
 if "%OPENCLAW_ENABLED%"=="1" if "!OPENCLAW_CONFIG_PATH_RESOLVED!"=="" set "OPENCLAW_CONFIG_PATH_RESOLVED=%USERPROFILE%\.openclaw\openclaw.json"
 if "%OPENCLAW_ENABLED%"=="1" if "!OPENCLAW_AGENT_DIR_RESOLVED!"=="" set "OPENCLAW_AGENT_DIR_RESOLVED=%USERPROFILE%\.openclaw\agents\main\agent\nulla"
 "%VENV_DIR%\Scripts\python.exe" "%SCRIPT_DIR%write_install_receipt.py" "%PROJECT_ROOT%" "%NULLA_HOME%" "%MODEL_TAG%" "%OPENCLAW_ENABLED%" "!OPENCLAW_CONFIG_PATH_RESOLVED!" "!OPENCLAW_AGENT_DIR_RESOLVED!" "%OLLAMA_EXE%" "%BACKGROUND_CMD_PATH%" "%AGENT_WALLET_PUBKEY%" >nul 2>&1
-if %errorlevel% neq 0 echo WARNING: Could not write install receipt.
+if !errorlevel! neq 0 echo WARNING: Could not write install receipt.
 echo Running NULLA doctor...
 "%VENV_DIR%\Scripts\python.exe" "%SCRIPT_DIR%doctor.py" "%PROJECT_ROOT%" "%NULLA_HOME%" "%MODEL_TAG%" "%OPENCLAW_ENABLED%" "!OPENCLAW_CONFIG_PATH_RESOLVED!" "!OPENCLAW_AGENT_DIR_RESOLVED!" "%OLLAMA_EXE%" "%BACKGROUND_CMD_PATH%" >nul 2>&1
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
   echo WARNING: Could not generate doctor report.
 ) else (
   echo Doctor report written to %PROJECT_ROOT%\install_doctor.json
