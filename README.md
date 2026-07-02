@@ -102,37 +102,69 @@ Parad0x Labs builds Web0 on Solana — money and agents that settle themselves. 
 
 ## Install
 
-Bootstrap install script:
+### Windows (one-click)
+
+Double-click **`Install_And_Run_NULLA.bat`** in the repo root. It installs and
+launches everything in one shot — Python venv + dependencies, Ollama and the model
+for the auto-selected profile, the OpenClaw bridge, DB migrations, and a logon task —
+then opens the OpenClaw UI at `http://127.0.0.1:18789` and the NULLA trace rail at
+`http://127.0.0.1:11435/trace`.
+
+Requirements: Python 3.10+ installed, and internet on first run (it downloads Ollama,
+the model, and Playwright).
+
+Pick a profile instead of the auto-recommended one:
+
+```bat
+Install_And_Run_NULLA.bat /INSTALLPROFILE=local-only
+```
+
+Valid profiles: `auto-recommended` (default), `local-only`, `local-max`. The profile
+is set during install — there is no separate step. GUI alternative with a profile
+dropdown and install-folder picker:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Install_And_Run_NULLA.ps1
+```
+
+### macOS / Linux (one command)
 
 ```bash
 curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.sh
 bash bootstrap_nulla.sh
 ```
 
-Windows PowerShell:
+This creates the venv, installs dependencies and Ollama, pulls the model, wires
+OpenClaw, and starts the API on `http://127.0.0.1:11435`. Choose a profile inline
+(set and persisted during install — no second command):
+
+```bash
+bash bootstrap_nulla.sh --install-profile local-only   # smaller machines, no remote dependency (alias: ollama-only)
+bash bootstrap_nulla.sh --install-profile local-max     # 24 GiB+ unified memory or equivalent (alias: ollama-max)
+```
+
+Omit the flag and the installer auto-selects a profile from your hardware. Pass
+`--no-start` to install without launching.
+
+### Advanced
+
+Remote Windows bootstrap without a local checkout:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1; powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1
+Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1
+powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1 -InstallProfile local-only
 ```
 
-Profiles:
+Change the active profile after install (optional; restart NULLA to apply):
 
 ```bash
-# Safest — smaller machines, zero remote dependency
-bash bootstrap_nulla.sh --install-profile ollama-only
-
-# Full local power — 24 GiB+ unified memory or equivalent
-bash bootstrap_nulla.sh --install-profile ollama-max
-
-# Max performance — Ollama + native llama.cpp (local_plus_llamacpp)
-bash bootstrap_nulla.sh --install-profile local_plus_llamacpp
+# macOS / Linux
+cd ~/nulla-local && .venv/bin/python -m apps.nulla_cli install-profile --set local-max
 ```
 
-After install, set your profile:
-
-```bash
-cd ~/nulla-local && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-only
-cd ~/nulla-local && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-max
+```powershell
+# Windows
+.venv\Scripts\python.exe -m apps.nulla_cli install-profile --set local-max
 ```
 
 Full install docs: [docs/INSTALL.md](docs/INSTALL.md)
