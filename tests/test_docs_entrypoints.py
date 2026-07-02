@@ -11,7 +11,7 @@ def test_readme_frontloads_product_summary_and_install() -> None:
 
     assert "NULLA is a local-first agent runtime" in early_block
     assert "Current state:" in early_block
-    assert "Bootstrap install script:" in early_block
+    assert "Windows (one-click)" in early_block
     assert "## Try It" in readme
     assert "docs/INSTALL.md" in readme
     assert "docs/STATUS.md" in readme
