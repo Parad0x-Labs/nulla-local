@@ -58,7 +58,15 @@ class AcceptanceProfile:
 
 
 def _sanitize_text(value: str, *, repo_root: Path) -> str:
-    sanitized = value.replace(str(repo_root), "<repo>")
+    sanitized = str(value or "")
+    repo_variants = {str(repo_root), repo_root.as_posix()}
+    try:
+        resolved = repo_root.resolve()
+        repo_variants.update({str(resolved), resolved.as_posix()})
+    except Exception:
+        pass
+    for variant in sorted((item for item in repo_variants if item), key=len, reverse=True):
+        sanitized = sanitized.replace(variant, "<repo>")
     sanitized = re.sub(r"/Users/[^/\s]+", "/Users/<redacted>", sanitized)
     return sanitized
 
@@ -238,9 +246,17 @@ def _launch_agent_label(path: Path | None) -> str:
     return path.name or DEFAULT_RUNTIME_LAUNCH_AGENT_LABEL
 
 
+def _launch_agent_gui_domain(label: str = "") -> str:
+    uid = getattr(os, "getuid", lambda: 0)()
+    domain = f"gui/{uid}"
+    if label:
+        return f"{domain}/{label}"
+    return domain
+
+
 def _launch_agent_loaded(path: Path) -> bool:
     label = _launch_agent_label(path)
-    domain = f"gui/{os.getuid()}/{label}"
+    domain = _launch_agent_gui_domain(label)
     result = subprocess.run(
         ["launchctl", "print", domain],
         stdout=subprocess.DEVNULL,
@@ -262,7 +278,7 @@ def _suspend_installed_launch_agent(*, repo_root: Path, base_url: str) -> dict[s
     if not _launch_agent_loaded(launch_agent_path):
         return None
     subprocess.run(
-        ["launchctl", "bootout", f"gui/{os.getuid()}", str(launch_agent_path)],
+        ["launchctl", "bootout", _launch_agent_gui_domain(), str(launch_agent_path)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -280,7 +296,7 @@ def _restore_installed_launch_agent(state: dict[str, str] | None) -> None:
     if not launch_agent_path.exists():
         return
     result = subprocess.run(
-        ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(launch_agent_path)],
+        ["launchctl", "bootstrap", _launch_agent_gui_domain(), str(launch_agent_path)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,

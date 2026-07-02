@@ -21,7 +21,7 @@ from core.local_specialist_lane import (
     secondary_local_model,
 )
 from core.provider_env import merge_provider_env
-from core.runtime_install_profiles import format_install_profile_id
+from core.runtime_install_profiles import default_ollama_models_path, format_install_profile_id
 
 
 @dataclass(frozen=True)
@@ -201,10 +201,16 @@ def _free_gb(runtime_home: str | Path | None) -> float:
     candidate = (
         Path(runtime_home).expanduser().resolve()
         if runtime_home
-        else (Path.home() / ".nulla_runtime").resolve()
+        else default_ollama_models_path()
     )
     existing = _nearest_existing_path(candidate)
-    usage = shutil.disk_usage(existing)
+    try:
+        usage = shutil.disk_usage(existing)
+    except OSError:
+        try:
+            usage = shutil.disk_usage(Path.home().resolve())
+        except OSError:
+            return 0.0
     return float(usage.free) / (1024.0**3)
 
 
@@ -212,7 +218,9 @@ def _nearest_existing_path(path: Path) -> Path:
     current = path
     while not current.exists() and current != current.parent:
         current = current.parent
-    return current.resolve()
+    if current.exists():
+        return current.resolve()
+    return Path.home().resolve()
 
 
 def _param_billions_for_model(model_tag: str) -> float | None:

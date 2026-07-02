@@ -102,12 +102,11 @@ def load_registered_agent_name(
 
 
 def _default_openclaw_home() -> Path:
-    home = Path.home()
-    return home / ".openclaw"
+    return _user_home() / ".openclaw"
 
 
 def _candidate_homes() -> list[tuple[Path, str]]:
-    home = Path.home()
+    home = _user_home()
     candidates: list[tuple[Path, str]] = []
     launchd_home = _launch_agent_state_home(home)
     if launchd_home is not None:
@@ -200,6 +199,22 @@ def _clean_path(value: str | Path | None) -> Path | None:
     raw = str(value or "").strip()
     if not raw:
         return None
+    return _expand_user_path(raw)
+
+
+def _user_home() -> Path:
+    for env_name in ("HOME", "USERPROFILE"):
+        raw = str(os.environ.get(env_name, "")).strip()
+        if raw:
+            return Path(raw)
+    return Path.home()
+
+
+def _expand_user_path(raw: str) -> Path:
+    if raw == "~":
+        return _user_home()
+    if raw.startswith("~/") or raw.startswith("~\\"):
+        return _user_home() / raw[2:]
     return Path(raw).expanduser()
 
 

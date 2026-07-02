@@ -43,6 +43,7 @@ def build_receipt(
     openclaw_agent_dir: str,
     ollama_binary: str,
     launch_agent_path: str = "",
+    agent_wallet_pubkey: str = "",
 ) -> dict:
     project = Path(project_root).resolve()
     provider_capability_truth, install_profile = _provider_snapshot_and_profile(
@@ -63,6 +64,13 @@ def build_receipt(
         "dirty_state": source_truth.get("dirty_state"),
         "source_kind": str(source_truth.get("source_kind") or ""),
         "selected_model": model_tag,
+        # Only the PUBLIC key is ever surfaced. The private seed stays encrypted at
+        # rest (AES-256-GCM) under a locally-derived key and is never written here.
+        "agent_wallet": {
+            "pubkey": str(agent_wallet_pubkey or "").strip(),
+            "created_at_install": bool(str(agent_wallet_pubkey or "").strip()),
+            "storage": "encrypted_local:aes-256-gcm",
+        },
         "provider_capability_truth": provider_capability_truth,
         "install_profile": install_profile.to_dict(),
         "install_recommendation": install_recommendation.to_dict(),
@@ -76,6 +84,7 @@ def build_receipt(
         "ollama_binary": ollama_binary,
         "launch_agent": {
             "macos": str(launch_agent_path or ""),
+            "windows": str(launch_agent_path or ""),
             "enabled": bool(str(launch_agent_path or "").strip()),
         },
         "web_stack": {
@@ -126,6 +135,8 @@ def main() -> int:
     parser.add_argument("openclaw_agent_dir")
     parser.add_argument("ollama_binary")
     parser.add_argument("launch_agent_path")
+    # Optional trailing arg so older callers that don't pass a wallet pubkey still work.
+    parser.add_argument("agent_wallet_pubkey", nargs="?", default="")
     args = parser.parse_args()
 
     receipt = build_receipt(
@@ -137,6 +148,7 @@ def main() -> int:
         openclaw_agent_dir=args.openclaw_agent_dir,
         ollama_binary=args.ollama_binary,
         launch_agent_path=args.launch_agent_path,
+        agent_wallet_pubkey=args.agent_wallet_pubkey,
     )
     target_path = Path(args.project_root).resolve() / "install_receipt.json"
     target_path.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

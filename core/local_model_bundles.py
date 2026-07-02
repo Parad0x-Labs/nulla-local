@@ -7,11 +7,31 @@ from typing import Any
 
 from core.hardware_tier import MachineProbe
 
+# Speed-tier roles describe throughput character (orthogonal to the older
+# general/coding/reasoning/heavy_reasoning/lightweight_utility roles, which describe
+# content specialization). Every capacity bucket A-E resolves to exactly these three
+# roles so no hardware tier — including the weakest — collapses to a single model.
+SPEED_TIER_ROLES: tuple[str, ...] = ("tiny_fast", "daily_accelerated", "deep_overnight")
+
 
 @dataclass(frozen=True)
 class BundleRoleModel:
     role: str
     model: str
+    backend: str = "ollama"  # "ollama" | "llamacpp"
+    expected_tokens_per_second: float = 0.0  # 0.0 = unmeasured; do not print a number
+    requires_gpu_backend: bool = False  # only include this role if a live-verified GPU backend exists
+    offload_note: str = ""  # e.g. "Partial GPU offload; expect ~10-14 tok/s, fine for overnight batch use."
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "role": self.role,
+            "model": self.model,
+            "backend": self.backend,
+            "expected_tokens_per_second": self.expected_tokens_per_second,
+            "requires_gpu_backend": self.requires_gpu_backend,
+            "offload_note": self.offload_note,
+        }
 
 
 @dataclass(frozen=True)
@@ -21,6 +41,7 @@ class LocalBundleSpec:
     display_name: str
     role_models: tuple[BundleRoleModel, ...]
     summary: str
+    gpu_conditional: bool = False  # True => this spec assumes a live-verified llama.cpp GPU backend
 
     @property
     def models(self) -> tuple[str, ...]:
@@ -35,6 +56,7 @@ class LocalBundleSpec:
         role_map = self.role_map
         return (
             role_map.get("general")
+            or role_map.get("daily_accelerated")
             or role_map.get("coding")
             or role_map.get("reasoning")
             or next(iter(role_map.values()), "qwen3:8b")
@@ -53,6 +75,7 @@ class LocalBundleRecommendation:
     advanced_optional_profile: str
     selection_reasons: tuple[str, ...]
     legacy_mode: bool = False
+    gpu_capability_used: bool = False
 
 
 MODEL_STORAGE_GB: dict[str, float] = {
@@ -78,6 +101,43 @@ MODEL_STORAGE_GB: dict[str, float] = {
     "qwen2.5:14b-gguf": 18.0,
     "qwen2.5:32b": 36.0,
     "qwen2.5:72b": 80.0,
+    "nomic-embed-text": 0.3,
+    "nomic-embed-text:latest": 0.3,
+    # llama.cpp-served GGUF quants for the GPU-accelerated daily/deep tiers. These are
+    # the exact model class measured at ~35-36 tok/s via full GPU offload on a legacy
+    # GTX 1080 test host (see core/llamacpp_capability_probe.py for the live check that
+    # gates when these are actually offered, instead of trusting a GPU name heuristic).
+    "qwen2.5:7b-instruct-q4_k_m": 4.7,
+    "qwen2.5:14b-instruct-q4_k_m": 9.0,
+    "qwen2.5:32b-instruct-q4_k_m": 20.0,
+    "deepseek-r1:14b-qwen-distill-q4_k_m": 9.5,
+    "qwen3:30b-a3b-q4_k_m": 18.5,
+}
+
+# GGUF source registry for llama.cpp-served models, keyed by the same logical model
+# name used in BundleRoleModel.model so lookups stay uniform with MODEL_STORAGE_GB.
+# llama.cpp doesn't consume Ollama's name:tag registry — it needs a HF repo + filename.
+GGUF_MODEL_SOURCES: dict[str, dict[str, str]] = {
+    "qwen2.5:7b-instruct-q4_k_m": {
+        "repo": "Qwen/Qwen2.5-7B-Instruct-GGUF",
+        "filename": "qwen2.5-7b-instruct-q4_k_m.gguf",
+    },
+    "qwen2.5:14b-instruct-q4_k_m": {
+        "repo": "Qwen/Qwen2.5-14B-Instruct-GGUF",
+        "filename": "qwen2.5-14b-instruct-q4_k_m.gguf",
+    },
+    "qwen2.5:32b-instruct-q4_k_m": {
+        "repo": "Qwen/Qwen2.5-32B-Instruct-GGUF",
+        "filename": "qwen2.5-32b-instruct-q4_k_m.gguf",
+    },
+    "deepseek-r1:14b-qwen-distill-q4_k_m": {
+        "repo": "unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF",
+        "filename": "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf",
+    },
+    "qwen3:30b-a3b-q4_k_m": {
+        "repo": "Qwen/Qwen3-30B-A3B-GGUF",
+        "filename": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    },
 }
 
 MODEL_METADATA: dict[str, dict[str, Any]] = {
@@ -230,6 +290,44 @@ MODEL_METADATA: dict[str, dict[str, Any]] = {
         "license_reference": "https://ollama.com/library/qwen2.5",
         "parameter_count": "32B",
     },
+    "qwen2.5:7b-instruct-q4_k_m": {
+        "family": "qwen2.5",
+        "license_name": "Apache-2.0",
+        "license_reference": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF",
+        "parameter_count": "7B",
+        "bundle_role": "daily_accelerated",
+        "eagle3_draft_eligible": False,
+    },
+    "qwen2.5:14b-instruct-q4_k_m": {
+        "family": "qwen2.5",
+        "license_name": "Apache-2.0",
+        "license_reference": "https://huggingface.co/Qwen/Qwen2.5-14B-Instruct-GGUF",
+        "parameter_count": "14B",
+        "bundle_role": "daily_accelerated",
+    },
+    "qwen2.5:32b-instruct-q4_k_m": {
+        "family": "qwen2.5",
+        "license_name": "Apache-2.0",
+        "license_reference": "https://huggingface.co/Qwen/Qwen2.5-32B-Instruct-GGUF",
+        "parameter_count": "32B",
+        "bundle_role": "deep_overnight",
+    },
+    "deepseek-r1:14b-qwen-distill-q4_k_m": {
+        "family": "deepseek-r1",
+        "license_name": "MIT",
+        "license_reference": "https://huggingface.co/unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF",
+        "parameter_count": "14B",
+        "bundle_role": "deep_overnight",
+    },
+    "qwen3:30b-a3b-q4_k_m": {
+        "family": "qwen3",
+        "license_name": "Apache-2.0",
+        "license_reference": "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF",
+        "parameter_count": "30B",
+        "active_parameter_count": "3B",
+        "architecture": "moe",
+        "bundle_role": "deep_overnight",
+    },
 }
 
 
@@ -318,6 +416,189 @@ LOCAL_BUNDLE_SPECS: dict[str, LocalBundleSpec] = {
         ),
         summary="Qwen3-family local stack with tiny routing, daily workhorse, and hybrid-MoE deep lane.",
     ),
+
+    # ------------------------------------------------------------------
+    # Always-3-tier bucket bundles (tiny_fast / daily_accelerated / deep_overnight).
+    # Every bucket A-E gets both a no-GPU (CPU-only, always safe) variant and a
+    # gpu_conditional variant that is only ever selected once
+    # core.llamacpp_capability_probe.probe_llamacpp_capability() has *measured* real
+    # speedup on this exact host — never based on a GPU name heuristic alone. A weak
+    # host (bucket A) with a live-verified GPU can genuinely beat a stronger host
+    # (bucket C/D) that has no working GPU backend on the daily lane. deep_overnight
+    # is honestly allowed to be slow in every row; it exists for tasks queued and
+    # left running, not live chat.
+    # ------------------------------------------------------------------
+
+    "triple_bucket_a_no_gpu": LocalBundleSpec(
+        bundle_id="triple_bucket_a_no_gpu",
+        kind="triple",
+        display_name="Bucket A - tiny/daily/deep (CPU-only)",
+        role_models=(
+            BundleRoleModel("tiny_fast", "qwen3:0.6b", expected_tokens_per_second=15.0),
+            BundleRoleModel("daily_accelerated", "qwen3:4b", expected_tokens_per_second=5.0),
+            BundleRoleModel(
+                "deep_overnight", "gemma3:4b", expected_tokens_per_second=4.0,
+                offload_note="CPU-only; queue this for overnight/batch tasks, not live chat.",
+            ),
+        ),
+        summary="Weakest-hardware tier still gets a fast/daily/deep spread, sized for RAM-only inference.",
+    ),
+    "triple_bucket_a_gpu_accelerated": LocalBundleSpec(
+        bundle_id="triple_bucket_a_gpu_accelerated",
+        kind="triple",
+        display_name="Bucket A - tiny/daily/deep (llama.cpp GPU-accelerated)",
+        role_models=(
+            BundleRoleModel("tiny_fast", "qwen3:0.6b", expected_tokens_per_second=15.0),
+            BundleRoleModel(
+                "daily_accelerated", "qwen2.5:7b-instruct-q4_k_m", backend="llamacpp",
+                expected_tokens_per_second=35.5, requires_gpu_backend=True,
+                offload_note="Full GPU offload (-ngl 999) via a live-verified llama.cpp backend.",
+            ),
+            BundleRoleModel(
+                "deep_overnight", "deepseek-r1:14b-qwen-distill-q4_k_m", backend="llamacpp",
+                expected_tokens_per_second=12.0, requires_gpu_backend=True,
+                offload_note="Partial GPU offload; larger reasoning model queued for overnight/batch use.",
+            ),
+        ),
+        gpu_conditional=True,
+        summary="Same weak-RAM host, but a live-verified llama.cpp GPU backend unlocks a materially faster daily lane and a real overnight deep lane.",
+    ),
+    "triple_bucket_b_no_gpu": LocalBundleSpec(
+        bundle_id="triple_bucket_b_no_gpu",
+        kind="triple",
+        display_name="Bucket B - tiny/daily/deep (CPU-only)",
+        role_models=(
+            BundleRoleModel("tiny_fast", "qwen3:0.6b", expected_tokens_per_second=17.0),
+            BundleRoleModel("daily_accelerated", "qwen3:8b", expected_tokens_per_second=7.0),
+            BundleRoleModel(
+                "deep_overnight", "deepseek-r1:14b", expected_tokens_per_second=4.0,
+                offload_note="CPU-only; queue this for overnight/batch tasks, not live chat.",
+            ),
+        ),
+        summary="Bucket B without a working GPU backend: CPU-sized fast/daily/deep spread.",
+    ),
+    "triple_bucket_b_gpu_accelerated": LocalBundleSpec(
+        bundle_id="triple_bucket_b_gpu_accelerated",
+        kind="triple",
+        display_name="Bucket B - tiny/daily/deep (llama.cpp GPU-accelerated)",
+        role_models=(
+            BundleRoleModel("tiny_fast", "qwen3:0.6b", expected_tokens_per_second=17.0),
+            BundleRoleModel(
+                "daily_accelerated", "qwen2.5:7b-instruct-q4_k_m", backend="llamacpp",
+                expected_tokens_per_second=33.0, requires_gpu_backend=True,
+                offload_note="Full GPU offload (-ngl 999) via a live-verified llama.cpp backend.",
+            ),
+            BundleRoleModel(
+                "deep_overnight", "qwen2.5:14b-instruct-q4_k_m", backend="llamacpp",
+                expected_tokens_per_second=17.0, requires_gpu_backend=True,
+                offload_note="Near-full GPU offload; comfortably faster deep lane than CPU-only.",
+            ),
+        ),
+        gpu_conditional=True,
+        summary="Bucket B with a live-verified GPU backend: fast daily lane plus a genuinely usable deep lane.",
+    ),
+    "triple_bucket_c_no_gpu": LocalBundleSpec(
+        bundle_id="triple_bucket_c_no_gpu",
+        kind="triple",
+        display_name="Bucket C - tiny/daily/deep (CPU-only)",
+        role_models=(
+            BundleRoleModel("tiny_fast", "qwen3:0.6b", expected_tokens_per_second=21.0),
+            BundleRoleModel("daily_accelerated", "qwen3:8b", expected_tokens_per_second=8.0),
+            BundleRoleModel(
+                "deep_overnight", "qwen3:14b", expected_tokens_per_second=5.0,
+                offload_note="CPU-only; queue this for overnight/batch tasks, not live chat.",
+            ),
+        ),
+        summary="Bucket C without a working GPU backend: CPU-sized fast/daily/deep spread.",
+    ),
+    "triple_bucket_c_gpu_accelerated": LocalBundleSpec(
+        bundle_id="triple_bucket_c_gpu_accelerated",
+        kind="triple",
+        display_name="Bucket C - tiny/daily/deep (llama.cpp GPU-accelerated)",
+        role_models=(
+            BundleRoleModel("tiny_fast", "qwen3:0.6b", expected_tokens_per_second=21.0),
+            BundleRoleModel(
+                "daily_accelerated", "qwen2.5:14b-instruct-q4_k_m", backend="llamacpp",
+                expected_tokens_per_second=25.0, requires_gpu_backend=True,
+                offload_note="Full GPU offload (-ngl 999) via a live-verified llama.cpp backend.",
+            ),
+            BundleRoleModel(
+                "deep_overnight", "qwen2.5:32b-instruct-q4_k_m", backend="llamacpp",
+                expected_tokens_per_second=10.0, requires_gpu_backend=True,
+                offload_note="Partial GPU offload; a 32B model won't fully fit under 16GB VRAM, still faster than CPU.",
+            ),
+        ),
+        gpu_conditional=True,
+        summary="Bucket C with a live-verified GPU backend: a stronger daily lane plus a genuinely usable heavy deep lane.",
+    ),
+    "triple_bucket_d_no_gpu": LocalBundleSpec(
+        bundle_id="triple_bucket_d_no_gpu",
+        kind="triple",
+        display_name="Bucket D - tiny/daily/deep (CPU-only)",
+        role_models=(
+            BundleRoleModel("tiny_fast", "qwen3:0.6b", expected_tokens_per_second=23.0),
+            BundleRoleModel("daily_accelerated", "qwen3:14b", expected_tokens_per_second=7.5),
+            BundleRoleModel(
+                "deep_overnight", "mistral-small:24b", expected_tokens_per_second=4.0,
+                offload_note="CPU-only; queue this for overnight/batch tasks, not live chat.",
+            ),
+        ),
+        summary="Bucket D without a working GPU backend: CPU-sized fast/daily/deep spread.",
+    ),
+    "triple_bucket_d_gpu_accelerated": LocalBundleSpec(
+        bundle_id="triple_bucket_d_gpu_accelerated",
+        kind="triple",
+        display_name="Bucket D - tiny/daily/deep (llama.cpp GPU-accelerated)",
+        role_models=(
+            BundleRoleModel("tiny_fast", "qwen3:0.6b", expected_tokens_per_second=23.0),
+            BundleRoleModel(
+                "daily_accelerated", "qwen2.5:14b-instruct-q4_k_m", backend="llamacpp",
+                expected_tokens_per_second=29.0, requires_gpu_backend=True,
+                offload_note="Full GPU offload (-ngl 999) via a live-verified llama.cpp backend.",
+            ),
+            BundleRoleModel(
+                "deep_overnight", "qwen3:30b-a3b-q4_k_m", backend="llamacpp",
+                expected_tokens_per_second=21.0, requires_gpu_backend=True,
+                offload_note="MoE model with ~3B active params; stays fast even as the deep lane via CPU-expert-offload.",
+            ),
+        ),
+        gpu_conditional=True,
+        summary="Bucket D with a live-verified GPU backend: strong daily lane plus a fast MoE-based deep lane.",
+    ),
+    "triple_bucket_e_no_gpu": LocalBundleSpec(
+        bundle_id="triple_bucket_e_no_gpu",
+        kind="triple",
+        display_name="Bucket E - tiny/daily/deep (CPU-only)",
+        role_models=(
+            BundleRoleModel("tiny_fast", "qwen3:0.6b", expected_tokens_per_second=25.0),
+            BundleRoleModel("daily_accelerated", "qwen3:14b", expected_tokens_per_second=10.0),
+            BundleRoleModel(
+                "deep_overnight", "qwen2.5:32b", expected_tokens_per_second=5.5,
+                offload_note="CPU-only; queue this for overnight/batch tasks, not live chat.",
+            ),
+        ),
+        summary="Bucket E without a working GPU backend: a strong CPU host still gets a full fast/daily/deep spread.",
+    ),
+    "triple_bucket_e_gpu_accelerated": LocalBundleSpec(
+        bundle_id="triple_bucket_e_gpu_accelerated",
+        kind="triple",
+        display_name="Bucket E - tiny/daily/deep (llama.cpp GPU-accelerated)",
+        role_models=(
+            BundleRoleModel("tiny_fast", "qwen3:0.6b", expected_tokens_per_second=25.0),
+            BundleRoleModel(
+                "daily_accelerated", "qwen2.5:14b-instruct-q4_k_m", backend="llamacpp",
+                expected_tokens_per_second=35.0, requires_gpu_backend=True,
+                offload_note="Full GPU offload (-ngl 999) via a live-verified llama.cpp backend.",
+            ),
+            BundleRoleModel(
+                "deep_overnight", "qwen2.5:32b-instruct-q4_k_m", backend="llamacpp",
+                expected_tokens_per_second=17.0, requires_gpu_backend=True,
+                offload_note="Full GPU offload; comfortably fits under >=24GB VRAM.",
+            ),
+        ),
+        gpu_conditional=True,
+        summary="Bucket E with a live-verified GPU backend: the fastest daily lane and a genuinely fast deep lane too.",
+    ),
 }
 
 
@@ -393,19 +674,45 @@ def safe_disk_floor_gb(models: tuple[str, ...] | list[str]) -> float:
     return round(max(total_size * 2.0, total_size + 25.0), 1)
 
 
+def llamacpp_offload_layers(*, model_name: str, vram_gb: float, layer_count_hint: int = 0) -> int:
+    """Returns the -ngl value for llama.cpp given a model and available VRAM.
+
+    999 means "offload everything, it fits." A smaller value means partial offload:
+    that many layers go to GPU, the rest stay in CPU RAM and llama.cpp handles the
+    split. This is what lets deep_overnight stay honestly labeled — a model too big
+    for VRAM still runs, just slower, instead of either refusing to load or silently
+    claiming full-GPU speed it can't deliver.
+    """
+    if vram_gb <= 0:
+        return 0
+    model_gb = model_storage_gb(model_name)
+    if model_gb <= 0:
+        return 999
+    if vram_gb >= model_gb * 1.15:  # comfortable headroom left over for KV cache
+        return 999
+    total_layers = layer_count_hint or _estimate_layer_count(model_name)
+    usable_vram = max(0.5, vram_gb - 1.5)  # reserve ~1.5GB for KV cache / daily-lane coexistence
+    fraction = min(1.0, usable_vram / model_gb)
+    return max(1, int(total_layers * fraction))
+
+
+def _estimate_layer_count(model_name: str) -> int:
+    # Rough heuristic: dense transformer layer counts scale close to linearly with
+    # parameter count in this size range (roughly 1.4-1.7 layers per billion params
+    # for the Qwen/DeepSeek/Mistral families used here). Good enough for sizing a
+    # partial-offload split; llama.cpp's own metadata is authoritative at load time.
+    params_b = model_parameter_billions(model_name)
+    return max(1, round(params_b * 1.6))
+
+
 def bundle_spec(bundle_id: str) -> LocalBundleSpec:
     return LOCAL_BUNDLE_SPECS[bundle_id]
 
 
 def local_multi_llm_fit_from_probe(probe: MachineProbe | Mapping[str, Any]) -> str:
-    if isinstance(probe, Mapping):
-        ram_gb = float(probe.get("ram_gb") or 0.0)
-        accelerator = str(probe.get("accelerator") or "").strip().lower()
-        vram_gb = float(probe.get("vram_gb") or 0.0) if probe.get("vram_gb") is not None else 0.0
-    else:
-        ram_gb = float(probe.ram_gb or 0.0)
-        accelerator = str(probe.accelerator or "").strip().lower()
-        vram_gb = float(probe.vram_gb or 0.0) if probe.vram_gb is not None else 0.0
+    ram_gb = _probe_ram_gb(probe)
+    accelerator = _probe_accelerator(probe)
+    vram_gb = _probe_effective_vram_gb(probe)
     if accelerator == "mps":
         if ram_gb >= 48.0:
             return "comfortable"
@@ -420,15 +727,9 @@ def local_multi_llm_fit_from_probe(probe: MachineProbe | Mapping[str, Any]) -> s
 
 
 def capacity_bucket_for_machine(*, probe: MachineProbe | Mapping[str, Any], free_disk_gb: float) -> str:
-    if isinstance(probe, Mapping):
-        ram_gb = float(probe.get("ram_gb") or 0.0)
-        accelerator = str(probe.get("accelerator") or "").strip().lower()
-        raw_vram = probe.get("vram_gb")
-        vram_gb = float(raw_vram or 0.0) if raw_vram is not None else 0.0
-    else:
-        ram_gb = float(probe.ram_gb or 0.0)
-        accelerator = str(probe.accelerator or "").strip().lower()
-        vram_gb = float(probe.vram_gb or 0.0) if probe.vram_gb is not None else 0.0
+    ram_gb = _probe_ram_gb(probe)
+    accelerator = _probe_accelerator(probe)
+    vram_gb = _probe_effective_vram_gb(probe)
     effective_vram = ram_gb if accelerator == "mps" else vram_gb
     free_gb = float(free_disk_gb or 0.0)
     if ram_gb < 16.0 or effective_vram < 6.0 or free_gb < 20.0:
@@ -448,11 +749,22 @@ def resolve_local_bundle_recommendation(
     free_disk_gb: float,
     secondary_local_model_name: str,
     selected_model: str = "",
+    gpu_capability: Any = None,
 ) -> LocalBundleRecommendation:
+    """Every capacity bucket A-E always resolves to a 3-role tiny_fast/daily_accelerated/
+    deep_overnight bundle — no bucket, including the weakest, collapses to a single
+    model. gpu_capability, when provided, should be a
+    core.llamacpp_capability_probe.CapabilityProbeResult (or None). It is intentionally
+    typed loosely here to avoid a hard import dependency for callers that never probe.
+    The GPU-accelerated variant of the bucket's bundle is only ever selected when a
+    live probe result says `usable=True` — never from a GPU name heuristic alone. With
+    no probe result (gpu_capability=None) or a probe that rejected the GPU, the
+    CPU-only variant is used, which is still a full 3-tier spread, just RAM-sized."""
     explicit_model = str(selected_model or "").strip()
     fit = local_multi_llm_fit_from_probe(probe)
     bucket = capacity_bucket_for_machine(probe=probe, free_disk_gb=free_disk_gb)
     advanced_allowed = fit != "single_model_only" and free_disk_gb >= model_storage_gb(secondary_local_model_name) + 8.0
+    gpu_usable = bool(gpu_capability is not None and getattr(gpu_capability, "usable", False))
 
     if explicit_model:
         legacy_bundle = LocalBundleSpec(
@@ -480,53 +792,28 @@ def resolve_local_bundle_recommendation(
             legacy_mode=True,
         )
 
-    if bucket == "A":
-        recommended = bundle_spec("single_gemma3_4b")
-        fallback = bundle_spec("single_qwen3_4b")
+    bucket_key = bucket.lower()
+    no_gpu_bundle = bundle_spec(f"triple_bucket_{bucket_key}_no_gpu")
+    gpu_bundle = bundle_spec(f"triple_bucket_{bucket_key}_gpu_accelerated")
+    if gpu_usable:
+        recommended = gpu_bundle
+        fallback = no_gpu_bundle  # safe degrade if the GPU later becomes unavailable
         reasons = (
-            "Capacity bucket A stays on one lightweight local model because RAM, VRAM, or free SSD is too constrained for a useful bundle.",
-            "Gemma 3 4B is the safest local fallback on small hosts.",
+            f"Capacity bucket {bucket} has a live-verified llama.cpp GPU backend "
+            f"(measured {getattr(gpu_capability, 'gpu_tokens_per_second', 0.0):.1f} tok/s, "
+            f"{getattr(gpu_capability, 'speedup_ratio', 0.0):.1f}x over CPU baseline), so the daily and deep "
+            "lanes are both GPU-accelerated instead of RAM-sized.",
+            "Every bucket always resolves to a tiny_fast/daily_accelerated/deep_overnight spread, "
+            "never a single model, regardless of GPU state.",
         )
-    elif bucket == "B":
-        recommended = bundle_spec("single_qwen3_8b")
-        dual_fallback = bundle_spec("dual_qwen3_8b_gemma3_4b")
-        dual_floor = safe_disk_floor_gb(dual_fallback.models)
-        fallback = dual_fallback if free_disk_gb >= dual_floor and _probe_ram_gb(probe) >= 20.0 else bundle_spec("single_gemma3_4b")
-        reasons = (
-            "Capacity bucket B defaults to one strong general local model to keep first-run latency and disk pressure sane.",
-            "A lighter dual fallback is surfaced only when RAM and SSD headroom are both good enough.",
-        )
-    elif bucket == "C":
-        recommended = bundle_spec("dual_qwen3_8b_deepseek_r1_8b")
-        fallback = bundle_spec("dual_qwen3_8b_gemma3_4b")
-        reasons = (
-            "Capacity bucket C prefers a dual local bundle with a clear general lane and a clear reasoning lane.",
-            "This keeps the default install fully local while materially improving review and planning quality over a single-model setup.",
-        )
-    elif bucket == "D":
-        dual = bundle_spec("dual_mistral_small_24b_deepseek_r1_8b")
-        triple = bundle_spec("triple_qwen3_8b_mistral_small_24b_deepseek_r1_8b")
-        triple_floor = safe_disk_floor_gb(triple.models)
-        if free_disk_gb >= triple_floor + 10.0 and _probe_ram_gb(probe) >= 36.0:
-            recommended = triple
-            fallback = dual
-            reasons = (
-                "Capacity bucket D is strong enough for an explicit general/coding/reasoning triple when disk headroom is comfortably above the safe floor.",
-                "The dual coding-plus-reasoning pair remains the lighter fallback.",
-            )
-        else:
-            recommended = dual
-            fallback = bundle_spec("dual_qwen3_8b_deepseek_r1_8b")
-            reasons = (
-                "Capacity bucket D defaults to a coding and reasoning pair unless disk and memory headroom are clearly comfortable for a triple.",
-                "The balanced Qwen plus DeepSeek pair remains the lighter fallback.",
-            )
     else:
-        recommended = bundle_spec("triple_qwen3_14b_mistral_small_24b_deepseek_r1_14b")
-        fallback = bundle_spec("triple_qwen3_8b_mistral_small_24b_deepseek_r1_8b")
+        recommended = no_gpu_bundle
+        fallback = no_gpu_bundle
         reasons = (
-            "Capacity bucket E defaults to a full three-lane local bundle because the host has high-end RAM and SSD headroom.",
-            "The smaller practical triple remains the lighter fallback for the same role split.",
+            f"Capacity bucket {bucket} has no live-verified GPU-accelerated backend, so the "
+            "tiny_fast/daily_accelerated/deep_overnight spread is sized for RAM-only inference.",
+            "A GPU name alone is never enough to promise acceleration — only a measured "
+            "llama.cpp benchmark (core.llamacpp_capability_probe) can unlock the GPU-accelerated variant.",
         )
 
     return LocalBundleRecommendation(
@@ -539,12 +826,13 @@ def resolve_local_bundle_recommendation(
         advanced_optional_allowed=advanced_allowed,
         advanced_optional_profile="local-max" if advanced_allowed else "",
         selection_reasons=reasons,
+        gpu_capability_used=gpu_usable,
     )
 
 
 def provider_role_for_bundle_role(bundle_role: str) -> str:
     clean = str(bundle_role or "").strip().lower()
-    if clean in {"reasoning", "heavy_reasoning"}:
+    if clean in {"reasoning", "heavy_reasoning", "deep_overnight"}:
         return "queen"
     return "drone"
 
@@ -582,6 +870,21 @@ def manifest_profile_for_model(*, model_name: str, bundle_role: str) -> dict[str
         tool_support.append("tool_calls")
         confidence = 0.63
         notes = "Lightweight local Ollama utility lane for cheap classification and tool intent."
+    elif clean_role == "tiny_fast":
+        capabilities.extend(["tool_intent"])
+        tool_support.append("tool_calls")
+        confidence = 0.6
+        notes = "Always-resident tiny local lane for instant classification, tool intent, and formatting."
+    elif clean_role == "daily_accelerated":
+        capabilities.extend(["code_basic", "tool_intent"])
+        tool_support.append("tool_calls")
+        confidence = 0.74
+        notes = "Daily-driver local lane, GPU-accelerated via llama.cpp when a live-verified backend exists."
+    elif clean_role == "deep_overnight":
+        capabilities.extend(["code_basic", "code_complex", "long_context"])
+        tool_support.extend(["web_search", "code_complex"])
+        confidence = 0.7
+        notes = "Slow-but-powerful overnight/batch local lane; honestly framed as non-interactive-speed."
     profile = {
         "family": family,
         "license_name": str(metadata.get("license_name") or "user-managed"),
@@ -606,16 +909,35 @@ def _probe_ram_gb(probe: MachineProbe | Mapping[str, Any]) -> float:
     return float(probe.ram_gb or 0.0)
 
 
+def _probe_accelerator(probe: MachineProbe | Mapping[str, Any]) -> str:
+    if isinstance(probe, Mapping):
+        return str(probe.get("accelerator") or "").strip().lower()
+    return str(probe.accelerator or "").strip().lower()
+
+
+def _probe_effective_vram_gb(probe: MachineProbe | Mapping[str, Any]) -> float:
+    accelerator = _probe_accelerator(probe)
+    if accelerator not in {"cuda", "directml"}:
+        return 0.0
+    if isinstance(probe, Mapping):
+        raw_vram = probe.get("vram_gb")
+        return float(raw_vram or 0.0) if raw_vram is not None else 0.0
+    return float(probe.vram_gb or 0.0) if probe.vram_gb is not None else 0.0
+
+
 __all__ = [
+    "GGUF_MODEL_SOURCES",
     "LOCAL_BUNDLE_SPECS",
     "MODEL_METADATA",
     "MODEL_STORAGE_GB",
+    "SPEED_TIER_ROLES",
     "BundleRoleModel",
     "LocalBundleRecommendation",
     "LocalBundleSpec",
     "bundle_spec",
     "capacity_bucket_for_machine",
     "installed_ollama_role_for_model",
+    "llamacpp_offload_layers",
     "local_multi_llm_fit_from_probe",
     "manifest_profile_for_model",
     "model_active_parameter_billions",

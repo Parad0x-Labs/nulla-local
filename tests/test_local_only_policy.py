@@ -91,17 +91,20 @@ class WebOptInPolicyTests(unittest.TestCase):
     def tearDown(self) -> None:
         policy_engine._POLICY_CACHE = self._old_cache
 
-    def test_web_is_off_by_default(self) -> None:
-        # No opt-in env set: web stays off after a fresh policy load.
+    def test_web_is_on_by_default(self) -> None:
+        # No override env set: web is on after a fresh policy load, so live-data
+        # questions (weather, prices, news) get a real answer out of the box.
         with mock.patch.dict("os.environ", {}, clear=False) as env:
             env.pop("NULLA_ENABLE_WEB", None)
             env.pop("NULLA_ALLOW_WEB", None)
+            env.pop("NULLA_DISABLE_WEB", None)
+            env.pop("NULLA_NO_WEB", None)
             policy_engine._POLICY_CACHE = None
             policy_engine.load(force_reload=True)
-            self.assertFalse(policy_engine.allow_web_fallback())
+            self.assertTrue(policy_engine.allow_web_fallback())
 
-    def test_web_default_value_in_code_default_policy_is_off(self) -> None:
-        self.assertFalse(policy_engine._DEFAULT_POLICY["system"]["allow_web_fallback"])
+    def test_web_default_value_in_code_default_policy_is_on(self) -> None:
+        self.assertTrue(policy_engine._DEFAULT_POLICY["system"]["allow_web_fallback"])
 
     def test_nulla_enable_web_env_turns_web_on(self) -> None:
         with mock.patch.dict("os.environ", {"NULLA_ENABLE_WEB": "1"}, clear=False):
@@ -115,6 +118,25 @@ class WebOptInPolicyTests(unittest.TestCase):
             policy_engine._POLICY_CACHE = None
             policy_engine.load(force_reload=True)
             self.assertTrue(policy_engine.allow_web_fallback())
+
+    def test_nulla_disable_web_env_turns_web_off(self) -> None:
+        with mock.patch.dict("os.environ", {"NULLA_DISABLE_WEB": "1"}, clear=False):
+            policy_engine._POLICY_CACHE = None
+            policy_engine.load(force_reload=True)
+            self.assertFalse(policy_engine.allow_web_fallback())
+
+    def test_nulla_no_web_alias_turns_web_off(self) -> None:
+        with mock.patch.dict("os.environ", {"NULLA_NO_WEB": "true"}, clear=False) as env:
+            env.pop("NULLA_DISABLE_WEB", None)
+            policy_engine._POLICY_CACHE = None
+            policy_engine.load(force_reload=True)
+            self.assertFalse(policy_engine.allow_web_fallback())
+
+    def test_disable_env_wins_over_enable_env(self) -> None:
+        with mock.patch.dict("os.environ", {"NULLA_ENABLE_WEB": "1", "NULLA_DISABLE_WEB": "1"}, clear=False):
+            policy_engine._POLICY_CACHE = None
+            policy_engine.load(force_reload=True)
+            self.assertFalse(policy_engine.allow_web_fallback())
 
     def test_opt_in_env_still_blocked_by_local_only_mode(self) -> None:
         # Local-only mode is an even stronger guarantee than the web opt-in.

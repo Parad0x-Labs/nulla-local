@@ -1,0 +1,66 @@
+name: Windows Release Gauntlet
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-release-gauntlet.yml"
+      - "Install_And_Run_NULLA.ps1"
+      - "Install_And_Run_NULLA.bat"
+      - "Test_NULLA_Windows_Gauntlet.cmd"
+      - "installer/**"
+      - "core/**"
+      - "storage/**"
+      - "tools/windows_fresh_host_gauntlet.ps1"
+      - "tests/test_hardware_tier.py"
+      - "tests/test_model_store_planner.py"
+      - "tests/test_provider_probe.py"
+      - "tests/test_provider_probe_contract.py"
+      - "tests/test_install_script_contract.py"
+      - "tests/test_install_surface_contracts.py"
+      - "tests/test_local_only_policy.py"
+      - "tests/test_validate_install_profile.py"
+  push:
+    branches: [main, develop]
+    paths:
+      - ".github/workflows/windows-release-gauntlet.yml"
+      - "Install_And_Run_NULLA.ps1"
+      - "Install_And_Run_NULLA.bat"
+      - "Test_NULLA_Windows_Gauntlet.cmd"
+      - "installer/**"
+      - "core/**"
+      - "storage/**"
+      - "tools/windows_fresh_host_gauntlet.ps1"
+      - "tests/test_hardware_tier.py"
+      - "tests/test_model_store_planner.py"
+      - "tests/test_provider_probe.py"
+      - "tests/test_provider_probe_contract.py"
+      - "tests/test_install_script_contract.py"
+      - "tests/test_install_surface_contracts.py"
+      - "tests/test_local_only_policy.py"
+      - "tests/test_validate_install_profile.py"
+  workflow_dispatch:
+
+jobs:
+  gauntlet:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install package with runtime test dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run Windows gauntlet without live model pull
+        shell: cmd
+        run: Test_NULLA_Windows_Gauntlet.cmd -SkipInstall -SkipBenchmark -Json
+      - name: Upload gauntlet report
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: nulla-windows-gauntlet-report
+          path: dist/windows-gauntlet/*.json

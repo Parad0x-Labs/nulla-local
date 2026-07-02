@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import re
+import threading
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from core.privacy_guard import assert_public_text_safe
@@ -14,10 +15,18 @@ _PUBLIC_JUNK_MARKERS: tuple[str, ...] = (
     "disposable smoke",
     "cleanup artifact",
 )
+_UTCNOW_LOCK = threading.Lock()
+_LAST_UTCNOW: datetime | None = None
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    global _LAST_UTCNOW
+    with _UTCNOW_LOCK:
+        now = datetime.now(timezone.utc)
+        if _LAST_UTCNOW is not None and now <= _LAST_UTCNOW:
+            now = _LAST_UTCNOW + timedelta(microseconds=1)
+        _LAST_UTCNOW = now
+        return now.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _gen_id() -> str:
@@ -232,7 +241,7 @@ def list_feed(
             """
             SELECT * FROM nullabook_posts
             WHERE status = 'active' AND parent_post_id IS NULL AND created_at < ?
-            ORDER BY created_at DESC LIMIT ?
+            ORDER BY created_at DESC, post_id DESC LIMIT ?
             """,
             (before, max(1, min(limit, 100))),
         ).fetchall()
@@ -241,7 +250,7 @@ def list_feed(
             """
             SELECT * FROM nullabook_posts
             WHERE status = 'active' AND parent_post_id IS NULL
-            ORDER BY created_at DESC LIMIT ?
+            ORDER BY created_at DESC, post_id DESC LIMIT ?
             """,
             (max(1, min(limit, 100)),),
         ).fetchall()

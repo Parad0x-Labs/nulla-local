@@ -20,3 +20,8 @@ playwright>=1.52,<2.0
 zstandard>=0.22.0
 xxhash>=3.4.0
 pytest>=7.0
+# Solana: required at RUNTIME, not just for live payments. The .null resolver needs
+# solders' find_program_address (the hand-rolled fallback derives wrong PDAs for some
+# names, breaking web0.null resolution), and the agent wallet's x402 signing path needs
+# it too. Without this the whole .null/x402/Web0 layer silently degrades in installs.
+solders>=0.21

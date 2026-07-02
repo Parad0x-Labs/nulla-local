@@ -3,6 +3,7 @@ from __future__ import annotations
 import difflib
 import fnmatch
 import json
+import os
 import platform
 import re
 import subprocess
@@ -1226,17 +1227,38 @@ def _truncate(text: str, *, limit: int = 1800) -> str:
 
 
 def _home_relative_label(path: Path) -> str:
-    home = Path.home().resolve()
+    home = _machine_home().resolve()
     try:
         relative = path.resolve().relative_to(home)
-        return "~" if str(relative) in {"", "."} else f"~/{relative}"
+        return "~" if str(relative) in {"", "."} else f"~/{relative.as_posix()}"
     except Exception:
-        return str(path)
+        return path.as_posix()
 
 
 def _safe_machine_roots() -> tuple[Path, ...]:
-    home = Path.home().resolve()
+    home = _machine_home().resolve()
     return tuple((home / name).resolve() for name in _SAFE_MACHINE_DIRECTORY_NAMES)
+
+
+def _machine_home() -> Path:
+    try:
+        return Path.home()
+    except Exception:
+        pass
+    for key in ("HOME", "USERPROFILE"):
+        value = str(os.environ.get(key) or "").strip()
+        if value:
+            return Path(value).expanduser()
+    return Path("~").expanduser()
+
+
+def _expand_machine_user(raw: str) -> Path:
+    value = str(raw or "").strip()
+    if value in {"~", "~/", "~\\"}:
+        return _machine_home()
+    if value.startswith("~/") or value.startswith("~\\"):
+        return _machine_home() / value[2:]
+    return Path(value).expanduser()
 
 
 def _resolve_machine_directory(raw_path: str | None) -> Path:
@@ -1257,10 +1279,10 @@ def _resolve_machine_directory(raw_path: str | None) -> Path:
         "docs": "Documents",
     }
     if lowered in alias_map:
-        return (Path.home() / alias_map[lowered]).resolve()
-    candidate = Path(raw).expanduser()
+        return (_machine_home() / alias_map[lowered]).resolve()
+    candidate = _expand_machine_user(raw)
     if not candidate.is_absolute():
-        candidate = (Path.home() / candidate).resolve()
+        candidate = (_machine_home() / candidate).resolve()
     else:
         candidate = candidate.resolve()
     for root in _safe_machine_roots():
@@ -1682,6 +1704,15 @@ def _inspect_machine_specs() -> RuntimeExecutionResult:
         f"- Accelerator: {probe.accelerator or 'cpu'}",
         f"- GPU: {probe.gpu_name or 'none'}",
     ]
+    accelerator = str(probe.accelerator or "").strip().lower()
+    accelerator_status = str(getattr(probe, "accelerator_status", "") or "").strip()
+    if not accelerator_status:
+        accelerator_status = "cpu" if accelerator == "cpu" else "usable"
+    accelerator_advice = str(getattr(probe, "accelerator_advice", "") or "").strip()
+    if accelerator_status and accelerator_status not in {"usable", "cpu"}:
+        response_lines.append(f"- Accelerator status: {accelerator_status}")
+    if accelerator_advice:
+        response_lines.append(f"- Accelerator advice: {accelerator_advice}")
     if probe.vram_gb is not None:
         label = "Unified memory" if str(probe.accelerator or "").strip().lower() == "mps" else "VRAM"
         response_lines.append(f"- {label}: {round(probe.vram_gb, 1)} GiB")
@@ -1709,6 +1740,8 @@ def _inspect_machine_specs() -> RuntimeExecutionResult:
         gpu_name=probe.gpu_name or "",
         vram_gb=round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
         accelerator=probe.accelerator,
+        accelerator_status=accelerator_status,
+        accelerator_advice=accelerator_advice,
         recommended_model=recommended_model,
         selected_tier=selected_tier,
         capacity_bucket=capacity_bucket,
@@ -1732,6 +1765,8 @@ def _inspect_machine_specs() -> RuntimeExecutionResult:
             "gpu_name": probe.gpu_name or "",
             "vram_gb": round(probe.vram_gb, 1) if probe.vram_gb is not None else None,
             "accelerator": probe.accelerator,
+            "accelerator_status": accelerator_status,
+            "accelerator_advice": accelerator_advice,
             "recommended_model": recommended_model,
             "selected_tier": selected_tier,
             "capacity_bucket": capacity_bucket,
@@ -2948,6 +2983,8 @@ def _trusted_local_network_mode(command: str, *, arguments: dict[str, Any]) -> s
     if not argv:
         return None
     base = Path(str(argv[0] or "")).name.lower()
+    if os.name == "nt" and base.endswith(".exe"):
+        base = base[:-4]
     if base in {"pytest", "ruff"}:
         return "heuristic_only"
     if base not in {"python", "python3"} or len(argv) < 3:

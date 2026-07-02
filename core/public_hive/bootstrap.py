@@ -184,13 +184,17 @@ def write_public_hive_agent_bootstrap(
         project_root=root,
     )
     if resolved_tls_ca_file:
-        try:
-            resolved_tls_path = Path(resolved_tls_ca_file).resolve()
-            if destination.is_relative_to(root) and resolved_tls_path.is_relative_to(root):
-                payload["tls_ca_file"] = resolved_tls_path.relative_to(root).as_posix()
-            else:
-                payload["tls_ca_file"] = str(resolved_tls_path)
-        except Exception:
+        resolved_tls_path = Path(resolved_tls_ca_file).expanduser()
+        if resolved_tls_path.is_file():
+            try:
+                local_tls_path = resolved_tls_path.resolve()
+                if destination.is_relative_to(root) and local_tls_path.is_relative_to(root):
+                    payload["tls_ca_file"] = local_tls_path.relative_to(root).as_posix()
+                else:
+                    payload["tls_ca_file"] = str(local_tls_path)
+            except Exception:
+                payload["tls_ca_file"] = resolved_tls_ca_file
+        else:
             payload["tls_ca_file"] = resolved_tls_ca_file
     else:
         payload.pop("tls_ca_file", None)

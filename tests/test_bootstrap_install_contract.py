@@ -4,12 +4,17 @@ import subprocess
 import tarfile
 from pathlib import Path
 
+from tests.platform_helpers import bash_path, bash_script_args
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_shell_bootstrap_falls_back_to_canonical_installer() -> None:
     script = (PROJECT_ROOT / "installer" / "bootstrap_nulla.sh").read_text(encoding="utf-8")
 
+    assert 'REPO="${NULLA_GITHUB_REPO:-nulla-local}"' in script
+    assert 'INSTALL_DIR="${NULLA_INSTALL_DIR:-$HOME/nulla-local}"' in script
+    assert 'NULLA_GITHUB_REPO:-nulla-hive-mind' not in script
     assert "--install-profile <id>" in script
     assert "ollama-only" in script
     assert "ollama-max" in script
@@ -50,7 +55,7 @@ def test_shell_bootstrap_handles_flat_git_archive_without_stripping_root_files(t
     (source_root / "Install_And_Run_NULLA.sh").write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        f'printf "%s\\n" "$@" > "{marker_path}"\n',
+        f'printf "%s\\n" "$@" > "{bash_path(marker_path)}"\n',
         encoding="utf-8",
     )
     (source_root / "Install_And_Run_NULLA.sh").chmod(0o755)
@@ -69,14 +74,13 @@ def test_shell_bootstrap_handles_flat_git_archive_without_stripping_root_files(t
         tar.add(installer_dir, arcname="installer")
 
     subprocess.run(
-        [
-            "bash",
-            str(PROJECT_ROOT / "installer" / "bootstrap_nulla.sh"),
+        bash_script_args(
+            PROJECT_ROOT / "installer" / "bootstrap_nulla.sh",
             "--archive-url",
             archive_path.resolve().as_uri(),
             "--dir",
             str(install_dir),
-        ],
+        ),
         check=True,
         cwd=PROJECT_ROOT,
     )
@@ -89,6 +93,11 @@ def test_shell_bootstrap_handles_flat_git_archive_without_stripping_root_files(t
 def test_powershell_bootstrap_falls_back_to_canonical_installer() -> None:
     script = (PROJECT_ROOT / "installer" / "bootstrap_nulla.ps1").read_text(encoding="utf-8")
 
+    assert 'if ([string]::IsNullOrWhiteSpace($RepoName)) { $RepoName = "nulla-local" }' in script
+    assert "function Resolve-DefaultInstallDir" in script
+    assert '[System.IO.DriveInfo]::GetDrives()' in script
+    assert 'Join-Path $bestDrive.RootDirectory.FullName "NULLA\\nulla-local"' in script
+    assert 'Join-Path $HOME "nulla-hive-mind"' not in script
     assert '[string]$InstallProfile = $env:NULLA_INSTALL_PROFILE' in script
     assert '[string]$SourceCommit = $env:NULLA_BUILD_COMMIT' in script
     assert '[string]$SourceDirtyState = $env:NULLA_BUILD_DIRTY_STATE' in script
@@ -96,6 +105,9 @@ def test_powershell_bootstrap_falls_back_to_canonical_installer() -> None:
     assert 'function Resolve-DirtyState' in script
     assert 'function Write-BuildMetadata' in script
     assert 'build-source.json' in script
+    assert '$psLauncher = Join-Path $InstallDir "Install_And_Run_NULLA.ps1"' in script
+    assert '& powershell -NoProfile -ExecutionPolicy Bypass -File $psLauncher @psArgs' in script
+    assert '-SkipBenchmark' not in script
     assert '/INSTALLPROFILE=$InstallProfile' in script
     assert 'install_nulla.bat' in script
     assert 'installer\\\\install_nulla.bat' in script
@@ -116,7 +128,7 @@ def test_shell_bootstrap_executes_launcher_without_profile_override(tmp_path: Pa
     (archive_root / "Install_And_Run_NULLA.sh").write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        f'printf "%s\\n" "$@" > "{marker_path}"\n',
+        f'printf "%s\\n" "$@" > "{bash_path(marker_path)}"\n',
         encoding="utf-8",
     )
     (archive_root / "Install_And_Run_NULLA.sh").chmod(0o755)
@@ -125,14 +137,13 @@ def test_shell_bootstrap_executes_launcher_without_profile_override(tmp_path: Pa
         tar.add(archive_root, arcname=archive_root.name)
 
     subprocess.run(
-        [
-            "bash",
-            str(PROJECT_ROOT / "installer" / "bootstrap_nulla.sh"),
+        bash_script_args(
+            PROJECT_ROOT / "installer" / "bootstrap_nulla.sh",
             "--archive-url",
             archive_path.resolve().as_uri(),
             "--dir",
             str(install_dir),
-        ],
+        ),
         check=True,
         cwd=PROJECT_ROOT,
     )
@@ -157,7 +168,7 @@ def test_shell_bootstrap_records_explicit_source_commit_for_custom_archive(tmp_p
     (archive_root / "Install_And_Run_NULLA.sh").write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        f'printf "%s\\n" "$@" > "{marker_path}"\n',
+        f'printf "%s\\n" "$@" > "{bash_path(marker_path)}"\n',
         encoding="utf-8",
     )
     (archive_root / "Install_And_Run_NULLA.sh").chmod(0o755)
@@ -166,9 +177,8 @@ def test_shell_bootstrap_records_explicit_source_commit_for_custom_archive(tmp_p
         tar.add(archive_root, arcname=archive_root.name)
 
     subprocess.run(
-        [
-            "bash",
-            str(PROJECT_ROOT / "installer" / "bootstrap_nulla.sh"),
+        bash_script_args(
+            PROJECT_ROOT / "installer" / "bootstrap_nulla.sh",
             "--ref",
             "codex/honest-ollama-prewarm-bootstrap",
             "--archive-url",
@@ -179,7 +189,7 @@ def test_shell_bootstrap_records_explicit_source_commit_for_custom_archive(tmp_p
             "true",
             "--dir",
             str(install_dir),
-        ],
+        ),
         check=True,
         cwd=PROJECT_ROOT,
     )

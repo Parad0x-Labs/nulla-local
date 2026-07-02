@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from typing import Any
 from urllib import request
 
@@ -20,6 +21,8 @@ from core.install_recommendations import (
     install_recommendation_machine_summary,
     local_multi_llm_fit,
 )
+from core.local_model_bundles import model_storage_gb
+from core.model_store_planner import DEFAULT_OPENCLAW_MEMORY_MODEL, build_model_store_drive_plan
 from core.provider_routing import ProviderCapabilityTruth
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_install_profiles import (
@@ -27,6 +30,8 @@ from core.runtime_install_profiles import (
     default_ollama_models_path,
     format_install_profile_id,
 )
+
+BENCHMARK_MARKER = "NULLA_BENCH_OK"
 
 
 def detect_ollama_binary() -> str:
@@ -72,6 +77,8 @@ def _list_ollama_models_via_api(api_url: str | None = None) -> list[dict[str, st
                 [curl_binary, "-fsS", url],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=3,
                 check=False,
             )
@@ -168,6 +175,8 @@ def list_ollama_models(ollama_binary: str | None = None, ollama_api_url: str | N
             [binary, "list"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15,
             check=False,
         )
@@ -187,6 +196,85 @@ def list_ollama_models(ollama_binary: str | None = None, ollama_api_url: str | N
         modified = " ".join(parts[3:])
         rows.append({"name": name, "id": model_id, "size": size, "modified": modified})
     return rows
+
+
+def run_ollama_benchmark(
+    *,
+    model_name: str,
+    ollama_binary: str | None = None,
+    timeout_seconds: int = 180,
+) -> dict[str, Any]:
+    """Run an opt-in local generation smoke check for the selected Ollama model."""
+    model = str(model_name or "").strip()
+    binary = str(ollama_binary or "").strip() or detect_ollama_binary()
+    base: dict[str, Any] = {
+        "schema": "nulla.local_model_benchmark.v1",
+        "model": model,
+        "ollama_binary": binary,
+        "marker": BENCHMARK_MARKER,
+        "timeout_seconds": int(timeout_seconds),
+        "note": "CLI wall-clock includes model load time; treat this as a local smoke and warmup check, not lab throughput.",
+    }
+    if not binary:
+        return base | {"status": "skipped", "reason": "ollama binary missing"}
+    if not model:
+        return base | {"status": "skipped", "reason": "model missing"}
+
+    prompt = (
+        f"Return exactly this marker and no other text: {BENCHMARK_MARKER}"
+    )
+    started = time.perf_counter()
+    try:
+        completed = subprocess.run(
+            [binary, "run", model, prompt],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=max(1, int(timeout_seconds)),
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        elapsed = max(0.0, time.perf_counter() - started)
+        output = str(getattr(exc, "stdout", "") or "")
+        stderr = str(getattr(exc, "stderr", "") or "")
+        return base | {
+            "status": "timeout",
+            "elapsed_seconds": round(elapsed, 2),
+            "output_excerpt": output[:400],
+            "stderr_excerpt": stderr[:400],
+            "reason": f"ollama run exceeded {int(timeout_seconds)} seconds",
+        }
+    except Exception as exc:
+        elapsed = max(0.0, time.perf_counter() - started)
+        return base | {
+            "status": "failed",
+            "elapsed_seconds": round(elapsed, 2),
+            "reason": str(exc),
+        }
+
+    elapsed = max(0.0, time.perf_counter() - started)
+    stdout = str(completed.stdout or "").strip()
+    stderr = str(completed.stderr or "").strip()
+    output_tokens = len(stdout.split())
+    rough_tps = round(output_tokens / elapsed, 2) if elapsed > 0 and output_tokens else 0.0
+    marker_seen = BENCHMARK_MARKER in stdout
+    status = "ok" if completed.returncode == 0 and marker_seen else "bad_output" if completed.returncode == 0 else "failed"
+    result = base | {
+        "status": status,
+        "returncode": int(completed.returncode),
+        "elapsed_seconds": round(elapsed, 2),
+        "output_tokens": output_tokens,
+        "rough_output_tokens_per_second": rough_tps,
+        "marker_seen": marker_seen,
+        "output_excerpt": stdout[:400],
+        "stderr_excerpt": stderr[:400],
+    }
+    if status == "bad_output":
+        result["reason"] = "ollama returned successfully, but the expected marker was not present"
+    elif status == "failed":
+        result["reason"] = "ollama run exited non-zero"
+    return result
 
 
 def remote_env_statuses() -> dict[str, dict[str, Any]]:
@@ -247,6 +335,50 @@ def _probe_env_for_install_profile(env_statuses: dict[str, dict[str, Any]]) -> d
     return env
 
 
+def _model_installed(model_name: str, installed_names: set[str]) -> bool:
+    clean = str(model_name or "").strip()
+    if not clean:
+        return False
+    if clean in installed_names:
+        return True
+    if ":" not in clean and f"{clean}:latest" in installed_names:
+        return True
+    return clean.endswith(":latest") and clean.removesuffix(":latest") in installed_names
+
+
+def _local_model_pull_plan(
+    *,
+    recommended_models: tuple[str, ...],
+    fallback_models: tuple[str, ...],
+    installed_names: set[str],
+    free_disk_gb: float,
+    safe_disk_floor_gb: float,
+) -> dict[str, Any]:
+    recommended = tuple(str(item).strip() for item in recommended_models if str(item).strip())
+    fallback = tuple(str(item).strip() for item in fallback_models if str(item).strip())
+    installed_recommended = tuple(item for item in recommended if _model_installed(item, installed_names))
+    missing = tuple(item for item in recommended if not _model_installed(item, installed_names))
+    estimated_download_gb = round(sum(model_storage_gb(item) for item in missing), 1)
+    free_gb = round(float(free_disk_gb or 0.0), 1)
+    safe_floor_gb = round(float(safe_disk_floor_gb or 0.0), 1)
+    disk_margin_gb = round(free_gb - safe_floor_gb, 1)
+    needs_space = bool(missing) and disk_margin_gb < 0.0
+    status = "ready" if recommended and not missing else "needs_space" if needs_space else "needs_setup"
+    return {
+        "recommended_models": list(recommended),
+        "fallback_models": list(fallback),
+        "installed_recommended_models": list(installed_recommended),
+        "missing_recommended_models": list(missing),
+        "pull_commands": [f"ollama pull {item}" for item in missing],
+        "estimated_missing_download_gb": estimated_download_gb,
+        "free_disk_gb": free_gb,
+        "safe_disk_floor_gb": safe_floor_gb,
+        "disk_margin_gb": disk_margin_gb,
+        "minimum_space_to_free_gb": round(max(0.0, safe_floor_gb - free_gb), 1),
+        "status": status,
+    }
+
+
 def build_probe_report(
     *,
     machine: MachineProbe | None = None,
@@ -255,6 +387,8 @@ def build_probe_report(
     env_statuses: dict[str, dict[str, Any]] | None = None,
     provider_capability_truth: tuple[ProviderCapabilityTruth, ...] | None = None,
     show_unsupported: bool = False,
+    run_benchmark: bool = False,
+    benchmark_timeout_seconds: int = 180,
 ) -> dict[str, Any]:
     probe = machine
     if probe is None:
@@ -295,7 +429,19 @@ def build_probe_report(
         for item in list(recommendation.recommended_bundle_models)
         if str(item).strip()
     )
-    local_only_ready = bool(binary) and all(model_name in model_names for model_name in recommended_bundle_models)
+    model_pull_plan = _local_model_pull_plan(
+        recommended_models=recommended_bundle_models,
+        fallback_models=recommendation.fallback_bundle_models,
+        installed_names=model_names,
+        free_disk_gb=recommendation.free_disk_gb,
+        safe_disk_floor_gb=recommendation.safe_disk_floor_gb,
+    )
+    model_store_drive_plan = build_model_store_drive_plan(
+        required_models=recommended_bundle_models,
+        support_models=(DEFAULT_OPENCLAW_MEMORY_MODEL,),
+    )
+    local_only_ready = bool(binary) and not model_pull_plan["missing_recommended_models"]
+    local_only_needs_space = bool(binary) and model_pull_plan["status"] == "needs_space"
     stacks.append(
         {
             "stack_id": "local_only",
@@ -303,6 +449,8 @@ def build_probe_report(
             "status": (
                 "ready"
                 if local_only_ready
+                else "needs_space"
+                if local_only_needs_space
                 else "needs_setup"
                 if binary
                 else "needs_install"
@@ -311,6 +459,10 @@ def build_probe_report(
             "reason": (
                 "The recommended local Ollama bundle is installed and ready."
                 if local_only_ready
+                else (
+                    "Ollama is present, but the target volume is below the safe disk floor for the missing recommended bundle."
+                )
+                if local_only_needs_space
                 else "Ollama is present, but the recommended local bundle is not fully pulled yet."
                 if binary
                 else "Ollama is missing; installer must provision it before the default local bundle is usable."
@@ -410,11 +562,19 @@ def build_probe_report(
         "recommended_install_profile_label": profile_truth.label,
         "recommended_install_profile_summary": profile_truth.summary,
         "install_recommendation": recommendation.to_dict(),
+        "local_model_plan": model_pull_plan,
+        "model_store_drive_plan": model_store_drive_plan,
         "recommended_stack_id": str(recommended.get("stack_id") or ""),
         "stacks": stacks,
     }
     if unsupported_stacks:
         report["unsupported_stacks"] = unsupported_stacks
+    if run_benchmark:
+        report["local_model_benchmark"] = run_ollama_benchmark(
+            model_name=recommendation.primary_local_model,
+            ollama_binary=binary,
+            timeout_seconds=benchmark_timeout_seconds,
+        )
     return report
 
 
@@ -432,8 +592,85 @@ def render_probe_report(report: dict[str, Any]) -> str:
         f"- capacity bucket: {report.get('capacity_bucket') or 'unknown'}",
         f"- ollama present: {'yes' if ollama.get('binary_present') else 'no'}",
     ]
+    accelerator_status = str(machine.get("accelerator_status") or "").strip()
+    accelerator_advice = str(machine.get("accelerator_advice") or "").strip()
+    if accelerator_status and accelerator_status not in {"usable", "cpu"}:
+        lines.append(f"- accelerator status: {accelerator_status}")
+    if accelerator_advice:
+        lines.append(f"- accelerator advice: {accelerator_advice}")
+    gpu_rows = [dict(item) for item in list(machine.get("gpu_devices") or []) if isinstance(item, dict)]
+    if gpu_rows:
+        rendered_gpus = []
+        for row in gpu_rows[:8]:
+            vram = row.get("vram_gb")
+            vram_label = f"{vram} GB" if vram is not None else "unknown VRAM"
+            active = " active" if row.get("active_accelerator") else ""
+            selected = " selected" if row.get("selected") and not active else ""
+            rendered_gpus.append(
+                f"[{row.get('index')}] {row.get('name')} {vram_label} "
+                f"{row.get('backend')} {row.get('status')}{active}{selected}"
+            )
+        lines.append(f"- detected GPUs: {'; '.join(rendered_gpus)}")
     installed = [str(item.get("name") or "").strip() for item in list(ollama.get("installed_models") or []) if str(item.get("name") or "").strip()]
     lines.append(f"- installed local models: {', '.join(installed) if installed else 'none'}")
+    model_plan = dict(report.get("local_model_plan") or {})
+    drive_plan = dict(report.get("model_store_drive_plan") or {})
+    if drive_plan:
+        recommended_drive = dict(drive_plan.get("recommended_drive") or {})
+        current_drive = dict(drive_plan.get("current_drive") or {})
+        lines.append(f"- current model store: {drive_plan.get('current_model_store_path') or 'unknown'}")
+        if recommended_drive:
+            lines.append(
+                "- recommended model store: "
+                f"{drive_plan.get('recommended_model_store_path')} "
+                f"({recommended_drive.get('drive') or 'unknown'}, "
+                f"{recommended_drive.get('free_gb')} GB free)"
+            )
+        if current_drive and str(drive_plan.get("status") or "") == "move_recommended":
+            lines.append(
+                "- current model-store drive: "
+                f"{current_drive.get('drive') or 'unknown'} "
+                f"({current_drive.get('free_gb')} GB free)"
+            )
+            if str(drive_plan.get("set_env_command") or "").strip():
+                lines.append(f"- model-store action: {drive_plan.get('set_env_command')}")
+        drive_rows = [
+            dict(item)
+            for item in list(drive_plan.get("drives") or [])
+            if isinstance(item, dict)
+        ]
+        if drive_rows:
+            drive_summary = "; ".join(
+                f"{row.get('drive')} {row.get('free_gb')} GB {row.get('status')}"
+                for row in drive_rows[:6]
+            )
+            lines.append(f"- mounted drive space: {drive_summary}")
+    if model_plan:
+        missing_models = [
+            str(item).strip()
+            for item in list(model_plan.get("missing_recommended_models") or [])
+            if str(item).strip()
+        ]
+        if missing_models:
+            lines.append(f"- missing recommended models: {', '.join(missing_models)}")
+            pull_commands = [
+                str(item).strip()
+                for item in list(model_plan.get("pull_commands") or [])
+                if str(item).strip()
+            ]
+            if pull_commands:
+                lines.append(f"- pull commands: {'; '.join(pull_commands)}")
+            lines.append(f"- estimated missing model download: {model_plan.get('estimated_missing_download_gb')} GB")
+            lines.append(
+                "- model disk headroom: "
+                f"{model_plan.get('free_disk_gb')} GB free, "
+                f"{model_plan.get('safe_disk_floor_gb')} GB safe floor, "
+                f"{model_plan.get('disk_margin_gb')} GB margin"
+            )
+            if str(model_plan.get("status") or "") == "needs_space":
+                lines.append(f"- disk action: free at least {model_plan.get('minimum_space_to_free_gb')} GB before pulling")
+        else:
+            lines.append("- recommended model bundle installed: yes")
     display_profile_id = str(report.get("recommended_install_profile_display_id") or "").strip()
     lines.append(
         f"- recommended install profile: {display_profile_id or report.get('recommended_install_profile_id') or 'unknown'}"
@@ -454,6 +691,19 @@ def render_probe_report(report: dict[str, Any]) -> str:
         if optional_profile:
             lines.append(f"- optional stronger profile: {optional_profile}")
             lines.append(f"- optional secondary model: {recommendation.get('secondary_local_model') or 'unknown'}")
+    benchmark = dict(report.get("local_model_benchmark") or {})
+    if benchmark:
+        status = str(benchmark.get("status") or "unknown")
+        elapsed = benchmark.get("elapsed_seconds")
+        elapsed_label = f", {elapsed}s wall-clock" if elapsed is not None else ""
+        lines.append(
+            f"- local model live check: {status} on {benchmark.get('model') or 'unknown'}{elapsed_label}"
+        )
+        if benchmark.get("rough_output_tokens_per_second"):
+            lines.append(f"- rough output tokens/sec: {benchmark.get('rough_output_tokens_per_second')}")
+        reason = str(benchmark.get("reason") or "").strip()
+        if reason:
+            lines.append(f"- live check reason: {reason}")
     lines.append(f"- recommended stack: {report.get('recommended_stack_id') or 'unknown'}")
     lines.append("- stack status:")
     for stack in stacks:
@@ -475,9 +725,24 @@ def main() -> int:
         action="store_true",
         help="Include unsupported remote ideas like Tether or QVAC in a separate section.",
     )
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Run an Ollama generation smoke/warmup check for the recommended local model.",
+    )
+    parser.add_argument(
+        "--benchmark-timeout",
+        type=int,
+        default=180,
+        help="Maximum seconds to wait for the optional Ollama generation check.",
+    )
     args = parser.parse_args()
 
-    report = build_probe_report(show_unsupported=bool(args.show_unsupported))
+    report = build_probe_report(
+        show_unsupported=bool(args.show_unsupported),
+        run_benchmark=bool(args.benchmark),
+        benchmark_timeout_seconds=max(1, int(args.benchmark_timeout)),
+    )
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:

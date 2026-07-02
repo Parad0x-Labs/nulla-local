@@ -312,6 +312,18 @@ function renderEvents() {
   eventFeedEl.innerHTML = knownEvents.map((event) => {
     const chips = [];
     if (event.seq != null) chips.push(`<span class="meta-chip">seq ${escapeHtml(String(event.seq))}</span>`);
+    // Model routing chips: make NULLA's per-turn lane/model/complexity visible. This is
+    // how you SEE that a trivial "hi" took the tiny fast-path (no LLM) while a coding
+    // task went to the daily lane on gemma3:4b - the model NULLA actually ran, which the
+    // OpenClaw model dropdown (a static config label) can't show.
+    const routeModel = event.actual_adapter_model_id || event.model_id || event.model_name || event.selected_model || event.planned_model_id || '';
+    const routeProvider = event.provider_id || event.actual_adapter_provider_id || '';
+    if (event.lane) chips.push(`<span class="meta-chip route">lane ${escapeHtml(String(event.lane))}</span>`);
+    if (event.complexity) chips.push(`<span class="meta-chip route">complexity ${escapeHtml(String(event.complexity))}</span>`);
+    if (routeModel) chips.push(`<span class="meta-chip route">model ${escapeHtml(String(routeModel))}</span>`);
+    else if (routeProvider && String(routeProvider).indexOf('fast-path') !== -1) chips.push(`<span class="meta-chip route">model none · fast-path</span>`);
+    else if (routeProvider) chips.push(`<span class="meta-chip route">via ${escapeHtml(String(routeProvider))}</span>`);
+    if (event.tokens_per_second) chips.push(`<span class="meta-chip route">${escapeHtml(String(Math.round(Number(event.tokens_per_second))))} tok/s</span>`);
     if (event.topic_id) chips.push(`<span class="meta-chip">topic ${escapeHtml(String(event.topic_id).slice(0, 8))}</span>`);
     if (event.claim_id) chips.push(`<span class="meta-chip">claim ${escapeHtml(String(event.claim_id).slice(0, 8))}</span>`);
     if (event.artifact_id) chips.push(`<span class="meta-chip">artifact ${escapeHtml(String(event.artifact_id).slice(0, 8))}</span>`);

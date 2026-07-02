@@ -138,7 +138,7 @@ def _launch_agent_status(launch_agent_path: str) -> dict[str, Any]:
     if sys.platform != "darwin":
         return _status(True, "launch agent file present", path=str(candidate), loaded=None, running=None)
 
-    uid = os.getuid()
+    uid = getattr(os, "getuid", lambda: 0)()
     label = candidate.stem
     try:
         result = subprocess.run(
@@ -194,11 +194,12 @@ def build_report(
     )
     ollama_path = _resolve_binary(ollama_binary)
 
+    launcher_suffix = ".bat" if os.name == "nt" else ".sh"
     launchers = {
-        "start": project / "Start_NULLA.sh",
-        "chat": project / "Talk_To_NULLA.sh",
-        "openclaw": project / "OpenClaw_NULLA.sh",
-        "stage_trainable_base": project / "Stage_Trainable_Base.sh",
+        "start": project / f"Start_NULLA{launcher_suffix}",
+        "chat": project / f"Talk_To_NULLA{launcher_suffix}",
+        "openclaw": project / f"OpenClaw_NULLA{launcher_suffix}",
+        "stage_trainable_base": project / f"Stage_Trainable_Base{launcher_suffix}",
     }
     launcher_status = {
         name: _status(path.exists(), "present" if path.exists() else "missing", path=str(path))
@@ -250,7 +251,7 @@ def build_report(
             "liquefy": _status(liquefy_config.exists(), "Liquefy config present" if liquefy_config.exists() else "Liquefy config missing", path=str(liquefy_config)),
             "trainable_base": _status(trainable_base_ok, trainable_base_detail, staged_bases=staged_bases),
             "ollama": _status(bool(ollama_path), "Ollama binary found" if ollama_path else "Ollama binary missing", path=str(ollama_path or ollama_binary or "")),
-            "trace_surface": _status((project / "OpenClaw_NULLA.sh").exists(), "trace launcher path available" if (project / "OpenClaw_NULLA.sh").exists() else "trace launcher path missing", url="http://127.0.0.1:11435/trace"),
+            "trace_surface": _status(launchers["openclaw"].exists(), "trace launcher path available" if launchers["openclaw"].exists() else "trace launcher path missing", url="http://127.0.0.1:11435/trace"),
             "launch_agent": _launch_agent_status(launch_agent_path),
             "public_hive": _public_hive_status(project, runtime),
         },

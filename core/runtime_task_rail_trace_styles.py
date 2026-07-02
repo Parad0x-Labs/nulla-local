@@ -150,4 +150,10 @@ RUNTIME_TASK_RAIL_TRACE_STYLES = """
       background: rgba(255,255,255,0.04);
       border: 1px solid rgba(154, 171, 212, 0.12);
     }
+    .meta-chip.route {
+      color: #7fd7ff;
+      background: rgba(108, 204, 255, 0.10);
+      border-color: rgba(108, 204, 255, 0.45);
+      font-weight: 600;
+    }
 """

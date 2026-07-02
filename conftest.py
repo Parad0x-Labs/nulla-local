@@ -21,7 +21,7 @@ def pytest_configure(config) -> None:
     del config
     global _TEST_RUNTIME_HOME
     if _TEST_RUNTIME_HOME is None:
-        _TEST_RUNTIME_HOME = Path(tempfile.mkdtemp(prefix="nulla_pytest_home_", dir="/tmp")).resolve()
+        _TEST_RUNTIME_HOME = Path(tempfile.mkdtemp(prefix="nulla_pytest_home_", dir=tempfile.gettempdir())).resolve()
     os.environ["NULLA_HOME"] = str(_TEST_RUNTIME_HOME)
     configure_runtime_home(_TEST_RUNTIME_HOME)
     configure_default_db_path(_TEST_RUNTIME_HOME / "data" / "nulla_web0_v2.db")

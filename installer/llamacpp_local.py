@@ -205,6 +205,10 @@ def _env_int(env: dict[str, str], key: str, *, default: int) -> int:
     value = str(env.get(key) or "").strip()
     if not value:
         return default
+    try:
+        return int(value)
+    except Exception:
+        return default
 
 
 def _env_bool(env: dict[str, str], key: str, *, default: bool) -> bool:
@@ -216,10 +220,6 @@ def _env_bool(env: dict[str, str], key: str, *, default: bool) -> bool:
     if value in {"0", "false", "no", "off", "disabled"}:
         return False
     return default
-    try:
-        return int(value)
-    except Exception:
-        return default
 
 
 __all__ = [

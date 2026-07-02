@@ -260,6 +260,18 @@ class NullaWallet:
     def sign_transaction(self, transaction_message: bytes) -> bytes:
         return self.sign(transaction_message)
 
+    def export_secret_key_base58(self) -> str:
+        """Return the 64-byte Solana secret key (seed+pubkey), base58-encoded.
+
+        This is the raw private key in the format wallets like Phantom import. It is
+        the ONLY method that returns private material, and callers must gate it behind
+        an OS user-consent prompt (see reveal_wallet_secret_key_base58). Never log, print,
+        or persist the result.
+        """
+        if self._private_seed_bytes is None or self._public_bytes is None:
+            raise RuntimeError("Solana wallet is not loaded")
+        return b58encode(bytes(self._private_seed_bytes) + bytes(self._public_bytes))
+
     def get_sol_balance(self) -> float:
         result = self._rpc_call("getBalance", [self.pubkey])
         if not isinstance(result, dict):
@@ -343,6 +355,29 @@ def get_or_create_wallet(
     return wallet.load()
 
 
+def reveal_wallet_secret_key_base58(
+    *,
+    runtime_home: str | Path | None = None,
+    derivation_key: bytes | None = None,
+    reason: str = "Reveal your NULLA agent wallet private key for backup",
+) -> str:
+    """Return the base58 secret key, but ONLY after a live OS user-consent prompt.
+
+    This is the single sanctioned path for a human to back up the agent's private
+    key. Consent is required and fails closed - if the OS can't prompt, or the user
+    declines, this raises and no key material is returned. The gate runs BEFORE the
+    wallet is decrypted, so a denied prompt never even loads the seed into memory.
+    Neither OpenClaw nor the agent can call this without the user physically
+    confirming at the machine.
+    """
+    from core.os_consent_gate import require_os_user_consent
+
+    if not require_os_user_consent(reason):
+        raise PermissionError("OS user consent was not granted; wallet key reveal denied")
+    wallet = get_or_create_wallet(runtime_home=runtime_home, derivation_key=derivation_key)
+    return wallet.export_secret_key_base58()
+
+
 __all__ = [
     "NullaWallet",
     "WalletInfo",
@@ -351,5 +386,6 @@ __all__ = [
     "decode_solana_pubkey",
     "get_or_create_wallet",
     "is_solana_pubkey",
+    "reveal_wallet_secret_key_base58",
     "verify_wallet_signature",
 ]

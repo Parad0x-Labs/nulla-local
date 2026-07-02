@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -8,6 +9,12 @@ from unittest import mock
 from core.provider_routing import ProviderCapabilityTruth
 from installer.doctor import build_report
 from installer.write_install_receipt import build_receipt
+
+
+def _write_platform_launchers(root: Path) -> None:
+    suffix = ".bat" if os.name == "nt" else ".sh"
+    for stem in ("Start_NULLA", "Talk_To_NULLA", "OpenClaw_NULLA", "Stage_Trainable_Base"):
+        root.joinpath(f"{stem}{suffix}").write_text("@echo off\n" if suffix == ".bat" else "#!/bin/sh\n", encoding="utf-8")
 
 
 def test_install_receipt_exposes_doctor_report_path() -> None:
@@ -21,7 +28,9 @@ def test_install_receipt_exposes_doctor_report_path() -> None:
         ollama_binary="/tmp/ollama",
     )
 
-    assert receipt["doctor_report_path"].endswith("/nulla/install_doctor.json")
+    doctor_report_path = Path(receipt["doctor_report_path"])
+    assert doctor_report_path.name == "install_doctor.json"
+    assert doctor_report_path.parent.name == "nulla"
     assert receipt["install_profile"]["schema"] == "nulla.install_profile.v1"
 
 
@@ -39,16 +48,14 @@ def test_install_receipt_records_launch_agent_path() -> None:
 
     assert receipt["launch_agent"]["enabled"] is True
     assert receipt["launch_agent"]["macos"].endswith("ai.nulla.runtime.plist")
+    assert receipt["launch_agent"]["windows"].endswith("ai.nulla.runtime.plist")
 
 
 def test_build_report_marks_missing_components_as_degraded() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
         (root / ".venv").mkdir()
-        (root / "Start_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "Talk_To_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "OpenClaw_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "Stage_Trainable_Base.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        _write_platform_launchers(root)
         (root / "install_receipt.json").write_text("{}\n", encoding="utf-8")
         runtime_home = root / ".nulla_runtime"
         runtime_home.mkdir()
@@ -77,10 +84,7 @@ def test_build_report_marks_launch_agent_present_when_file_exists() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
         (root / ".venv").mkdir()
-        (root / "Start_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "Talk_To_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "OpenClaw_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "Stage_Trainable_Base.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        _write_platform_launchers(root)
         (root / "install_receipt.json").write_text("{}\n", encoding="utf-8")
         runtime_home = root / ".nulla_runtime"
         runtime_home.mkdir()
@@ -114,10 +118,7 @@ def test_build_report_marks_launch_agent_degraded_when_file_exists_but_agent_is_
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
         (root / ".venv").mkdir()
-        (root / "Start_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "Talk_To_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "OpenClaw_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "Stage_Trainable_Base.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        _write_platform_launchers(root)
         (root / "install_receipt.json").write_text("{}\n", encoding="utf-8")
         runtime_home = root / ".nulla_runtime"
         runtime_home.mkdir()
@@ -155,10 +156,7 @@ def test_build_report_flags_missing_public_hive_write_auth() -> None:
             json.dumps({"meet_seed_urls": ["https://seed-eu.example.test:8766"]}) + "\n",
             encoding="utf-8",
         )
-        (root / "Start_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "Talk_To_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "OpenClaw_NULLA.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "Stage_Trainable_Base.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        _write_platform_launchers(root)
         (root / "install_receipt.json").write_text("{}\n", encoding="utf-8")
         runtime_home = root / ".nulla_runtime"
         runtime_home.mkdir()

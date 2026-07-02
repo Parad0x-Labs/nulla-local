@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import sqlite3
 import threading
 from pathlib import Path
@@ -15,10 +16,21 @@ _DEFAULT_DB_PATH_OVERRIDE: str | None = None
 _thread_local = threading.local()
 
 
-def _resolve_db_path(db_path: str | Path) -> str:
-    path = Path(db_path).expanduser().resolve()
+@functools.lru_cache(maxsize=256)
+def _resolve_db_path_cached(db_path_str: str) -> str:
+    path = Path(db_path_str).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     return str(path)
+
+
+def _resolve_db_path(db_path: str | Path) -> str:
+    # get_connection() below calls this multiple times per invocation (including on
+    # its cached-connection fast path), so on Windows this was issuing a real
+    # GetFinalPathNameByHandleW syscall (via Path.resolve()) thousands of times
+    # across a full test run - which produced intermittent access-violation crashes
+    # under sustained load. The resolution is idempotent for a given input string
+    # within a process lifetime, so cache it.
+    return _resolve_db_path_cached(str(db_path))
 
 
 def _runtime_default_db_path() -> str:

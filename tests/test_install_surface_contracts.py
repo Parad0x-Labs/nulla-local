@@ -163,9 +163,9 @@ def test_bootstrap_scripts_support_checksum_verification_and_docs_do_not_pipe_re
     assert "| bash" not in install_doc
     assert "| iex" not in install_doc
     assert "curl -fsSLo bootstrap_nulla.sh" in readme
-    assert "Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1" in readme
+    assert "Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1" in readme
     assert "curl -fsSLo bootstrap_nulla.sh" in install_doc
-    assert "Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1" in install_doc
+    assert "Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1" in install_doc
 
 
 def test_install_profile_selection_is_available_across_bootstrap_and_installer_surfaces() -> None:
@@ -173,6 +173,9 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     bat_installer = (REPO_ROOT / "installer" / "install_nulla.bat").read_text(encoding="utf-8")
     sh_bootstrap = (REPO_ROOT / "installer" / "bootstrap_nulla.sh").read_text(encoding="utf-8")
     ps_bootstrap = (REPO_ROOT / "installer" / "bootstrap_nulla.ps1").read_text(encoding="utf-8")
+    ps_launcher = (REPO_ROOT / "Install_And_Run_NULLA.ps1").read_text(encoding="utf-8")
+    ps_one_click = (REPO_ROOT / "installer" / "windows_one_click.ps1").read_text(encoding="utf-8")
+    ps_package = (REPO_ROOT / "installer" / "build_windows_package.ps1").read_text(encoding="utf-8")
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     install_doc = (REPO_ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
 
@@ -181,6 +184,27 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "--install-profile <id>" in sh_bootstrap
     assert '-InstallProfile local-max' in install_doc
     assert '/INSTALLPROFILE=$InstallProfile' in ps_bootstrap
+    assert "Install_And_Run_NULLA.ps1" in ps_bootstrap
+    assert "-AutoYes" in ps_bootstrap
+    assert "installer\\windows_one_click.ps1" in ps_launcher
+    assert '$forward["SkipBenchmark"] = $true' in ps_launcher
+    assert "System.Windows.Forms" in ps_one_click
+    assert "Probe PC" in ps_one_click
+    assert "Run live local model check after install" in ps_one_click
+    assert "--benchmark --benchmark-timeout 240" in ps_one_click
+    assert "$SkipBenchmark" in ps_one_click
+    assert "$env:NULLA_INSTALL_PROFILE = $batchProfile" in ps_one_click
+    assert "$env:NULLA_HEADLESS = \"1\"" in ps_one_click
+    assert "$env:NULLA_HOME = $NullaHome" in ps_one_click
+    assert "Set-AuthenticodeSignature" in ps_package
+    assert "NULLA_WINDOWS_SIGNING_CERT_THUMBPRINT" in ps_package
+    assert "Get-FileHash -Algorithm SHA256" in ps_package
+    assert "schema = \"nulla.windows_package.v1\"" in ps_package
+    assert 'Get-GitLines @("ls-files")' in ps_package
+    assert "Staged Windows package is missing Install_And_Run_NULLA.ps1" in ps_package
+    assert "refusing to create an incomplete package" in ps_package
+    assert "powershell -ExecutionPolicy Bypass -File .\\Install_And_Run_NULLA.ps1" in install_doc
+    assert "installer\\build_windows_package.ps1" in install_doc
     assert "install-profile --set ollama-only" in sh_installer
     assert "install-profile --set ollama-max" in sh_installer
     assert "install-profile --set ollama-only" in readme
@@ -192,5 +216,70 @@ def test_install_profile_selection_is_available_across_bootstrap_and_installer_s
     assert "detect_install_profile_display" in sh_installer
     assert "Recommended profile: ${recommended_install_profile_display}" in sh_installer
     assert "Install profile: ${install_profile_display}" in sh_installer
+    assert "from core.install_recommendations import build_install_recommendation_truth" in bat_installer
+    assert "from core.model_store_planner import DEFAULT_OPENCLAW_MEMORY_MODEL, build_model_store_drive_plan" in bat_installer
+    assert "Recommended Ollama model store: %OLLAMA_MODELS_DIR%" in bat_installer
+    assert "RECOMMENDED_BUNDLE_MODELS" in bat_installer
+    assert "set \"MODELS_TO_PULL_LIST=%MODELS_TO_PULL:,= %\"" in bat_installer
+    assert "for %%M in (%MODELS_TO_PULL_LIST%) do" in bat_installer
     assert "local_plus_llamacpp" in readme
     assert "first-class installer/runtime lane yet" not in readme
+
+
+def test_windows_openclaw_launcher_uses_receipt_model_unless_explicitly_overridden() -> None:
+    launcher = (REPO_ROOT / "OpenClaw_NULLA.bat").read_text(encoding="utf-8")
+    runtime = (REPO_ROOT / "core" / "web" / "api" / "runtime.py").read_text(encoding="utf-8")
+
+    assert 'if not "%NULLA_ALLOW_MODEL_ENV_OVERRIDE%"=="1" set "NULLA_OLLAMA_MODEL=%MODEL_TAG%"' in launcher
+    assert 'if "%NULLA_OLLAMA_MODEL%"=="" set "NULLA_OLLAMA_MODEL=%MODEL_TAG%"' in launcher
+    assert 'if not "%NULLA_OLLAMA_MODEL%"=="" set "MODEL_TAG=%NULLA_OLLAMA_MODEL%"' in launcher
+    assert "where openclaw.cmd" in launcher
+    assert "where openclaw.exe" in launcher
+    assert 'set "NULLA_REGISTER_INSTALLED_OLLAMA_MODELS=1"' in launcher
+    assert 'for %%I in ("%SCRIPT_DIR%.") do set "SCRIPT_ROOT=%%~fI"' in launcher
+    assert 'register_openclaw_agent.py" "%SCRIPT_ROOT%" "%NULLA_HOME%" "%MODEL_TAG%" "%DISPLAY_NAME%"' in launcher
+    assert "http://127.0.0.1:11435/healthz" in launcher
+    assert "installer\\start_windows_detached.py" in launcher
+    assert "nulla_background.vbs" in launcher
+    assert 'schtasks /run /tn "NULLA_Daemon"' in launcher
+    assert "%SystemRoot%\\System32\\wscript.exe" in launcher
+    assert "%SCRIPT_ROOT%\\nulla_background.vbs" in launcher
+    assert 'start "NULLA API" /MIN' not in launcher
+    assert '--cwd "%SCRIPT_ROOT%"' in launcher
+    assert "goto ensure_gateway" in launcher
+    assert ":ensure_gateway" in launcher
+    assert "timeout /t" not in launcher
+    assert "for /L %%i in (1,1,120)" in launcher
+    assert "for /L %%j in (1,1,90)" in launcher
+    assert "-Tail 80" in launcher
+    assert 'type "%TEMP%\\nulla_api.err.log"' not in launcher
+    assert "Start-Sleep -Seconds 1" in launcher
+    background_cmd = (REPO_ROOT / "nulla_background.cmd").read_text(encoding="utf-8")
+    assert "goto run" in background_cmd
+    assert "http://127.0.0.1:11435/healthz" in background_cmd
+    assert 'for %%I in ("%SCRIPT_DIR%.") do set "SCRIPT_ROOT=%%~fI"' in background_cmd
+    assert '--cwd "%SCRIPT_ROOT%"' in background_cmd
+    assert "installer\\start_windows_detached.py" in background_cmd
+    assert "NULLA API detached start requested" in background_cmd
+    assert "nulla_api_child.log" in background_cmd
+    assert "nulla_api_child.err.log" in background_cmd
+    assert "call \"%SCRIPT_DIR%Start_NULLA.bat\"" not in background_cmd
+    assert "BeginConnect('127.0.0.1', 11435" in background_cmd
+    assert 'start "NULLA API" /MIN' not in background_cmd
+    background_vbs = (REPO_ROOT / "nulla_background.vbs").read_text(encoding="utf-8")
+    assert "\\nulla_background.cmd" in background_vbs
+    assert "\\Start_NULLA.bat" not in background_vbs
+    start_launcher = (REPO_ROOT / "Start_NULLA.bat").read_text(encoding="utf-8")
+    assert 'set "NULLA_REGISTER_INSTALLED_OLLAMA_MODELS=1"' in start_launcher
+    install_bat = (REPO_ROOT / "installer" / "install_nulla.bat").read_text(encoding="utf-8")
+    assert 'setx NULLA_REGISTER_INSTALLED_OLLAMA_MODELS "1"' in install_bat
+    assert "NULLA_ENABLE_WINDOWS_COMPUTE_MODE" in runtime
+    assert "Adaptive compute mode daemon disabled" in runtime
+    assert "NULLA_ENABLE_WINDOWS_MESH_DAEMON" in runtime
+    assert "Mesh daemon disabled" in runtime
+    assert "Test-NetConnection -ComputerName 127.0.0.1 -Port 18789" in launcher
+    assert "%USERPROFILE%\\.local\\bin\\openclaw.cmd" in launcher
+    assert 'from core.openclaw_locator import load_gateway_token; print(load_gateway_token())' in launcher
+    assert "nulla_api.err.log" in launcher
+    assert "nulla_api_child.err.log" in launcher
+    assert "nulla_gateway.err.log" in launcher

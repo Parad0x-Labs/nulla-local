@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 RUNTIME_HOME="${NULLA_HOME:-$HOME/.nulla_runtime}"
-INSTALL_ROOT="${NULLA_INSTALL_ROOT:-$HOME/nulla-hive-mind}"
+INSTALL_ROOT="${NULLA_INSTALL_ROOT:-$HOME/nulla-local}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw-default}"
 OPENCLAW_AGENT_DIR="${NULLA_OPENCLAW_AGENT_DIR:-$HOME/.openclaw/agents/main/agent/nulla}"
 LAUNCH_AGENT_PATH="${NULLA_LAUNCH_AGENT_PATH:-$HOME/Library/LaunchAgents/ai.nulla.runtime.plist}"

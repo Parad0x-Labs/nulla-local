@@ -75,6 +75,29 @@ def test_runtime_provider_defaults_register_installed_ollama_lanes() -> None:
     assert manifests[("ollama-local", "qwen2.5:32b")].runtime_config["prewarm"]["options"]["num_ctx"] == 1024
 
 
+def test_runtime_provider_defaults_exposes_installed_text_models_not_embedding_lanes() -> None:
+    registry, manifests = _mock_registry()
+
+    ensure_default_runtime_providers(
+        registry,
+        model_tag="gemma3:4b",
+        env={
+            "NULLA_REGISTER_INSTALLED_OLLAMA_MODELS": "1",
+            "NULLA_INSTALLED_OLLAMA_MODELS": "gemma3:4b,qwen2.5:7b,nomic-embed-text:latest",
+        },
+        install_profile="local-only",
+    )
+
+    assert ("ollama-local", "gemma3:4b") in manifests
+    assert ("ollama-local", "qwen2.5:7b") in manifests
+    assert ("ollama-local", "nomic-embed-text:latest") not in manifests
+    ranked = rank_providers(
+        [item for item in manifests.values() if item.enabled],
+        ModelSelectionRequest(task_kind="action_plan", output_mode="action_plan"),
+    )
+    assert ranked[0].model_name == "qwen2.5:7b"
+
+
 def test_default_runtime_model_prefers_installed_fast_nothink_lane() -> None:
     env = {
         "NULLA_INSTALLED_OLLAMA_MODELS": "qwen3:8b,nulla-qwen3-30b-a3b:nothink,qwen3.5:35b-a3b",

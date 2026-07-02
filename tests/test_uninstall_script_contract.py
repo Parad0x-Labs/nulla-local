@@ -9,7 +9,7 @@ def test_uninstall_script_tracks_runtime_install_and_openclaw_paths() -> None:
     script = (PROJECT_ROOT / "installer" / "uninstall_nulla_local.sh").read_text(encoding="utf-8")
 
     assert 'RUNTIME_HOME="${NULLA_HOME:-$HOME/.nulla_runtime}"' in script
-    assert 'INSTALL_ROOT="${NULLA_INSTALL_ROOT:-$HOME/nulla-hive-mind}"' in script
+    assert 'INSTALL_ROOT="${NULLA_INSTALL_ROOT:-$HOME/nulla-local}"' in script
     assert 'OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw-default}"' in script
     assert 'OPENCLAW_AGENT_DIR="${NULLA_OPENCLAW_AGENT_DIR:-$HOME/.openclaw/agents/main/agent/nulla}"' in script
     assert 'LAUNCH_AGENT_PATH="${NULLA_LAUNCH_AGENT_PATH:-$HOME/Library/LaunchAgents/ai.nulla.runtime.plist}"' in script

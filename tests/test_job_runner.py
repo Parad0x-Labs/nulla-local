@@ -145,6 +145,7 @@ class JobRunnerTests(unittest.TestCase):
 
     def test_linux_bwrap_prefix_preferred_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
+            resolved = str(Path(tmpdir).resolve())
             runner = JobRunner(
                 ExecutionPolicy(
                     workspace_root=Path(tmpdir),
@@ -167,7 +168,6 @@ class JobRunnerTests(unittest.TestCase):
                 self.assertIn("--unshare-net", argv)
                 self.assertIn("--ro-bind", argv)
                 self.assertIn("--tmpfs", argv)
-                resolved = str(Path(tmpdir).resolve())
                 self.assertIn("--bind", argv)
                 self.assertIn(resolved, argv)
                 self.assertEqual(argv[-3:], ["python3", "-c", "print('x')"])

@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
+from pathlib import Path
 from unittest import mock
+
+import pytest
 
 from core.hardware_tier import MachineProbe, QwenTier
 from core.provider_routing import ProviderCapabilityTruth
 from core.runtime_install_profiles import (
     build_install_profile_truth,
+    default_ollama_models_path,
     format_install_profile_id,
     install_profile_display_choices,
+    installed_profile_selected_model,
     normalize_install_profile_id,
     preferred_install_profile_id,
 )
@@ -19,6 +25,56 @@ def _fake_disk_usage_with_free_gb(free_gb: float) -> mock.Mock:
     fake_usage = mock.Mock()
     fake_usage.free = int(free_gb * 1024**3)
     return fake_usage
+
+
+def test_auto_profile_bundle_sizing_uses_ollama_model_store_disk(monkeypatch, tmp_path) -> None:
+    model_store = (tmp_path / "ollama" / "models").resolve()
+    model_store.mkdir(parents=True)
+    seen_paths: list[Path] = []
+
+    def fake_disk_usage(path: str | Path) -> mock.Mock:
+        seen_paths.append(Path(path).resolve())
+        return _fake_disk_usage_with_free_gb(222.0)
+
+    probe = MachineProbe(
+        cpu_cores=8,
+        ram_gb=8.0,
+        gpu_name=None,
+        vram_gb=None,
+        accelerator="cpu",
+    )
+    tier = QwenTier("lite", "qwen2.5:3b", 3.0, 2.0, 6.0)
+    monkeypatch.setenv("OLLAMA_MODELS", str(model_store))
+    monkeypatch.setattr("core.runtime_install_profiles.shutil.disk_usage", fake_disk_usage)
+
+    profile = build_install_profile_truth(
+        requested_profile="auto-recommended",
+        probe=probe,
+        tier=tier,
+        env={"NULLA_INSTALLED_OLLAMA_MODELS": "[]", "OLLAMA_MODELS": str(model_store)},
+        runtime_home=str(tmp_path / "nulla-runtime"),
+    )
+
+    assert model_store in seen_paths
+    assert profile.capacity_bucket == "A"
+    assert profile.profile_id == "local-only"
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Exercises Windows drive-letter (F:\\) path semantics that POSIX pathlib can't simulate.",
+)
+def test_default_ollama_models_path_skips_missing_windows_override(tmp_path) -> None:
+    model_store = (tmp_path / "Ollama" / "models").resolve()
+    model_store.mkdir(parents=True)
+
+    with mock.patch("core.runtime_install_profiles.platform.system", return_value="Windows"), mock.patch(
+        "core.runtime_install_profiles._windows_ollama_models_env_paths",
+        return_value=(model_store,),
+    ):
+        path = default_ollama_models_path({"OLLAMA_MODELS": "F:\\.ollama\\models"})
+
+    assert path == model_store
 
 
 def test_normalize_install_profile_id_accepts_user_friendly_ollama_aliases() -> None:
@@ -409,6 +465,23 @@ def test_installed_profile_record_is_used_when_no_env_override_is_present() -> N
     assert any("operator lane `ollama+kimi`" in reason for reason in profile.reasons)
 
 
+def test_installed_profile_selected_model_reads_persisted_record() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        target = Path(tmpdir) / "config" / "install-profile.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps({"profile_id": "local-only", "selected_model": "gemma3:4b"}),
+            encoding="utf-8",
+        )
+
+        assert installed_profile_selected_model(tmpdir) == "gemma3:4b"
+
+
+def test_installed_profile_selected_model_is_empty_when_no_record_exists() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        assert installed_profile_selected_model(tmpdir) == ""
+
+
 def test_explicit_full_orchestrated_profile_fails_closed_when_keys_and_space_are_missing() -> None:
     probe = MachineProbe(
         cpu_cores=12,
@@ -622,7 +695,10 @@ def test_local_max_budgets_for_secondary_llamacpp_lane_even_when_primary_ollama_
         accelerator="mps",
     )
     tier = QwenTier("mid", "qwen2.5:14b", 14.0, 10.0, 24.0)
-    with mock.patch("core.runtime_install_profiles.shutil.disk_usage", return_value=_fake_disk_usage_with_free_gb(23.0)):
+    with mock.patch("core.runtime_install_profiles.shutil.disk_usage", return_value=_fake_disk_usage_with_free_gb(23.0)), mock.patch(
+        "core.runtime_install_profiles.default_ollama_models_path",
+        return_value=Path("/tmp/.ollama/models").resolve(),
+    ):
         profile = build_install_profile_truth(
             requested_profile="local-max",
             probe=probe,

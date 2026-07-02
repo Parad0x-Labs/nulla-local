@@ -51,6 +51,22 @@ def installed_ollama_model_names(
     )
 
 
+def is_text_generation_ollama_model(model_name: str) -> bool:
+    clean = str(model_name or "").strip().lower()
+    if not clean:
+        return False
+    non_text_markers = (
+        "all-minilm",
+        "bge-",
+        "clip",
+        "embed",
+        "embedding",
+        "nomic-embed",
+        "snowflake-arctic-embed",
+    )
+    return not any(marker in clean for marker in non_text_markers)
+
+
 def _dedupe_model_names(values: Any) -> tuple[str, ...]:
     seen: list[str] = []
     for value in values:
@@ -61,4 +77,4 @@ def _dedupe_model_names(values: Any) -> tuple[str, ...]:
     return tuple(seen)
 
 
-__all__ = ["env_flag_enabled", "installed_ollama_model_names"]
+__all__ = ["env_flag_enabled", "installed_ollama_model_names", "is_text_generation_ollama_model"]

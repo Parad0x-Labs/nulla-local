@@ -11,6 +11,28 @@ from core.runtime_paths import project_path
 from core.user_preferences import load_preferences
 from storage.dialogue_memory import get_dialogue_session, recent_dialogue_turns, session_lexicon
 
+_WEB0_NULL_FACTS = (
+    "Web0/.null project facts: .null is not an ICANN DNS TLD or normal registrar purchase. "
+    ".null is a wallet-owned Solana null_registrar v2 name "
+    "(NXgQhepFpDCu935H1D4g34g59ZYbo1jR4tBCZWhV8Np; live/pilot=free in project docs). "
+    "Resolve locally with `nulla resolve <name>.null`. Buy/register uses Web0/null-sdk or local tooling "
+    "with wallet confirmation; dial/pay need opt-in and spend approval."
+)
+
+_WEB0_NULL_MARKERS = (
+    ".null",
+    "dot null",
+    "web0",
+    "null registrar",
+    "null_registrar",
+    "nulldomain",
+    "nullpay",
+    "nullpass",
+    "null://",
+    "x402 endpoint",
+    "x402 payment",
+)
+
 
 def _compact_join(items: list[str], *, limit: int) -> str:
     picked = [item.strip() for item in items if item and item.strip()][:limit]
@@ -72,6 +94,44 @@ def _execution_preference_text() -> str:
         f"social_commons={'on' if prefs.social_commons else 'off'}",
     ]
     return "; ".join(fragment for fragment in fragments if str(fragment or "").strip())
+
+
+def _web0_null_signal_text(
+    *,
+    task: Any,
+    classification: dict[str, Any],
+    interpretation: Any,
+) -> str:
+    values: list[str] = [
+        getattr(task, "task_summary", ""),
+        getattr(interpretation, "raw_text", ""),
+        getattr(interpretation, "normalized_text", ""),
+        getattr(interpretation, "reconstructed_text", ""),
+        str(classification.get("task_class") or ""),
+    ]
+    values.extend(str(item) for item in list(classification.get("topic_hints") or []))
+    values.extend(str(item) for item in list(getattr(interpretation, "topic_hints", []) or []))
+    values.extend(str(item) for item in list(getattr(interpretation, "reference_targets", []) or []))
+    return " ".join(item for item in values if str(item or "").strip()).lower()
+
+
+def _needs_web0_null_context(
+    *,
+    task: Any,
+    classification: dict[str, Any],
+    interpretation: Any,
+) -> bool:
+    signal = _web0_null_signal_text(
+        task=task,
+        classification=classification,
+        interpretation=interpretation,
+    )
+    if any(marker in signal for marker in _WEB0_NULL_MARKERS):
+        return True
+    return (
+        " null " in f" {signal} "
+        and any(word in signal for word in ("domain", "address", "name", "register", "buy", "resolve", "auction"))
+    )
 
 
 def _read_markdown_context(*parts: str, max_chars: int = 2200) -> str:
@@ -364,6 +424,22 @@ def build_bootstrap_context(
                 confidence=0.9,
                 must_keep=True,
                 include_reason="anti_hallucination",
+            )
+        )
+
+    if _needs_web0_null_context(task=task, classification=classification, interpretation=interpretation):
+        items.append(
+            ContextItem(
+                item_id="bootstrap-web0-null",
+                layer="bootstrap",
+                source_type="project_knowledge",
+                title="Web0 .null project facts",
+                content=_WEB0_NULL_FACTS,
+                priority=0.975,
+                confidence=1.0,
+                must_keep=True,
+                include_reason="web0_null_grounding",
+                metadata={"context_domain": "web0_null"},
             )
         )
 

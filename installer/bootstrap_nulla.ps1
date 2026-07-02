@@ -14,10 +14,35 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Resolve-DefaultInstallDir {
+    $homeDefault = Join-Path $HOME "nulla-local"
+    try {
+        $systemDriveRoot = ($env:SystemDrive + "\")
+        $fixedDrives = [System.IO.DriveInfo]::GetDrives() |
+            Where-Object { $_.IsReady -and $_.DriveType -eq [System.IO.DriveType]::Fixed }
+        # Prefer a non-OS drive with the most free space; only fall back to the OS drive
+        # if it's the sole fixed drive on the machine.
+        $bestDrive = $fixedDrives |
+            Where-Object { $_.RootDirectory.FullName -ne $systemDriveRoot } |
+            Sort-Object AvailableFreeSpace -Descending |
+            Select-Object -First 1
+        if (-not $bestDrive) {
+            $bestDrive = $fixedDrives | Sort-Object AvailableFreeSpace -Descending | Select-Object -First 1
+        }
+        if ($bestDrive) {
+            return (Join-Path $bestDrive.RootDirectory.FullName "NULLA\nulla-local")
+        }
+    }
+    catch {
+        return $homeDefault
+    }
+    return $homeDefault
+}
+
 if ([string]::IsNullOrWhiteSpace($RepoOwner)) { $RepoOwner = "Parad0x-Labs" }
-if ([string]::IsNullOrWhiteSpace($RepoName)) { $RepoName = "nulla-hive-mind" }
+if ([string]::IsNullOrWhiteSpace($RepoName)) { $RepoName = "nulla-local" }
 if ([string]::IsNullOrWhiteSpace($Ref)) { $Ref = "main" }
-if ([string]::IsNullOrWhiteSpace($InstallDir)) { $InstallDir = Join-Path $HOME "nulla-hive-mind" }
+if ([string]::IsNullOrWhiteSpace($InstallDir)) { $InstallDir = Resolve-DefaultInstallDir }
 if ([string]::IsNullOrWhiteSpace($ArchiveUrl)) { $ArchiveUrl = "https://github.com/$RepoOwner/$RepoName/archive/refs/heads/$Ref.zip" }
 
 function Write-Info {
@@ -133,6 +158,7 @@ function Write-BuildMetadata {
 }
 
 function Run-Installer {
+    $psLauncher = Join-Path $InstallDir "Install_And_Run_NULLA.ps1"
     $launcher = Join-Path $InstallDir "Install_And_Run_NULLA.bat"
     $guided = Join-Path $InstallDir "Install_NULLA.bat"
     $canonical = Join-Path $InstallDir "installer\\install_nulla.bat"
@@ -144,6 +170,17 @@ function Run-Installer {
     $profileArgs = @()
     if (-not [string]::IsNullOrWhiteSpace($InstallProfile)) {
         $profileArgs = @("/INSTALLPROFILE=$InstallProfile")
+    }
+    if (Test-Path -LiteralPath $psLauncher) {
+        $psArgs = @("-AutoYes")
+        if (-not [string]::IsNullOrWhiteSpace($InstallProfile)) {
+            $psArgs += @("-InstallProfile", $InstallProfile)
+        }
+        if ($NoStart) {
+            $psArgs += "-NoStart"
+        }
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $psLauncher @psArgs
+        return
     }
     if ($NoStart) {
         if (Test-Path -LiteralPath $guided) {

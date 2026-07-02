@@ -144,7 +144,7 @@ _CREATE_FILE_CONTENT_STOP = (
     r")"
 )
 _CREATE_NAMED_FILE_WITH_CONTENT_RE = re.compile(
-    rf"\bcreate\s+(?:a\s+)?file(?:\s+named)?\s+[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?(?:\s+in\s+[^:]+?)?\s+with(?:\s+exactly)?(?:\s+(?:this|the))?\s+(?:line|content|code)(?:(?:\s*,?\s*[^:\n.]+?)\s*:|:\s*|\s+)(?P<content>.+?){_CREATE_FILE_CONTENT_STOP}",
+    rf"\bcreate\s+(?:a\s+)?file(?:\s+named)?\s+[`\"']?(?P<path>{_WORKSPACE_FILE_RE})[`\"']?(?:\s+in\s+[^\r\n]+?)?\s+with(?:\s+exactly)?(?:\s+(?:this|the))?\s+(?:line|content|code)(?:(?:\s*,?\s*[^:\n.]+?)\s*:|:\s*|\s+)(?P<content>.+?){_CREATE_FILE_CONTENT_STOP}",
     re.IGNORECASE | re.DOTALL,
 )
 _INLINE_CREATE_FILE_RE = re.compile(

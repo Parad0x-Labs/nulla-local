@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -258,9 +259,10 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
                 "def test_truth():\n    assert 2 + 2 == 4\n",
                 encoding="utf-8",
             )
-            with mock.patch("sandbox.job_runner.os.name", "posix"), mock.patch(
-                "sandbox.job_runner.sys.platform", "linux"
-            ), mock.patch("sandbox.job_runner.shutil.which", return_value="/usr/bin/unshare"):
+            with mock.patch(
+                "sandbox.job_runner.JobRunner._kernel_network_isolation_prefix",
+                side_effect=AssertionError("trusted validation should not request kernel isolation"),
+            ):
                 result = execute_runtime_tool(
                     "workspace.run_tests",
                     {"command": "python3 -m pytest -q test_sample.py"},
@@ -281,11 +283,11 @@ class RuntimeExecutionOperatorPhase1Tests(unittest.TestCase):
     def test_runtime_validation_command_uses_current_interpreter_for_pytest_and_ruff(self) -> None:
         self.assertEqual(
             runtime_validation_command("python3 -m pytest -q test_sample.py"),
-            f"{sys.executable} -m pytest -q test_sample.py",
+            shlex.join([sys.executable, "-m", "pytest", "-q", "test_sample.py"]),
         )
         self.assertEqual(
             runtime_validation_command("ruff check ."),
-            f"{sys.executable} -m ruff check .",
+            shlex.join([sys.executable, "-m", "ruff", "check", "."]),
         )
 
     def test_runtime_tool_can_execute_coder_task_envelope(self) -> None:

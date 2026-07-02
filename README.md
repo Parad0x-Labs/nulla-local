@@ -11,7 +11,7 @@ Current state: **Alpha** — core runtime, memory, and tool loop working on `mai
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)](docs/STATUS.md)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
-[![CI](https://github.com/Parad0x-Labs/nulla-hive-mind/actions/workflows/ci.yml/badge.svg)](https://github.com/Parad0x-Labs/nulla-hive-mind/actions/workflows/ci.yml)
+[![CI](https://github.com/Parad0x-Labs/nulla-local/actions/workflows/ci.yml/badge.svg)](https://github.com/Parad0x-Labs/nulla-local/actions/workflows/ci.yml)
 
 <p align="center">
   <img src="./docs/assets/github-header-nulla-local.png" alt="Parad0x Labs" width="100%" />
@@ -105,15 +105,14 @@ Parad0x Labs builds Web0 on Solana — money and agents that settle themselves. 
 Bootstrap install script:
 
 ```bash
-curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh
+curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.sh
 bash bootstrap_nulla.sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1
-powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1
+Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1; powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1
 ```
 
 Profiles:
@@ -132,8 +131,8 @@ bash bootstrap_nulla.sh --install-profile local_plus_llamacpp
 After install, set your profile:
 
 ```bash
-cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-only
-cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-max
+cd ~/nulla-local && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-only
+cd ~/nulla-local && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-max
 ```
 
 Full install docs: [docs/INSTALL.md](docs/INSTALL.md)
@@ -250,8 +249,8 @@ Full map: [`REPO_MAP.md`](REPO_MAP.md)
 ## For developers
 
 ```bash
-git clone https://github.com/Parad0x-Labs/nulla-hive-mind.git
-cd nulla-hive-mind
+git clone https://github.com/Parad0x-Labs/nulla-local.git
+cd nulla-local
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,runtime]"
 python3 -m apps.nulla_api_server

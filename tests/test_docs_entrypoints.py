@@ -71,6 +71,8 @@ def test_docs_root_is_curated_after_archive_sweep() -> None:
         "TDL.md",
         "THIRD_PARTY_LICENSES.md",
         "TRUST.md",
+        "WINDOWS_LOCAL_OPENCLAW_SETUP.md",
+        "WINDOWS_ONE_CLICK_READINESS.md",
         "x402-proof.md",
     }
 

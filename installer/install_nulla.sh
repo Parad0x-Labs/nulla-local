@@ -1522,6 +1522,7 @@ pull_models() {
   local install_profile="$2"
   local model_tag="$3"
   local runtime_home="$4"
+  local openclaw_enabled="${5:-0}"
   if [[ -z "${ollama_exe}" ]]; then
     say "Step 12/14: Model pull skipped because Ollama is unavailable."
     return
@@ -1529,15 +1530,22 @@ pull_models() {
 
   say "Step 12/14: Pulling AI model (this may take a while)..."
   local required_model=""
-  while IFS= read -r required_model; do
-    [[ -n "${required_model}" ]] || continue
+  pull_one_ollama_model() {
+    [[ -n "${required_model}" ]] || return
     if "${ollama_exe}" list 2>/dev/null | grep -qi "${required_model}"; then
       say "Model ${required_model} already available."
-      continue
+      return
     fi
     say "Downloading ${required_model}..."
     "${ollama_exe}" pull "${required_model}" || say "WARNING: Model pull failed. Run manually: ollama pull ${required_model}"
+  }
+  while IFS= read -r required_model; do
+    pull_one_ollama_model
   done < <(detect_required_ollama_models "${install_profile}" "${model_tag}" "${runtime_home}")
+  if [[ "${openclaw_enabled}" == "1" ]]; then
+    required_model="nomic-embed-text"
+    pull_one_ollama_model
+  fi
 }
 
 
@@ -1768,7 +1776,7 @@ main() {
   start_ollama_server "${ollama_exe}"
   configure_openclaw_with_ollama "${ollama_exe}" "${model_tag}" "${openclaw_enabled}" "${openclaw_home_override}"
   register_openclaw "${runtime_home}" "${model_tag}" "${openclaw_agent_dir}" "${openclaw_enabled}" "${openclaw_home_override}" "${agent_name}"
-  pull_models "${ollama_exe}" "${install_profile}" "${model_tag}" "${runtime_home}"
+  pull_models "${ollama_exe}" "${install_profile}" "${model_tag}" "${runtime_home}" "${openclaw_enabled}"
   configure_liquefy
   install_macos_launch_agent "${runtime_home}"
   write_install_receipt "${runtime_home}" "${model_tag}" "${openclaw_enabled}" "${ollama_exe}" "${openclaw_agent_dir}" "${LAUNCH_AGENT_PATH}"

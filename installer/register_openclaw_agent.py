@@ -18,6 +18,14 @@ from core.openclaw_locator import OpenClawPaths, discover_openclaw_paths
 NULLA_AGENT_ID = "nulla"
 NULLA_PROVIDER_ID = "nulla"
 NULLA_MODEL_ID = "nulla"
+OPENCLAW_MEMORY_EMBEDDING_MODEL = "nomic-embed-text"
+OPENCLAW_MEMORY_README = """# NULLA Local Memory
+
+Workspace memory notes for OpenClaw live here.
+
+Keep secrets, private keys, API tokens, and machine-local credentials out of this directory.
+"""
+DEFAULT_LOCAL_PROVIDER_TIMEOUT_SECONDS = 600
 
 
 def _nulla_api_url() -> str:
@@ -44,6 +52,16 @@ def _gateway_port() -> int:
         return max(1, min(int(raw), 65535))
     except ValueError:
         return 18789
+
+
+def _local_provider_timeout_seconds() -> int:
+    raw = str(os.environ.get("NULLA_OPENCLAW_PROVIDER_TIMEOUT_SECONDS") or "").strip()
+    if not raw:
+        return DEFAULT_LOCAL_PROVIDER_TIMEOUT_SECONDS
+    try:
+        return max(60, min(int(raw), 3600))
+    except ValueError:
+        return DEFAULT_LOCAL_PROVIDER_TIMEOUT_SECONDS
 
 
 def _openclaw_home(paths: OpenClawPaths) -> Path:
@@ -111,6 +129,34 @@ def _model_size_label(model_tag: str) -> str:
     return size.upper()
 
 
+_REASONING_MODEL_MARKERS = (
+    "thinking",
+    "-r1",
+    "deepseek-r1",
+    "qwq",
+    "o1",
+    "o3",
+)
+
+
+def _is_reasoning_model(model_tag: str) -> bool:
+    """Whether the underlying model actually does extended step-by-step reasoning.
+
+    OpenClaw treats this as a real capability flag, not a display toggle: it
+    drives the default "reasoning level" (on/off) it shows for the agent. A
+    blanket False is correct for today's non-reasoning tags (gemma3, qwen2.5)
+    but would silently misreport a genuinely reasoning-tuned tag (e.g. a
+    qwen3 "-thinking" variant or deepseek-r1) as non-reasoning too.
+    """
+    name = _runtime_model_name(model_tag).lower()
+    return any(marker in name for marker in _REASONING_MODEL_MARKERS)
+
+
+def _model_display_name(model_tag: str) -> str:
+    """Human-readable model identity for OpenClaw's model list, e.g. 'qwen2.5:7b (7B)'."""
+    return f"{_runtime_model_name(model_tag)} ({_model_size_label(model_tag)})"
+
+
 def _normalize_display_name(display_name: str | None) -> str:
     value = str(display_name or "").strip()
     return value[:40] if value else "NULLA"
@@ -132,6 +178,7 @@ def _base_openclaw_config(default_workspace: str) -> dict[str, Any]:
                 "subagents": {
                     "maxConcurrent": 8,
                 },
+                "memorySearch": _build_ollama_memory_search_config(),
             },
             "list": [],
         },
@@ -171,6 +218,13 @@ def _base_openclaw_config(default_workspace: str) -> dict[str, Any]:
                 "ollama": _build_ollama_provider(_detect_best_model()),
             }
         },
+        "tools": {
+            "web": {
+                "search": {
+                    "enabled": False,
+                },
+            },
+        },
     }
 
 
@@ -191,6 +245,7 @@ def _ensure_config_defaults(cfg: dict[str, Any], *, paths: OpenClawPaths) -> dic
     agent_defaults.setdefault("compaction", {"mode": "safeguard"})
     agent_defaults.setdefault("maxConcurrent", 4)
     agent_defaults.setdefault("subagents", {"maxConcurrent": 8})
+    _ensure_ollama_memory_search_config(cfg)
     if not isinstance(agents.get("list"), list):
         agents["list"] = []
 
@@ -223,6 +278,8 @@ def _ensure_config_defaults(cfg: dict[str, Any], *, paths: OpenClawPaths) -> dic
     models = cfg.setdefault("models", {})
     models.setdefault("providers", {})
     _ensure_ollama_provider(cfg, _detect_best_model())
+    _ensure_local_only_tools_config(cfg)
+    _remove_stale_ollama_plugin_config(cfg)
 
     cfg.setdefault("auth", {"profiles": {}})
     return cfg
@@ -284,14 +341,15 @@ def _build_agent_entry(
 
 
 def _build_nulla_provider(model_tag: str) -> dict[str, Any]:
+    resolved_tag = _normalize_model_tag(model_tag)
     return {
         "baseUrl": _nulla_api_url(),
         "api": "ollama",
         "models": [
             {
                 "id": NULLA_MODEL_ID,
-                "name": NULLA_MODEL_ID,
-                "reasoning": False,
+                "name": _model_display_name(resolved_tag),
+                "reasoning": _is_reasoning_model(resolved_tag),
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 32768,
@@ -299,6 +357,7 @@ def _build_nulla_provider(model_tag: str) -> dict[str, Any]:
             }
         ],
         "apiKey": "ollama-local",
+        "timeoutSeconds": _local_provider_timeout_seconds(),
     }
 
 
@@ -311,7 +370,7 @@ def _build_ollama_provider(model_tag: str) -> dict[str, Any]:
             {
                 "id": model_name,
                 "name": model_name,
-                "reasoning": False,
+                "reasoning": _is_reasoning_model(model_tag),
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 32768,
@@ -319,6 +378,7 @@ def _build_ollama_provider(model_tag: str) -> dict[str, Any]:
             }
         ],
         "apiKey": "ollama-local",
+        "timeoutSeconds": _local_provider_timeout_seconds(),
     }
 
 
@@ -379,8 +439,10 @@ def _provider_looks_like_broken_ollama_alias(provider: Any) -> bool:
     if not isinstance(model, dict):
         return False
     model_id = str(model.get("id") or "").strip()
-    model_name = str(model.get("name") or "").strip()
-    return model_id == NULLA_MODEL_ID and model_name == NULLA_MODEL_ID
+    # `id` is the stable "nulla" alias regardless of the underlying model; `name` is now
+    # a descriptive label (e.g. "qwen2.5:7b (7B)") rather than a second "nulla" literal,
+    # so id alone (combined with the baseUrl check above) is the reliable signal here.
+    return model_id == NULLA_MODEL_ID
 
 
 def _ensure_ollama_provider(cfg: dict[str, Any], model_tag: str) -> None:
@@ -389,6 +451,55 @@ def _ensure_ollama_provider(cfg: dict[str, Any], model_tag: str) -> None:
     current = providers.get("ollama")
     if current is None or _provider_looks_like_broken_ollama_alias(current):
         providers["ollama"] = _build_ollama_provider(model_tag)
+    elif isinstance(current, dict):
+        current.setdefault("timeoutSeconds", _local_provider_timeout_seconds())
+
+
+def _build_ollama_memory_search_config() -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "provider": "ollama",
+        "model": OPENCLAW_MEMORY_EMBEDDING_MODEL,
+        "fallback": "none",
+        "remote": {
+            "baseUrl": _ollama_api_url(),
+            "apiKey": "ollama-local",
+        },
+    }
+
+
+def _ensure_ollama_memory_search_config(cfg: dict[str, Any]) -> None:
+    agents = cfg.setdefault("agents", {})
+    defaults = agents.setdefault("defaults", {})
+    memory_search = defaults.setdefault("memorySearch", {})
+    if not isinstance(memory_search, dict):
+        memory_search = {}
+        defaults["memorySearch"] = memory_search
+    memory_search.update(_build_ollama_memory_search_config())
+
+
+def _ensure_local_only_tools_config(cfg: dict[str, Any]) -> None:
+    tools = cfg.setdefault("tools", {})
+    web = tools.setdefault("web", {})
+    search = web.setdefault("search", {})
+    if not isinstance(search, dict):
+        search = {}
+        web["search"] = search
+    search["enabled"] = False
+    search.pop("provider", None)
+
+
+def _remove_stale_ollama_plugin_config(cfg: dict[str, Any]) -> None:
+    plugins = cfg.get("plugins")
+    if not isinstance(plugins, dict):
+        return
+    entries = plugins.get("entries")
+    if isinstance(entries, dict):
+        entries.pop("ollama", None)
+        if not entries:
+            plugins.pop("entries", None)
+    if not plugins:
+        cfg.pop("plugins", None)
 
 
 def _apply_gateway_bind_overrides(cfg: dict[str, Any]) -> None:
@@ -495,6 +606,18 @@ def _write_bridge_launchers(base_dir: Path, project_root: str) -> None:
         path.chmod(0o755)
 
 
+def _thinking_mode_enabled() -> bool:
+    """NULLA's own 'show your workflow/thinking' preference, distinct from the
+    per-model `reasoning` capability flag sent to OpenClaw's provider config."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+        from core.user_preferences import load_preferences
+
+        return bool(load_preferences().show_workflow)
+    except Exception:
+        return False
+
+
 def _write_agent_metadata(
     project_root: str,
     nulla_home: str,
@@ -519,6 +642,7 @@ def _write_agent_metadata(
         "project_root": project_root or "",
         "api_url": _nulla_api_url(),
         "runtime_model": model_tag,
+        "thinking_mode_enabled": _thinking_mode_enabled(),
     }
     meta_path = agent_dir / "openclaw.agent.json"
     meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
@@ -552,6 +676,7 @@ def _write_compat_bridge(
         "project_root": project_root or "",
         "api_url": _nulla_api_url(),
         "runtime_model": model_tag,
+        "thinking_mode_enabled": _thinking_mode_enabled(),
     }
     (bridge_dir / "openclaw.agent.json").write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
@@ -560,6 +685,20 @@ def _write_compat_bridge(
     _write_bridge_launchers(bridge_dir, project_root)
     _create_auth_profiles(bridge_agent_dir)
     _create_models_json(bridge_agent_dir, model_tag)
+
+
+def _ensure_workspace_memory_seed(project_root: str) -> None:
+    root = str(project_root or "").strip()
+    if not root:
+        return
+    try:
+        memory_dir = Path(root) / "memory"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        readme = memory_dir / "README.md"
+        if not readme.exists():
+            readme.write_text(OPENCLAW_MEMORY_README, encoding="utf-8")
+    except OSError:
+        return
 
 
 def _backup_existing_config(config_path: Path) -> None:
@@ -651,6 +790,7 @@ def register(
         display_name=normalized_display_name,
         paths=paths,
     )
+    _ensure_workspace_memory_seed(project_root)
     print(f"Agent directory created at {_openclaw_agent_dir(paths)}")
     return True
 

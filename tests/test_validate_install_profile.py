@@ -8,6 +8,7 @@ from installer import validate_install_profile as validator
 
 def test_validate_install_profile_blocks_unready_hybrid_kimi(monkeypatch) -> None:
     monkeypatch.delenv("KIMI_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_MODELS", raising=False)
     monkeypatch.setattr(
         validator,
         "build_provider_registry_snapshot",
@@ -27,6 +28,7 @@ def test_validate_install_profile_blocks_unready_hybrid_kimi(monkeypatch) -> Non
 
 def test_validate_install_profile_accepts_ready_hybrid_kimi(monkeypatch) -> None:
     monkeypatch.setenv("KIMI_API_KEY", "test-key")
+    monkeypatch.delenv("OLLAMA_MODELS", raising=False)
     monkeypatch.setattr(
         validator,
         "build_provider_registry_snapshot",
@@ -82,6 +84,7 @@ def test_validate_install_profile_accepts_ready_hybrid_kimi(monkeypatch) -> None
 
 def test_validate_install_profile_blocks_unready_full_orchestrated(monkeypatch) -> None:
     monkeypatch.delenv("KIMI_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_MODELS", raising=False)
     monkeypatch.setattr(
         validator,
         "build_provider_registry_snapshot",
@@ -101,6 +104,7 @@ def test_validate_install_profile_blocks_unready_full_orchestrated(monkeypatch) 
 
 def test_validate_install_profile_accepts_ready_hybrid_fallback(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OLLAMA_MODELS", raising=False)
     monkeypatch.setattr(
         validator,
         "build_provider_registry_snapshot",
@@ -156,6 +160,7 @@ def test_validate_install_profile_accepts_ready_hybrid_fallback(monkeypatch) -> 
 
 def test_validate_install_profile_passes_requested_profile_to_registry_snapshot(monkeypatch) -> None:
     captured: dict[str, object] = {}
+    monkeypatch.delenv("OLLAMA_MODELS", raising=False)
 
     def _snapshot(**kwargs):
         captured.update(kwargs)

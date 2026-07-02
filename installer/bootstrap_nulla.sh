@@ -2,9 +2,9 @@
 set -euo pipefail
 
 OWNER="${NULLA_GITHUB_OWNER:-Parad0x-Labs}"
-REPO="${NULLA_GITHUB_REPO:-nulla-hive-mind}"
+REPO="${NULLA_GITHUB_REPO:-nulla-local}"
 REF="${NULLA_GITHUB_REF:-main}"
-INSTALL_DIR="${NULLA_INSTALL_DIR:-$HOME/nulla-hive-mind}"
+INSTALL_DIR="${NULLA_INSTALL_DIR:-$HOME/nulla-local}"
 ARCHIVE_URL="${NULLA_ARCHIVE_URL:-https://github.com/${OWNER}/${REPO}/archive/refs/heads/${REF}.tar.gz}"
 ARCHIVE_SHA256="${NULLA_ARCHIVE_SHA256:-}"
 SOURCE_COMMIT="${NULLA_BUILD_COMMIT:-}"

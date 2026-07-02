@@ -44,7 +44,7 @@ def start_web0_background_workers() -> None:
 
 from core.backend_manager import BackendManager
 from core.hardware_tier import MachineProbe, QwenTier, probe_machine, select_qwen_tier, tier_summary
-from core.local_ollama_inventory import env_flag_enabled, installed_ollama_model_names
+from core.local_ollama_inventory import env_flag_enabled, installed_ollama_model_names, is_text_generation_ollama_model
 from core.model_registry import ModelRegistry, ProviderAuditRow
 from core.provider_env import merge_provider_env
 from core.provider_routing import ProviderCapabilityTruth, provider_capability_truth_for_manifest
@@ -79,6 +79,7 @@ class RuntimeBackbone:
 def build_provider_registry_snapshot(
     registry: ModelRegistry | None = None,
     *,
+    model_tag: str | None = None,
     runtime_home: str | None = None,
     requested_profile: str | None = None,
     honor_install_profile: bool = False,
@@ -95,6 +96,7 @@ def build_provider_registry_snapshot(
         )
     ensure_default_runtime_providers(
         active_registry,
+        model_tag=model_tag,
         env=env_map,
         install_profile=install_profile,
         runtime_home=runtime_home,
@@ -118,6 +120,7 @@ def build_provider_registry_snapshot(
         visible_provider_ids = _visible_provider_ids_for_install_profile(
             capability_truth=capability_truth,
             requested_profile=install_profile or None,
+            selected_model=model_tag,
             runtime_home=runtime_home,
             env=env_map,
         )
@@ -184,7 +187,13 @@ def _filter_snapshot_to_installed_ollama_inventory(
     visible_provider_ids = {
         item.provider_id
         for item in capability_truth
-        if not _is_local_ollama_capability(item) or str(item.model_id or "").strip().lower() in installed_tags
+        if (
+            not _is_local_ollama_capability(item)
+            or (
+                str(item.model_id or "").strip().lower() in installed_tags
+                and is_text_generation_ollama_model(str(item.model_id or ""))
+            )
+        )
     }
     return _filter_snapshot_to_provider_ids(
         manifests=manifests,
@@ -198,6 +207,7 @@ def _visible_provider_ids_for_install_profile(
     *,
     capability_truth: tuple[ProviderCapabilityTruth, ...],
     requested_profile: str | None,
+    selected_model: str | None = None,
     runtime_home: str | None,
     env: dict[str, str],
 ) -> tuple[str, ...]:
@@ -205,6 +215,7 @@ def _visible_provider_ids_for_install_profile(
         return tuple()
     install_profile = build_install_profile_truth(
         requested_profile=requested_profile,
+        selected_model=selected_model,
         provider_capability_truth=capability_truth,
         runtime_home=runtime_home,
         env=env,

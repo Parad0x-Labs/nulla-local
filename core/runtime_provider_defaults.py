@@ -11,7 +11,7 @@ from core.local_model_bundles import (
     manifest_profile_for_model,
     resolve_local_bundle_recommendation,
 )
-from core.local_ollama_inventory import env_flag_enabled, installed_ollama_model_names
+from core.local_ollama_inventory import env_flag_enabled, installed_ollama_model_names, is_text_generation_ollama_model
 from core.local_specialist_lane import secondary_local_model
 from core.model_registry import ModelRegistry
 from core.runtime_install_profiles import normalize_install_profile_id, required_ollama_models_for_profile
@@ -105,7 +105,7 @@ def ensure_default_runtime_providers(
     for bundle_model, role in provider_models:
         if _ensure_local_ollama_provider(registry, model_tag=bundle_model, bundle_role=role):
             changed.append(f"ollama-local:{bundle_model}")
-    if _profile_allows_aux_local_providers(active_profile):
+    if _profile_allows_aux_local_providers(active_profile, runtime_home=runtime_home):
         llamacpp_provider_id = _ensure_llamacpp_provider(registry, model_name=local_model, env=env_map)
         if llamacpp_provider_id:
             changed.append(llamacpp_provider_id)
@@ -158,6 +158,8 @@ def _runtime_provider_model_roles(
         return tuple(model_roles)
 
     for installed_model in installed_ollama_model_names(env=env):
+        if not is_text_generation_ollama_model(installed_model):
+            continue
         add(
             installed_model,
             installed_ollama_role_for_model(model_name=installed_model, primary_model=primary_model),
@@ -741,10 +743,23 @@ def _default_free_disk_gb() -> float:
     return round(float(usage.free) / float(1024**3), 1)
 
 
-def _profile_allows_aux_local_providers(profile_id: str) -> bool:
+def _profile_allows_aux_local_providers(profile_id: str, *, runtime_home: str | None = None) -> bool:
     if not profile_id:
         return True
-    return profile_id in {"local-max", "full-orchestrated"}
+    if profile_id in {"local-max", "full-orchestrated"}:
+        return True
+    if not runtime_home:
+        return False
+    # A live-verified llama.cpp GPU backend (core.llamacpp_capability_probe) unlocks the
+    # aux local provider lane regardless of install profile — a measured speedup, not a
+    # profile choice, is what earns this. Import kept local to avoid a hard dependency
+    # for every runtime_provider_defaults caller that never touches GPU acceleration.
+    try:
+        from core.llamacpp_capability_probe import has_any_verified_gpu_backend
+
+        return has_any_verified_gpu_backend(runtime_home)
+    except Exception:
+        return False
 
 
 def _profile_allows_kimi_provider(profile_id: str) -> bool:

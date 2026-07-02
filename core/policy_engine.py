@@ -13,7 +13,7 @@ _DEFAULT_POLICY = {
     "system": {
         "advice_only_default": True,
         "local_only_mode": False,
-        "allow_web_fallback": False,
+        "allow_web_fallback": True,
         "allow_null_dial": False,
         "allow_swarm_queries": True,
         "max_datagram_bytes": 32768,
@@ -314,11 +314,16 @@ def _env_is_truthy(value: str | None) -> bool:
 
 
 def _apply_env_overrides(config: dict[str, Any], env: dict[str, str] | None = None) -> dict[str, Any]:
-    """Apply explicit, documented environment opt-ins on top of file/default policy.
+    """Apply explicit, documented environment overrides on top of file/default policy.
 
-    Web access is opt-in and off by default. Setting `NULLA_ENABLE_WEB=1`
-    (or its alias `NULLA_ALLOW_WEB=1`) deliberately enables live web lookup by
-    mapping to `system.allow_web_fallback=True` at load time.
+    Web access is on by default (see config/default_policy.yaml) so live-data
+    questions get a real DuckDuckGo-backed answer out of the box. Setting
+    `NULLA_ENABLE_WEB=1` (or its alias `NULLA_ALLOW_WEB=1`) force-enables it
+    regardless of the config file. Setting `NULLA_DISABLE_WEB=1` (or its alias
+    `NULLA_NO_WEB=1`) force-disables it regardless of the config file or the
+    enable env vars above — this is the quick opt-out for a user who wants no
+    web access without going all the way to `local_only_mode`, which also
+    restricts remote-only fallback and other non-web behavior.
 
     Remote `null://` dial is opt-in and off by default the same way. Setting
     `NULLA_ENABLE_NULL_DIAL=1` (or its alias `NULLA_ALLOW_NULL_DIAL=1`) maps to
@@ -328,6 +333,10 @@ def _apply_env_overrides(config: dict[str, Any], env: dict[str, str] | None = No
     if _env_is_truthy(env_map.get("NULLA_ENABLE_WEB")) or _env_is_truthy(env_map.get("NULLA_ALLOW_WEB")):
         system = dict(config.get("system") or {})
         system["allow_web_fallback"] = True
+        config["system"] = system
+    if _env_is_truthy(env_map.get("NULLA_DISABLE_WEB")) or _env_is_truthy(env_map.get("NULLA_NO_WEB")):
+        system = dict(config.get("system") or {})
+        system["allow_web_fallback"] = False
         config["system"] = system
     if _env_is_truthy(env_map.get("NULLA_ENABLE_NULL_DIAL")) or _env_is_truthy(env_map.get("NULLA_ALLOW_NULL_DIAL")):
         system = dict(config.get("system") or {})

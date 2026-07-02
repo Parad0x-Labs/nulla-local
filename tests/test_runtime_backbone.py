@@ -146,6 +146,40 @@ def test_build_provider_registry_snapshot_honors_local_only_install_profile_for_
     assert not any(item.provider_id.startswith("kimi-remote:") for item in snapshot.capability_truth)
 
 
+def test_build_provider_registry_snapshot_filters_profile_to_active_runtime_model() -> None:
+    manifests = {}
+
+    def _get_manifest(provider_name: str, model_name: str):
+        return manifests.get((provider_name, model_name))
+
+    def _register_manifest(manifest):
+        manifests[(manifest.provider_name, manifest.model_name)] = manifest
+        return manifest
+
+    def _list_manifests(*, enabled_only: bool = False, limit: int = 256):
+        return list(manifests.values())[:limit]
+
+    registry = mock.Mock()
+    registry.startup_warnings.return_value = []
+    registry.provider_audit_rows.return_value = []
+    registry.get_manifest.side_effect = _get_manifest
+    registry.register_manifest.side_effect = _register_manifest
+    registry.list_manifests.side_effect = _list_manifests
+
+    with mock.patch("core.runtime_provider_defaults.default_runtime_model_tag", return_value="gemma3:4b"):
+        snapshot = build_provider_registry_snapshot(
+            registry,
+            model_tag="qwen2.5:7b",
+            requested_profile="local-only",
+            honor_install_profile=True,
+            env={"OLLAMA_MODELS": "G:\\Ollama\\models"},
+        )
+
+    assert ("ollama-local", "qwen2.5:7b") in manifests
+    assert ("ollama-local", "gemma3:4b") not in manifests
+    assert tuple(item.provider_id for item in snapshot.capability_truth) == ("ollama-local:qwen2.5:7b",)
+
+
 def test_build_provider_registry_snapshot_filters_legacy_enabled_manifests_to_active_profile_mix() -> None:
     manifests: dict[tuple[str, str], ModelProviderManifest] = {
         ("cloud-fallback-http", "cloud"): ModelProviderManifest(
