@@ -17,18 +17,20 @@ if (-not (Test-Path -LiteralPath $OneClick)) {
     throw "Missing Windows one-click installer: $OneClick"
 }
 
-$forward = @("-InstallProfile", $InstallProfile)
+$forward = @{
+    InstallProfile = $InstallProfile
+}
 if (-not [string]::IsNullOrWhiteSpace($NullaHome)) {
-    $forward += @("-NullaHome", $NullaHome)
+    $forward["NullaHome"] = $NullaHome
 }
 if ($NoStart) {
-    $forward += "-NoStart"
+    $forward["NoStart"] = $true
 }
 if ($AutoYes) {
-    $forward += "-AutoYes"
+    $forward["AutoYes"] = $true
 }
 if ($SkipBenchmark) {
-    $forward += "-SkipBenchmark"
+    $forward["SkipBenchmark"] = $true
 }
 
 & $OneClick @forward

@@ -9,21 +9,20 @@ This is the canonical install and quickstart doc.
 macOS / Linux:
 
 ```bash
-curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh
+curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.sh
 bash bootstrap_nulla.sh
 ```
 
 If you need a reproducible historical install instead of the latest alpha trunk on `main`, pin an exact ref:
 
 ```bash
-tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --ref 2f17895ede500d85372269cb516083abd09c013c --install-profile ollama-max && rm -f "$tmp"
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.sh && bash "$tmp" --ref 2f17895ede500d85372269cb516083abd09c013c --install-profile ollama-max && rm -f "$tmp"
 ```
 
 Windows PowerShell:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1
-powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1
+Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1; powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1
 ```
 
 Local Windows checkout with guided installer:
@@ -69,19 +68,19 @@ powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1 -InstallProfile l
 Safe one-line profile shortcuts for macOS / Linux:
 
 ```bash
-tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile ollama-only && rm -f "$tmp"
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile ollama-only && rm -f "$tmp"
 ```
 
 ```bash
-tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-hive-mind/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile ollama-max && rm -f "$tmp"
+tmp="$(mktemp)" && curl -fsSLo "$tmp" https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.sh && bash "$tmp" --install-profile ollama-max && rm -f "$tmp"
 ```
 
 After install, inspect or switch profiles without editing env vars:
 
 ```bash
-cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile
-cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-only
-cd ~/nulla-hive-mind && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-max
+cd ~/nulla-local && .venv/bin/python -m apps.nulla_cli install-profile
+cd ~/nulla-local && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-only
+cd ~/nulla-local && .venv/bin/python -m apps.nulla_cli install-profile --set ollama-max
 ```
 
 Recommended profile guidance:
@@ -100,8 +99,8 @@ The probe reports:
 Manual local shortcut:
 
 ```bash
-git clone https://github.com/Parad0x-Labs/nulla-hive-mind.git
-cd nulla-hive-mind
+git clone https://github.com/Parad0x-Labs/nulla-local.git
+cd nulla-local
 bash Install_And_Run_NULLA.sh
 ```
 
@@ -130,8 +129,8 @@ If you already have a verified archive digest, pass it to the bootstrap script w
 ## Manual Developer Setup
 
 ```bash
-git clone https://github.com/Parad0x-Labs/nulla-hive-mind.git
-cd nulla-hive-mind
+git clone https://github.com/Parad0x-Labs/nulla-local.git
+cd nulla-local
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev,runtime]"

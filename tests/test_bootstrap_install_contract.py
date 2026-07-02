@@ -12,6 +12,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 def test_shell_bootstrap_falls_back_to_canonical_installer() -> None:
     script = (PROJECT_ROOT / "installer" / "bootstrap_nulla.sh").read_text(encoding="utf-8")
 
+    assert 'REPO="${NULLA_GITHUB_REPO:-nulla-local}"' in script
+    assert 'INSTALL_DIR="${NULLA_INSTALL_DIR:-$HOME/nulla-local}"' in script
+    assert 'NULLA_GITHUB_REPO:-nulla-hive-mind' not in script
     assert "--install-profile <id>" in script
     assert "ollama-only" in script
     assert "ollama-max" in script
@@ -90,6 +93,11 @@ def test_shell_bootstrap_handles_flat_git_archive_without_stripping_root_files(t
 def test_powershell_bootstrap_falls_back_to_canonical_installer() -> None:
     script = (PROJECT_ROOT / "installer" / "bootstrap_nulla.ps1").read_text(encoding="utf-8")
 
+    assert 'if ([string]::IsNullOrWhiteSpace($RepoName)) { $RepoName = "nulla-local" }' in script
+    assert "function Resolve-DefaultInstallDir" in script
+    assert '[System.IO.DriveInfo]::GetDrives()' in script
+    assert 'Join-Path $bestDrive.RootDirectory.FullName "NULLA\\nulla-local"' in script
+    assert 'Join-Path $HOME "nulla-hive-mind"' not in script
     assert '[string]$InstallProfile = $env:NULLA_INSTALL_PROFILE' in script
     assert '[string]$SourceCommit = $env:NULLA_BUILD_COMMIT' in script
     assert '[string]$SourceDirtyState = $env:NULLA_BUILD_DIRTY_STATE' in script

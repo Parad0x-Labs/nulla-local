@@ -1,9 +1,11 @@
 system:
   advice_only_default: true
   local_only_mode: false
-  # Web access is opt-in and off by default. Enable with NULLA_ENABLE_WEB=1
-  # (or NULLA_ALLOW_WEB=1), or set this to true here, to allow live web lookup.
-  allow_web_fallback: false
+  # Web access is on by default so live-data questions (weather, prices, news)
+  # get a real DuckDuckGo-backed answer instead of the model guessing. Disable
+  # with NULLA_DISABLE_WEB=1 (or NULLA_NO_WEB=1), set this to false here, or
+  # set local_only_mode: true above for a stronger no-remote-anything mode.
+  allow_web_fallback: true
   # Remote null:// dial is opt-in and off by default. Enable with
   # NULLA_ENABLE_NULL_DIAL=1 (or NULLA_ALLOW_NULL_DIAL=1), or set this to true
   # here, to let a null:// request reach the named agent's endpoint. Spend stays

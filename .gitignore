@@ -44,11 +44,18 @@ generated/
 artifacts/acceptance_runs/
 workspace/
 sandbox_workspace/
+control/
+templates/
 install_doctor.json
+install_receipt.json
 .worktrees/
 
 # Explicit guardrail: internal handovers must stay local-only.
 # Never put sensitive/operator handovers under docs/ or any tracked path.
+# Match HANDOVER anywhere in the name (e.g. WINDOWS_AGENT_HANDOVER.md), not just a
+# leading "HANDOVER_" — these files carry machine paths/usernames and must never ship.
+*HANDOVER*.md
+**/*HANDOVER*.md
 HANDOVER_*.md
 memory/HANDOVER_*.md
 memory/INTERNAL_TAKEOVER*.md
@@ -154,3 +161,6 @@ reports/greenloop/logs/healthz_*.json
 reports/greenloop/logs/concurrency_probe.json
 reports/greenloop/operator_replay/
 reports/greenloop/start_greenloop_runtime.sh
+
+# OpenClaw per-machine setup state (generated, not source)
+openclaw-workspace-state.json

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -112,13 +113,92 @@ def test_install_wrappers_forward_install_profile_and_extra_args() -> None:
     assert '"%SCRIPT_DIR%validate_install_profile.py"' in install_bat_script
 
 
-def test_windows_launchers_use_module_entrypoint_for_api_server() -> None:
+def test_windows_launchers_avoid_nested_quote_for_loop_around_python_exe() -> None:
+    # `for /f "..." %%A in ('"%PYTHON_EXE%" -c "..." 2^>nul') do ...` silently produces no
+    # output (and the receipt-derived variable silently falls back to a hardcoded default)
+    # when %PYTHON_EXE% itself contains a space, which happens for any install path with a
+    # space in it (e.g. a folder named "My Nulla" or "Local Nulla") -- a very real,
+    # previously-undetected cause of NULLA reporting the wrong model at runtime despite the
+    # installer having selected the right one. Every Windows launcher that reads
+    # install_receipt.json at every startup must route through a temp file instead of an
+    # inline for/f command clause.
+    launcher_names = (
+        "Start_NULLA.bat",
+        "OpenClaw_NULLA.bat",
+        "Talk_To_NULLA.bat",
+    )
+    for name in launcher_names:
+        script = (PROJECT_ROOT / name).read_text(encoding="utf-8")
+        assert re.search(r"for /f[^\n]*\('\"%PYTHON_EXE%\"", script) is None, name
+
+    install_bat_script = (PROJECT_ROOT / "installer" / "install_nulla.bat").read_text(encoding="utf-8")
+    assert re.search(r"for /f[^\n]*\('\"%VENV_DIR%\\Scripts\\python\.exe\"", install_bat_script) is None
+
+
+def test_windows_installer_uses_headless_safe_openclaw_bootstrap() -> None:
     install_bat_script = (PROJECT_ROOT / "installer" / "install_nulla.bat").read_text(encoding="utf-8")
 
-    assert '"%VENV_DIR%\\Scripts\\python.exe" -m apps.nulla_api_server' in install_bat_script
-    assert "where openclaw" in install_bat_script
-    assert "gateway run --force --port 18789" in install_bat_script
-    assert "Trying Ollama OpenClaw bootstrap" in install_bat_script
+    # The Ollama CLI's OpenClaw bootstrap subcommand cannot run headless here (it demands
+    # an interactive terminal for model selection even with --yes and a model flag set),
+    # and without its config-only flag it launches an attached interactive TUI that would
+    # hang a headless install. The installer must not fall back to that subcommand.
+    assert '"%OLLAMA_EXE%" launch openclaw' not in install_bat_script
+    assert "npm install -g openclaw" in install_bat_script
+    assert "where npm" in install_bat_script
+
+
+def test_windows_launchers_use_module_entrypoint_for_api_server() -> None:
+    install_bat_script = (PROJECT_ROOT / "installer" / "install_nulla.bat").read_text(encoding="utf-8")
+    start_launcher = (PROJECT_ROOT / "Start_NULLA.bat").read_text(encoding="utf-8")
+    openclaw_launcher = (PROJECT_ROOT / "OpenClaw_NULLA.bat").read_text(encoding="utf-8")
+    background_cmd = (PROJECT_ROOT / "nulla_background.cmd").read_text(encoding="utf-8")
+
+    assert 'for %%I in ("%PROJECT_ROOT%\\..\\.nulla_runtime") do set "NULLA_HOME_DEFAULT=%%~fI"' in install_bat_script
+    assert "Step 7/14: Verifying launchers" in install_bat_script
+    assert "persist_windows_runtime_config.py" in install_bat_script
+    assert '"Start_NULLA.bat" "Talk_To_NULLA.bat" "OpenClaw_NULLA.bat" "nulla_background.vbs" "nulla_background.cmd"' in install_bat_script
+    assert "Missing Windows launcher" in install_bat_script
+    assert 'set "VBS_PATH=%PROJECT_ROOT%\\nulla_background.vbs"' in install_bat_script
+    assert 'set "BACKGROUND_CMD_PATH=%PROJECT_ROOT%\\nulla_background.cmd"' in install_bat_script
+    assert 'set "SCRIPT_DIR=%PROJECT_ROOT%' not in install_bat_script
+    assert '"%PYTHON_EXE%" -m apps.nulla_api_server' in start_launcher
+    assert "http://127.0.0.1:11435/healthz" in openclaw_launcher
+    assert "installer\\start_windows_detached.py" in openclaw_launcher
+    assert "Start_NULLA.bat" in background_cmd
+    assert "nulla_background.cmd" in install_bat_script
+    assert "goto run" in background_cmd
+    assert "http://127.0.0.1:11435/healthz" in background_cmd
+    assert 'for %%I in ("%SCRIPT_DIR%.") do set "SCRIPT_ROOT=%%~fI"' in background_cmd
+    assert '--cwd "%SCRIPT_ROOT%"' in background_cmd
+    assert "NULLA API detached start requested" in background_cmd
+    assert "nulla_api_child.log" in background_cmd
+    assert "nulla_api_child.err.log" in background_cmd
+    assert "call \"%SCRIPT_DIR%Start_NULLA.bat\"" not in background_cmd
+    assert "nulla_background.vbs" in openclaw_launcher
+    assert "%SystemRoot%\\System32\\wscript.exe" in openclaw_launcher
+    assert 'schtasks /create /tn "NULLA_Daemon" /tr "\\"%SystemRoot%\\System32\\wscript.exe\\" \\"%VBS_PATH%\\""' in install_bat_script
+    assert 'start "NULLA API" /MIN' not in openclaw_launcher
+    assert "BeginConnect('127.0.0.1', 11435" in background_cmd
+    assert "Could not start NULLA API" in openclaw_launcher
+    assert "nulla_api.err.log" in openclaw_launcher
+    assert "where openclaw.cmd" in openclaw_launcher
+    assert "where openclaw.exe" in openclaw_launcher
+    assert "NULLA_ALLOW_MODEL_ENV_OVERRIDE" in openclaw_launcher
+    assert 'from core.openclaw_locator import load_gateway_token; print(load_gateway_token())' in openclaw_launcher
+    assert "%USERPROFILE%\\.local\\bin\\openclaw.cmd" in openclaw_launcher
+    assert "gateway run --force --port 18789" in openclaw_launcher
+    assert "goto ensure_gateway" in openclaw_launcher
+    assert ":ensure_gateway" in openclaw_launcher
+    assert "timeout /t" not in openclaw_launcher
+    assert "for /L %%i in (1,1,120)" in openclaw_launcher
+    assert "for /L %%j in (1,1,90)" in openclaw_launcher
+    assert "-Tail 80" in openclaw_launcher
+    assert 'type "%TEMP%\\nulla_api.err.log"' not in openclaw_launcher
+    assert 'Start-Sleep -Seconds 1' in openclaw_launcher
+    assert "Test-NetConnection -ComputerName 127.0.0.1 -Port 18789" in openclaw_launcher
+    assert "nulla_gateway.err.log" in openclaw_launcher
+    assert "OpenClaw gateway did not become reachable on 127.0.0.1:18789" in openclaw_launcher
+    assert "OpenClaw CLI not found on PATH. Installing OpenClaw..." in install_bat_script
     assert "OPENCLAW_MEMORY_MODEL=nomic-embed-text" in install_bat_script
 
 

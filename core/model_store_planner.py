@@ -26,6 +26,8 @@ def build_model_store_drive_plan(
     required_storage_gb = round(sum(model_storage_gb(model) for model in models), 1)
     safe_floor_gb = safe_disk_floor_gb(models)
     candidates = _candidate_model_store_paths(current_store=current_store)
+    system_drive_root = _system_drive_root()
+    current_store_is_real = _path_exists(current_store)
     rows: list[dict[str, Any]] = []
     for root, model_store in candidates:
         usage = _disk_usage(root)
@@ -34,6 +36,7 @@ def build_model_store_drive_plan(
         free_gb = round(float(usage.free) / (1024.0**3), 1)
         total_gb = round(float(usage.total) / (1024.0**3), 1)
         enough = free_gb >= safe_floor_gb
+        is_system_drive = system_drive_root is not None and _same_volume(root, system_drive_root)
         rows.append(
             {
                 "drive": _drive_label(root),
@@ -45,9 +48,29 @@ def build_model_store_drive_plan(
                 "status": "enough_space" if enough else "not_enough_space",
                 "is_current_drive": _same_volume(root, current_store),
                 "is_current_model_store": _same_path(model_store, current_store),
+                "is_system_drive": is_system_drive,
             }
         )
-    rows.sort(key=lambda item: (bool(item["enough_for_required_models"]), float(item["free_gb"])), reverse=True)
+    # Prefer non-system drives among equally-qualified candidates, so models avoid the OS
+    # drive whenever another fixed drive has enough room. The OS drive still wins if it's
+    # the only candidate with enough space. Critically, a store that ALREADY exists on disk
+    # (real downloaded models) wins over a drive that merely has more free space right now -
+    # without this, re-running the installer on a machine that already has models downloaded
+    # would "recommend" (and setx-persist) a different drive purely because it happens to
+    # have more headroom, silently orphaning the already-downloaded models and triggering a
+    # full re-download on the next process that reads OLLAMA_MODELS. This only applies when
+    # the current store is a real, populated directory - a fresh install's unpopulated
+    # default fallback path must not win this tiebreaker, or "avoid the OS drive" would never
+    # fire for first-time installs.
+    rows.sort(
+        key=lambda item: (
+            bool(item["enough_for_required_models"]),
+            bool(item["is_current_model_store"]) and current_store_is_real,
+            not item["is_system_drive"],
+            float(item["free_gb"]),
+        ),
+        reverse=True,
+    )
     recommended = rows[0] if rows else {}
     current_row = next((row for row in rows if row["is_current_model_store"]), None)
     if current_row is None:
@@ -66,6 +89,7 @@ def build_model_store_drive_plan(
                 else "not_enough_space",
                 "is_current_drive": True,
                 "is_current_model_store": True,
+                "is_system_drive": system_drive_root is not None and _same_volume(current_root, system_drive_root),
             }
     recommended_path = str(recommended.get("model_store_path") or current_store)
     current_path = str(current_store)
@@ -115,6 +139,15 @@ def _candidate_model_store_paths(*, current_store: Path) -> tuple[tuple[Path, Pa
     return ((current_root, current_store),)
 
 
+def _system_drive_root() -> Path | None:
+    if platform.system().lower() != "windows":
+        return None
+    raw = str(os.environ.get("SystemDrive") or "").strip().rstrip("\\/") or "C:"
+    if not raw.endswith(":"):
+        raw = f"{raw}:"
+    return Path(f"{raw}\\")
+
+
 def _mounted_windows_drive_roots() -> tuple[Path, ...]:
     roots: list[Path] = []
     for letter in string.ascii_uppercase:
@@ -129,6 +162,13 @@ def _disk_usage(path: Path) -> shutil._ntuple_diskusage | None:
         return shutil.disk_usage(path)
     except OSError:
         return None
+
+
+def _path_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
 
 
 def _nearest_existing_path(path: Path) -> Path:

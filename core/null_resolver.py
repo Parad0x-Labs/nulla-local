@@ -137,12 +137,18 @@ def decode_null_domain(raw: bytes) -> NullDomainRecord | None:
 
 
 def domain_filters(name: str) -> list[dict] | None:
-    """getProgramAccounts memcmp filters that uniquely select a NullDomain by name."""
+    """getProgramAccounts memcmp filters that uniquely select a NullDomain by name.
+
+    Filters ONLY on the discriminator (@0) and the full 64-byte padded name (@1),
+    which is already unique. Deliberately no `dataSize` filter: NullDomain has a v1
+    (314-byte) and a v2 (378-byte, adds a NullPay meta-address) layout, and pinning
+    dataSize to one silently drops the other - matching the shipping web0-resolver
+    extension, which omits dataSize for exactly this reason.
+    """
     padded = pad_name64(name)
     if padded is None:
         return None
     return [
-        {"dataSize": NULL_DOMAIN_SIZE},
         {"memcmp": {"offset": 0, "bytes": b58encode(bytes([NULL_DOMAIN_DISC]))}},
         {"memcmp": {"offset": _OFF_NAME, "bytes": b58encode(padded)}},
     ]
@@ -161,19 +167,30 @@ def _is_on_curve(point: bytes) -> bool:
 def find_program_address(seeds: list[bytes], program_id: str) -> tuple[str, int] | None:
     """Solana find_program_address: the canonical off-curve PDA + bump for `seeds`.
 
-    Mirrors the on-chain derivation — sha256(seeds || bump || program_id || marker),
-    walking bump 255→0 and taking the first hash that is OFF the ed25519 curve.
-    None if the curve check is unavailable or the program id is unparseable.
+    Prefers solders' native implementation (byte-for-byte what web3.js / the deployed
+    program use); the earlier hand-rolled version derived a WRONG address for real
+    names (it pointed at an empty account while the canonical PDA held the record),
+    so solders is the source of truth. Falls back to the hand-rolled walk only when
+    solders is unavailable, and returns None if neither can derive.
     """
+    try:
+        from solders.pubkey import Pubkey
+
+        pid = Pubkey.from_string(program_id)
+        pda, bump = Pubkey.find_program_address(list(seeds), pid)
+        return str(pda), bump
+    except Exception:
+        pass
+
     if _ed25519_is_valid_point is None:
         return None
     try:
-        pid = b58decode(program_id)
+        pid_bytes = b58decode(program_id)
     except Exception:
         return None
     prefix = b"".join(seeds)
     for bump in range(255, -1, -1):
-        digest = hashlib.sha256(prefix + bytes([bump]) + pid + _PDA_MARKER).digest()
+        digest = hashlib.sha256(prefix + bytes([bump]) + pid_bytes + _PDA_MARKER).digest()
         if not _is_on_curve(digest):
             return b58encode(digest), bump
     return None
@@ -251,7 +268,13 @@ def resolve_null_domain(
     """
     pda = derive_domain_pda(name, program_id=program_id)
     if pda is not None:
-        return _resolve_via_account_info(pda, name, timeout=timeout)
+        record = _resolve_via_account_info(pda, name, timeout=timeout)
+        if record is not None:
+            return record
+        # PDA read missed (unregistered, RPC hiccup, or a name whose live record lives
+        # at a non-canonical account). Fall back to the name scan rather than giving up -
+        # this is what the shipping extension does, and skipping it silently dropped
+        # names that DO exist on-chain.
     return _resolve_via_program_accounts(name, program_id=program_id, timeout=timeout)
 
 

@@ -34,7 +34,11 @@ from core.public_hive_bridge import ensure_public_hive_auth
 from core.release_channel import release_manifest_snapshot
 from core.runtime_backbone import build_provider_registry_snapshot
 from core.runtime_bootstrap import bootstrap_runtime_mode
-from core.runtime_install_profiles import active_install_profile_id, required_ollama_models_for_profile
+from core.runtime_install_profiles import (
+    active_install_profile_id,
+    installed_profile_selected_model,
+    required_ollama_models_for_profile,
+)
 from core.runtime_paths import active_config_home_dir, resolve_workspace_root
 from core.runtime_provider_defaults import default_runtime_model_tag, ensure_default_runtime_providers
 from core.runtime_task_events import (
@@ -53,6 +57,15 @@ _OPENCLAW_SENDER_WRAPPER_RE = re.compile(
     r"^Sender \(untrusted metadata\):\s*```json\s*\{.*?\}\s*```\s*\[[^\]]+\]\s*(.*)$",
     re.DOTALL,
 )
+# When a user sends a message while NULLA is still answering the previous one, the
+# OpenClaw gateway does not deliver it on its own - it prepends this literal marker
+# line and concatenates the new message ahead of the still-in-flight prompt. Kept in
+# sync with QUEUED_USER_MESSAGE_MARKER in OpenClaw's dist/attempt.prompt-helpers.
+_OPENCLAW_QUEUED_TURN_MARKER = "[Queued user message that arrived while the previous turn was still active]"
+# OpenClaw also stamps merged/queued turns with a leading "[<weekday> <date> <time> GMT+N]"
+# bracket. A human never opens a chat message with a GMT-stamped bracket, so a leading
+# one is always machine scaffolding and safe to drop.
+_OPENCLAW_TS_PREFIX_RE = re.compile(r"^\s*(?:\[[^\]]*\bGMT\b[^\]]*\]\s*)+", re.IGNORECASE)
 
 
 @dataclass
@@ -147,6 +160,13 @@ def env_int(name: str, default: int) -> int:
 
 def env_text(name: str, default: str) -> str:
     return str(os.environ.get(name, default) or default).strip() or str(default)
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    if not raw:
+        return bool(default)
+    return raw in {"1", "true", "yes", "on"}
 
 
 def daemon_runtime_config(*, capacity: int, local_worker_threads: int) -> DaemonConfig:
@@ -428,9 +448,12 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
         runtime_home=runtime_home,
         env=provider_env,
     )
-    runtime_model_tag = env_text(
-        "NULLA_OLLAMA_MODEL",
-        profile_default_model or default_runtime_model_tag(env=provider_env),
+    persisted_selected_model = installed_profile_selected_model(runtime_home) if runtime_home else ""
+    runtime_model_tag = (
+        str(provider_env.get("NULLA_OLLAMA_MODEL") or "").strip()
+        or persisted_selected_model
+        or profile_default_model
+        or default_runtime_model_tag(env=provider_env)
     )
     runtime_parameter_size = parameter_size_for_model(runtime_model_tag)
     ensure_ollama_model(runtime_model_tag)
@@ -454,8 +477,14 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
         runtime_version_stamp.get("dirty"),
     )
 
-    compute_daemon = ComputeModeDaemon(has_gpu=probe.accelerator != "cpu")
-    compute_daemon.start()
+    compute_mode_disabled = env_bool("NULLA_DISABLE_COMPUTE_MODE") or (
+        os.name == "nt" and not env_bool("NULLA_ENABLE_WINDOWS_COMPUTE_MODE")
+    )
+    if compute_mode_disabled:
+        logger.info("Adaptive compute mode daemon disabled for this API runtime.")
+    else:
+        compute_daemon = ComputeModeDaemon(has_gpu=probe.accelerator != "cpu")
+        compute_daemon.start()
 
     model_registry = ModelRegistry()
     ensure_default_provider(
@@ -494,20 +523,30 @@ def bootstrap_runtime_services(*, project_root: Path, workstation_version: str) 
     )
     agent.start()
 
-    pool_cap = max(1, int(policy_engine.get("orchestration.local_worker_pool_max", 10)))
-    daemon_capacity, _ = resolve_local_worker_capacity(requested=None, hard_cap=pool_cap)
-    daemon = NullaDaemon(
-        daemon_runtime_config(
-            capacity=int(daemon_capacity),
-            local_worker_threads=max(2, int(daemon_capacity) * 2),
-        )
+    mesh_daemon_disabled = env_bool("NULLA_DISABLE_MESH_DAEMON") or (
+        os.name == "nt" and not env_bool("NULLA_ENABLE_WINDOWS_MESH_DAEMON")
     )
-    daemon.start()
+    daemon: NullaDaemon | None = None
+    if mesh_daemon_disabled:
+        logger.info("Mesh daemon disabled for this API runtime.")
+    else:
+        pool_cap = max(1, int(policy_engine.get("orchestration.local_worker_pool_max", 10)))
+        daemon_capacity, _ = resolve_local_worker_capacity(requested=None, hard_cap=pool_cap)
+        daemon = NullaDaemon(
+            daemon_runtime_config(
+                capacity=int(daemon_capacity),
+                local_worker_threads=max(2, int(daemon_capacity) * 2),
+            )
+        )
+        daemon.start()
 
     logger.info("%s API server ready.", display_name)
     logger.info("Peer ID: %s...", peer_id[:24])
     logger.info("Backend: %s | Device: %s", selection.backend_name, selection.device)
-    logger.info("Mesh daemon: active on UDP %s", daemon.config.bind_port)
+    if daemon is not None:
+        logger.info("Mesh daemon: active on UDP %s", daemon.config.bind_port)
+    else:
+        logger.info("Mesh daemon: disabled")
 
     return RuntimeServices(
         agent=agent,
@@ -548,7 +587,7 @@ def _profile_fast_default_model(
 
 def message_text(content: Any) -> str:
     if isinstance(content, str):
-        return strip_openclaw_sender_wrapper(str(content).strip())
+        return _sanitize_openclaw_text(str(content).strip())
     if isinstance(content, list):
         parts: list[str] = []
         for part in content:
@@ -558,8 +597,12 @@ def message_text(content: Any) -> str:
                 text = str(part.get("text") or "").strip()
                 if text:
                     parts.append(text)
-        return strip_openclaw_sender_wrapper("\n".join(parts).strip())
-    return strip_openclaw_sender_wrapper(str(content or "").strip())
+        return _sanitize_openclaw_text("\n".join(parts).strip())
+    return _sanitize_openclaw_text(str(content or "").strip())
+
+
+def _sanitize_openclaw_text(text: str) -> str:
+    return strip_openclaw_turn_scaffolding(strip_openclaw_sender_wrapper(text))
 
 
 def strip_openclaw_sender_wrapper(text: str) -> str:
@@ -570,6 +613,34 @@ def strip_openclaw_sender_wrapper(text: str) -> str:
     if not match:
         return stripped
     return match.group(1).strip() or stripped
+
+
+def strip_openclaw_turn_scaffolding(text: str) -> str:
+    """Recover the real user message when OpenClaw merges an overlapping turn.
+
+    When a message arrives while the previous turn is still running, the OpenClaw
+    gateway concatenates it ahead of the in-flight prompt, shaped like::
+
+        [Queued user message that arrived while the previous turn was still active]
+        <the newly-typed message>
+
+        <the original in-flight prompt>
+
+    Left untouched, that whole blob flows downstream as if the user typed it - it
+    leaks the marker into replies and, worse, gets handed to the weather/live-lookup
+    path as a "location" (this is exactly how a "weather in Riga" question came back
+    as "Los Vargas, Mexico": the scaffolding blob was fuzzy-matched by wttr.in). Take
+    the block immediately after the marker as the message, since that is what the
+    user most recently asked, and drop any leading GMT-stamped scaffolding bracket.
+    """
+    stripped = str(text or "").strip()
+    if _OPENCLAW_QUEUED_TURN_MARKER in stripped:
+        after_marker = stripped.split(_OPENCLAW_QUEUED_TURN_MARKER, 1)[1]
+        blocks = [block.strip() for block in re.split(r"\n\s*\n", after_marker)]
+        newest = next((block for block in blocks if block), "")
+        stripped = newest or stripped.replace(_OPENCLAW_QUEUED_TURN_MARKER, "").strip()
+    stripped = _OPENCLAW_TS_PREFIX_RE.sub("", stripped).strip()
+    return stripped
 
 
 def normalize_chat_history(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -656,7 +727,18 @@ def run_agent(
     base_context = {
         "surface": "channel",
         "platform": "openclaw",
-        "allow_remote_fetch": policy_engine.allow_web_fallback(),
+        # Deliberately NOT setting allow_remote_fetch here: several downstream
+        # checks (fast_live_info_runtime_preflight._explicit_remote_fetch_disabled,
+        # research_tool_loop_facade, curiosity_roamer) treat an *explicit*
+        # allow_remote_fetch key in source_context as a caller override that takes
+        # precedence over the ambient policy_engine.allow_web_fallback() check.
+        # Injecting the ambient policy value here unconditionally made every
+        # OpenClaw chat turn look like it had an explicit override, which
+        # short-circuited past the honest "live lookup is disabled" message and
+        # silently fell through to the LLM hallucinating an answer with no data.
+        # Leaving the key absent lets those checks fall back to their own
+        # trusted-surface heuristic and lets policy_engine be the single source
+        # of truth for the actual allow/deny decision.
         "allow_cold_context": True,
     }
     if source_context:

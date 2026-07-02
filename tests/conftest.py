@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import socket
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 from urllib.error import URLError
@@ -23,8 +25,20 @@ from core.persistent_memory import (
 from core.public_hive import client as public_hive_client
 from core.runtime_continuity import configure_runtime_continuity_db_path, reset_runtime_continuity_state
 from core.user_preferences import default_preferences, save_preferences
-from storage.db import active_default_db_path, get_connection, reset_default_connection
+from storage.db import active_default_db_path, configure_default_db_path, get_connection, reset_default_connection
 from storage.migrations import run_migrations
+
+# storage/db.py has no pytest-specific path override, so without this, every test in
+# this session would share the SAME on-disk SQLite file a live `apps.nulla_api_server`
+# process may be connected to (active_default_db_path() resolves to the real runtime
+# data dir). runtime_storage_reset below DELETEs every runtime table - including wallet
+# and credit ledgers - before each test, which would wipe rows out from under a running
+# server; concurrent writes to the same file from two processes also produced
+# intermittent Windows access-violation crashes during full-suite runs. Re-applied at
+# the top of runtime_storage_reset (not just once here) so a test that resets the
+# override (e.g. test_storage_db_pooling.py calling configure_default_db_path(None))
+# can't leave later tests pointed at the live path for the rest of the session.
+_TEST_DB_PATH = str(Path(tempfile.mkdtemp(prefix="nulla_pytest_db_")) / "nulla_web0_v2_test.db")
 
 RUNTIME_TABLES = (
     "adaptive_lexicon",
@@ -112,6 +126,7 @@ def memory_hit_decision(*, output_text: str = "", trust_score: float = 0.82) -> 
 
 @pytest.fixture(autouse=True)
 def runtime_storage_reset() -> None:
+    configure_default_db_path(_TEST_DB_PATH)
     reset_default_connection()
     configure_runtime_continuity_db_path(active_default_db_path())
     run_migrations()
@@ -183,13 +198,41 @@ def block_live_local_ollama_under_pytest(monkeypatch):
     monkeypatch.setattr(socket, "create_connection", guarded_create_connection)
 
 
+@pytest.fixture(autouse=True)
+def default_test_policy_disables_web_fallback():
+    """Force `system.allow_web_fallback` off for every test unless a test
+    explicitly opts in via the `enable_web` fixture below.
+
+    The shipped product default (config/default_policy.yaml) is now
+    `allow_web_fallback: true` so real users get real DuckDuckGo-backed
+    answers out of the box. Tests must stay network-isolated regardless of
+    that shipped default, so this autouse fixture pins the test-session
+    baseline back to False; `enable_web` (opt-in, per test) flips it back on
+    for the specific tests that intentionally exercise live web lookups.
+    """
+    from core import policy_engine
+
+    previous_cache = getattr(policy_engine, "_POLICY_CACHE", None)
+    base = dict(policy_engine.load())
+    system = dict(base.get("system") or {})
+    system["allow_web_fallback"] = False
+    base["system"] = system
+    policy_engine._POLICY_CACHE = base
+    try:
+        yield
+    finally:
+        policy_engine._POLICY_CACHE = previous_cache
+
+
 @pytest.fixture
 def enable_web():
     """Explicitly turn on the opt-in web lookup for a single test.
 
-    Web access is off by default; tests that exercise the live web tools must
-    deliberately enable it. This flips `system.allow_web_fallback` in the cached
-    policy and restores the prior cache afterwards.
+    Web access is forced off for tests by default (see
+    default_test_policy_disables_web_fallback above); tests that exercise the
+    live web tools must deliberately enable it here. This flips
+    `system.allow_web_fallback` in the cached policy and restores the prior
+    cache afterwards.
     """
     from core import policy_engine
 

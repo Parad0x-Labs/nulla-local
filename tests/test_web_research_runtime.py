@@ -5,7 +5,57 @@ import unittest
 from unittest import mock
 
 from core.live_quote_contract import format_quote_timestamp
-from tools.web.web_research import PageEvidence, WebHit, _looks_like_news_query, _looks_like_price_query, web_research
+from tools.web.web_research import (
+    PageEvidence,
+    WebHit,
+    _extract_weather_location,
+    _is_plausible_weather_location,
+    _looks_like_news_query,
+    _looks_like_price_query,
+    _weather_fallback,
+    web_research,
+)
+
+
+class WeatherLocationGuardTests(unittest.TestCase):
+    def test_extracts_clean_place_names(self) -> None:
+        self.assertEqual(_extract_weather_location("whats the weather in Riga?"), "riga")
+        self.assertEqual(_extract_weather_location("wheater in vilnius?"), "vilnius")
+        self.assertEqual(_extract_weather_location("weather in new york today"), "new york")
+
+    def test_no_place_named_falls_back_to_current_location(self) -> None:
+        self.assertEqual(_extract_weather_location("what is the weather?"), "current location")
+        self.assertEqual(_extract_weather_location("weather?"), "current location")
+        self.assertEqual(_extract_weather_location("hows the weather"), "current location")
+
+    def test_scaffolding_and_garbage_locations_are_rejected(self) -> None:
+        # Regression: the OpenClaw queued-turn scaffolding blob used to be handed to
+        # wttr.in as a location and fuzzy-matched to "Los Vargas, Mexico" for a
+        # "weather in Riga" question. It (and any bracket/GMT/over-long blob) must
+        # now extract to "" so the weather fast-path bails.
+        blob = "[Queued user message that arrived while the previous turn was still active] whats the riga? hi"
+        self.assertEqual(_extract_weather_location(blob), "")
+        self.assertEqual(_extract_weather_location("weather in [Wed 2026-07-01 18:07 GMT+3] riga"), "")
+        self.assertEqual(
+            _extract_weather_location("weather in foo bar baz qux quux corge grault garply waldo"),
+            "",
+        )
+
+    def test_plausibility_predicate(self) -> None:
+        for good in ("Riga", "new york", "san francisco", "current location"):
+            self.assertTrue(_is_plausible_weather_location(good), good)
+        for bad in ("", "[queued]", "a b c d e f g h", "weather GMT+3 blah", "12345"):
+            self.assertFalse(_is_plausible_weather_location(bad), bad)
+
+    def test_weather_fallback_bails_on_rejected_location_without_network(self) -> None:
+        # If the location is rejected, _weather_fallback must return None BEFORE any
+        # network call - assert by making urlopen explode if it's ever reached.
+        with mock.patch(
+            "tools.web.web_research.urllib.request.urlopen",
+            side_effect=AssertionError("must not hit wttr.in with a rejected location"),
+        ):
+            blob = "[Queued user message that arrived while the previous turn was still active] whats the riga? hi"
+            self.assertIsNone(_weather_fallback(blob, timeout_s=5.0))
 
 
 class WebResearchRuntimeTests(unittest.TestCase):

@@ -66,11 +66,13 @@ class FilterTests(unittest.TestCase):
 
     def test_domain_filters_shape(self) -> None:
         f = domain_filters("web0")
-        self.assertEqual(f[0], {"dataSize": NULL_DOMAIN_SIZE})
-        self.assertEqual(f[1]["memcmp"]["offset"], 0)
-        self.assertEqual(f[2]["memcmp"]["offset"], 1)
+        # No dataSize filter: it would drop v2 (378-byte) NullDomain accounts. The
+        # disc (@0) + full 64-byte name (@1) memcmp pair is already unique.
+        self.assertTrue(all("dataSize" not in flt for flt in f))
+        self.assertEqual(f[0]["memcmp"]["offset"], 0)
+        self.assertEqual(f[1]["memcmp"]["offset"], 1)
         # disc byte 'N' base58-encodes to a non-empty ascii string
-        self.assertTrue(isinstance(f[1]["memcmp"]["bytes"], str) and f[1]["memcmp"]["bytes"])
+        self.assertTrue(isinstance(f[0]["memcmp"]["bytes"], str) and f[0]["memcmp"]["bytes"])
 
     def test_overflow_name_yields_no_filters(self) -> None:
         self.assertIsNone(domain_filters("x" * 65))
@@ -118,10 +120,14 @@ class PdaDerivationTests(unittest.TestCase):
     # Golden vectors confirmed LIVE against the deployed registrar (NXgQhepF):
     # getAccountInfo on each PDA returns the matching on-chain NullDomain. These
     # pin the client derivation to the on-chain seed scheme forever.
+    # NOTE: "web0" was previously CT2QddD… - the WRONG value from a hand-rolled PDA
+    # walk that pointed at an empty account (why web0.null never resolved). The
+    # reference derivation (solders/web3.js) gives FJ5kcbF…, which is the real
+    # account and the one that actually holds web0's Arweave content.
     GOLDEN = {
         "nulla": "5LnTqT68dERqRL7jYvPZBWsbTRrC8sR6hYaXh2q7aJbN",
         "null":  "6LGKrgqdUAo1ErsHpMgZmuhRLYGzjkA7dRvsJtg8fGku",
-        "web0":  "CT2QddDtxAHAhf4FP9CvPVChUxRWrhrGnzqGeu1BGUKx",
+        "web0":  "FJ5kcbFxU6pEVdUHcpvu6hX8CYfTd4LAvhHdiPcK1FG3",
     }
 
     def test_derive_matches_onchain_golden_pdas(self) -> None:
@@ -182,7 +188,12 @@ class ResolveViaAccountInfoTests(unittest.TestCase):
         ):
             self.assertIsNone(resolve_null_domain("nulla"))
 
-    def test_falls_back_to_scan_when_curve_check_unavailable(self) -> None:
+    def test_falls_back_to_scan_when_pda_read_misses(self) -> None:
+        # Derivation now goes through solders (independent of the nacl curve check),
+        # so the cheap getAccountInfo-on-PDA is always attempted first. When that PDA
+        # read misses (here the mock returns None for it), resolution falls back to the
+        # getProgramAccounts name-scan instead of giving up - the fix that stopped
+        # silently dropping names whose live record isn't at the derived PDA.
         calls: list = []
 
         def _fake_rpc(method, params, *, timeout=5.0):
@@ -191,12 +202,11 @@ class ResolveViaAccountInfoTests(unittest.TestCase):
                 return [{"account": {"data": [base64.b64encode(_blob(name="nulla")).decode(), "base64"]}}]
             return None
 
-        with mock.patch.object(null_resolver, "_ed25519_is_valid_point", None), \
-             mock.patch.object(null_resolver, "_rpc_call", _fake_rpc):
+        with mock.patch.object(null_resolver, "_rpc_call", _fake_rpc):
             rec = resolve_null_domain("nulla")
         self.assertIsNotNone(rec)
         self.assertEqual(rec.name, "nulla")
-        self.assertEqual(calls, ["getProgramAccounts"])  # no PDA path available
+        self.assertEqual(calls, ["getAccountInfo", "getProgramAccounts"])
 
 
 if __name__ == "__main__":

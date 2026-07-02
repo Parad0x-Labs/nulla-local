@@ -14,10 +14,35 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Resolve-DefaultInstallDir {
+    $homeDefault = Join-Path $HOME "nulla-local"
+    try {
+        $systemDriveRoot = ($env:SystemDrive + "\")
+        $fixedDrives = [System.IO.DriveInfo]::GetDrives() |
+            Where-Object { $_.IsReady -and $_.DriveType -eq [System.IO.DriveType]::Fixed }
+        # Prefer a non-OS drive with the most free space; only fall back to the OS drive
+        # if it's the sole fixed drive on the machine.
+        $bestDrive = $fixedDrives |
+            Where-Object { $_.RootDirectory.FullName -ne $systemDriveRoot } |
+            Sort-Object AvailableFreeSpace -Descending |
+            Select-Object -First 1
+        if (-not $bestDrive) {
+            $bestDrive = $fixedDrives | Sort-Object AvailableFreeSpace -Descending | Select-Object -First 1
+        }
+        if ($bestDrive) {
+            return (Join-Path $bestDrive.RootDirectory.FullName "NULLA\nulla-local")
+        }
+    }
+    catch {
+        return $homeDefault
+    }
+    return $homeDefault
+}
+
 if ([string]::IsNullOrWhiteSpace($RepoOwner)) { $RepoOwner = "Parad0x-Labs" }
-if ([string]::IsNullOrWhiteSpace($RepoName)) { $RepoName = "nulla-hive-mind" }
+if ([string]::IsNullOrWhiteSpace($RepoName)) { $RepoName = "nulla-local" }
 if ([string]::IsNullOrWhiteSpace($Ref)) { $Ref = "main" }
-if ([string]::IsNullOrWhiteSpace($InstallDir)) { $InstallDir = Join-Path $HOME "nulla-hive-mind" }
+if ([string]::IsNullOrWhiteSpace($InstallDir)) { $InstallDir = Resolve-DefaultInstallDir }
 if ([string]::IsNullOrWhiteSpace($ArchiveUrl)) { $ArchiveUrl = "https://github.com/$RepoOwner/$RepoName/archive/refs/heads/$Ref.zip" }
 
 function Write-Info {

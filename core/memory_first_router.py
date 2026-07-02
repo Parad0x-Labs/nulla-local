@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -701,6 +702,24 @@ class MemoryFirstRouter:
             ranked_manifests = _prioritize_autopilot_selection(ranked_manifests, autopilot.selected_provider_id)
         attempted: list[str] = []
         failover_used = False
+        # Bound total wall-clock time across the sequential fallback loop below.
+        # Each candidate's own per-call timeout_seconds is 180s (see manifest
+        # runtime_config in runtime_provider_defaults.py), and up to swarm_size=4
+        # candidates can be tried — with no cap that's up to 720s for a single
+        # ordinary chat turn if candidates are slow/hung rather than cleanly
+        # erroring. "deep"/"cloud"/"human" lanes are explicit, user-signaled heavy
+        # requests where a long wait is expected and acceptable; "tiny"/"daily"
+        # lanes are ordinary conversational turns that should fail fast and fall
+        # through to an honest response instead of silently accumulating minutes
+        # of sequential timeouts behind the scenes.
+        _fallback_budget_seconds = (
+            None
+            if autopilot.lane in {"deep", "cloud", "human"}
+            else float(policy_engine.get("model_orchestration.provider_fallback_budget_seconds", 60.0))
+        )
+        _fallback_deadline = (
+            time.monotonic() + _fallback_budget_seconds if _fallback_budget_seconds is not None else None
+        )
         autopilot_block_reason = _autopilot_block_reason(autopilot_plan)
         planned_manifest = next(
             (manifest for manifest in ranked_manifests if manifest.provider_id == autopilot.selected_provider_id),
@@ -932,6 +951,51 @@ class MemoryFirstRouter:
         for manifest in ranked_manifests:
             if manifest.provider_id in skipped_provider_ids:
                 continue
+            if _fallback_deadline is not None and time.monotonic() >= _fallback_deadline:
+                budget_proof = _lane_proof_payload(
+                    source_context=source_context,
+                    task=task,
+                    classification=classification,
+                    task_kind=task_kind,
+                    output_mode=output_mode,
+                    provider_role=provider_role,
+                    autopilot_plan=autopilot_plan,
+                    manifest=None,
+                    capability=None,
+                    phase="failed",
+                    attempted=attempted,
+                    failover_used=failover_used,
+                    fallback_reason="provider_fallback_budget_exceeded",
+                )
+                _emit_model_routing_event(
+                    source_context,
+                    "model_routing_failed",
+                    f"Provider fallback budget ({_fallback_budget_seconds:.0f}s) exceeded after {len(attempted)} attempt(s); stopping instead of trying remaining candidates.",
+                    task_kind=task_kind,
+                    output_mode=output_mode,
+                    provider_role=provider_role,
+                    lane=autopilot.lane,
+                    lane_type=autopilot.lane,
+                    phase="failed",
+                    ranked_candidates=[entry.provider_id for entry in ranked_manifests],
+                    attempted=attempted,
+                    rejection_reason="provider_fallback_budget_exceeded",
+                )
+                return ModelExecutionDecision(
+                    source="provider_fallback_budget_exceeded",
+                    task_hash=task_hash,
+                    used_model=False,
+                    failover_used=failover_used,
+                    details={
+                        "attempted": attempted,
+                        "reason": "provider_fallback_budget_exceeded",
+                        "provider_role": provider_role,
+                        "requested_model": str((source_context or {}).get("requested_model") or "").strip(),
+                        "ranked_candidates": [entry.provider_id for entry in ranked_manifests],
+                        "autopilot_plan": autopilot_plan,
+                        "lane_proof": budget_proof,
+                    },
+                )
             _emit_model_routing_event(
                 source_context,
                 "model_lane_started",
@@ -951,8 +1015,24 @@ class MemoryFirstRouter:
                 queue_depth=getattr(capability_by_provider.get(manifest.provider_id), "queue_depth", 0),
                 attempted=attempted,
             )
+            invoke_manifest = manifest
+            if _fallback_deadline is not None:
+                # Cap this individual call's own timeout to whatever's left of the
+                # overall budget. Without this, a single slow/hanging call can burn
+                # its full per-manifest timeout_seconds (180s) on its own, and the
+                # deadline check above — which only runs BETWEEN attempts — never
+                # gets a chance to stop it (this is exactly how the 155-180s
+                # hallucinated-answer bug happened: one in-flight call consumed the
+                # entire duration, so the between-attempts budget check never fired).
+                remaining_seconds = max(5.0, _fallback_deadline - time.monotonic())
+                existing_timeout = float((manifest.runtime_config or {}).get("timeout_seconds") or remaining_seconds)
+                capped_timeout = min(existing_timeout, remaining_seconds)
+                if capped_timeout < existing_timeout:
+                    invoke_manifest = manifest.model_copy(
+                        update={"runtime_config": {**(manifest.runtime_config or {}), "timeout_seconds": capped_timeout}}
+                    )
             adapter, response, error = self._invoke_manifest(
-                manifest=manifest,
+                manifest=invoke_manifest,
                 request=request,
                 output_mode=output_mode,
                 task=task,

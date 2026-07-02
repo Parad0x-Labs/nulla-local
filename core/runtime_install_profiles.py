@@ -387,6 +387,11 @@ def installed_profile_id(runtime_home: str | Path | None) -> str:
     return _installed_profile_id(runtime_home)
 
 
+def installed_profile_selected_model(runtime_home: str | Path | None) -> str:
+    payload = _installed_profile_record(runtime_home)
+    return str(payload.get("selected_model") or "").strip()
+
+
 def active_install_profile_id(
     *,
     runtime_home: str | Path | None = None,
@@ -1391,6 +1396,7 @@ __all__ = [
     "install_profile_display_choices",
     "install_profile_runs_local_only",
     "installed_profile_id",
+    "installed_profile_selected_model",
     "normalize_install_profile_id",
     "persist_install_profile_record",
     "preferred_install_profile_id",

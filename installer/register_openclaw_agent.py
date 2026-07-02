@@ -25,6 +25,7 @@ Workspace memory notes for OpenClaw live here.
 
 Keep secrets, private keys, API tokens, and machine-local credentials out of this directory.
 """
+DEFAULT_LOCAL_PROVIDER_TIMEOUT_SECONDS = 600
 
 
 def _nulla_api_url() -> str:
@@ -51,6 +52,16 @@ def _gateway_port() -> int:
         return max(1, min(int(raw), 65535))
     except ValueError:
         return 18789
+
+
+def _local_provider_timeout_seconds() -> int:
+    raw = str(os.environ.get("NULLA_OPENCLAW_PROVIDER_TIMEOUT_SECONDS") or "").strip()
+    if not raw:
+        return DEFAULT_LOCAL_PROVIDER_TIMEOUT_SECONDS
+    try:
+        return max(60, min(int(raw), 3600))
+    except ValueError:
+        return DEFAULT_LOCAL_PROVIDER_TIMEOUT_SECONDS
 
 
 def _openclaw_home(paths: OpenClawPaths) -> Path:
@@ -116,6 +127,34 @@ def _model_size_label(model_tag: str) -> str:
         return "7B"
     _, size = model_name.split(":", 1)
     return size.upper()
+
+
+_REASONING_MODEL_MARKERS = (
+    "thinking",
+    "-r1",
+    "deepseek-r1",
+    "qwq",
+    "o1",
+    "o3",
+)
+
+
+def _is_reasoning_model(model_tag: str) -> bool:
+    """Whether the underlying model actually does extended step-by-step reasoning.
+
+    OpenClaw treats this as a real capability flag, not a display toggle: it
+    drives the default "reasoning level" (on/off) it shows for the agent. A
+    blanket False is correct for today's non-reasoning tags (gemma3, qwen2.5)
+    but would silently misreport a genuinely reasoning-tuned tag (e.g. a
+    qwen3 "-thinking" variant or deepseek-r1) as non-reasoning too.
+    """
+    name = _runtime_model_name(model_tag).lower()
+    return any(marker in name for marker in _REASONING_MODEL_MARKERS)
+
+
+def _model_display_name(model_tag: str) -> str:
+    """Human-readable model identity for OpenClaw's model list, e.g. 'qwen2.5:7b (7B)'."""
+    return f"{_runtime_model_name(model_tag)} ({_model_size_label(model_tag)})"
 
 
 def _normalize_display_name(display_name: str | None) -> str:
@@ -302,14 +341,15 @@ def _build_agent_entry(
 
 
 def _build_nulla_provider(model_tag: str) -> dict[str, Any]:
+    resolved_tag = _normalize_model_tag(model_tag)
     return {
         "baseUrl": _nulla_api_url(),
         "api": "ollama",
         "models": [
             {
                 "id": NULLA_MODEL_ID,
-                "name": NULLA_MODEL_ID,
-                "reasoning": False,
+                "name": _model_display_name(resolved_tag),
+                "reasoning": _is_reasoning_model(resolved_tag),
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 32768,
@@ -317,6 +357,7 @@ def _build_nulla_provider(model_tag: str) -> dict[str, Any]:
             }
         ],
         "apiKey": "ollama-local",
+        "timeoutSeconds": _local_provider_timeout_seconds(),
     }
 
 
@@ -329,7 +370,7 @@ def _build_ollama_provider(model_tag: str) -> dict[str, Any]:
             {
                 "id": model_name,
                 "name": model_name,
-                "reasoning": False,
+                "reasoning": _is_reasoning_model(model_tag),
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 32768,
@@ -337,6 +378,7 @@ def _build_ollama_provider(model_tag: str) -> dict[str, Any]:
             }
         ],
         "apiKey": "ollama-local",
+        "timeoutSeconds": _local_provider_timeout_seconds(),
     }
 
 
@@ -397,8 +439,10 @@ def _provider_looks_like_broken_ollama_alias(provider: Any) -> bool:
     if not isinstance(model, dict):
         return False
     model_id = str(model.get("id") or "").strip()
-    model_name = str(model.get("name") or "").strip()
-    return model_id == NULLA_MODEL_ID and model_name == NULLA_MODEL_ID
+    # `id` is the stable "nulla" alias regardless of the underlying model; `name` is now
+    # a descriptive label (e.g. "qwen2.5:7b (7B)") rather than a second "nulla" literal,
+    # so id alone (combined with the baseUrl check above) is the reliable signal here.
+    return model_id == NULLA_MODEL_ID
 
 
 def _ensure_ollama_provider(cfg: dict[str, Any], model_tag: str) -> None:
@@ -407,6 +451,8 @@ def _ensure_ollama_provider(cfg: dict[str, Any], model_tag: str) -> None:
     current = providers.get("ollama")
     if current is None or _provider_looks_like_broken_ollama_alias(current):
         providers["ollama"] = _build_ollama_provider(model_tag)
+    elif isinstance(current, dict):
+        current.setdefault("timeoutSeconds", _local_provider_timeout_seconds())
 
 
 def _build_ollama_memory_search_config() -> dict[str, Any]:
@@ -560,6 +606,18 @@ def _write_bridge_launchers(base_dir: Path, project_root: str) -> None:
         path.chmod(0o755)
 
 
+def _thinking_mode_enabled() -> bool:
+    """NULLA's own 'show your workflow/thinking' preference, distinct from the
+    per-model `reasoning` capability flag sent to OpenClaw's provider config."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+        from core.user_preferences import load_preferences
+
+        return bool(load_preferences().show_workflow)
+    except Exception:
+        return False
+
+
 def _write_agent_metadata(
     project_root: str,
     nulla_home: str,
@@ -584,6 +642,7 @@ def _write_agent_metadata(
         "project_root": project_root or "",
         "api_url": _nulla_api_url(),
         "runtime_model": model_tag,
+        "thinking_mode_enabled": _thinking_mode_enabled(),
     }
     meta_path = agent_dir / "openclaw.agent.json"
     meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
@@ -617,6 +676,7 @@ def _write_compat_bridge(
         "project_root": project_root or "",
         "api_url": _nulla_api_url(),
         "runtime_model": model_tag,
+        "thinking_mode_enabled": _thinking_mode_enabled(),
     }
     (bridge_dir / "openclaw.agent.json").write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",

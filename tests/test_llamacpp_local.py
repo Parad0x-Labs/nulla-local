@@ -31,6 +31,28 @@ def test_build_llamacpp_local_config_uses_runtime_home_defaults(tmp_path: Path) 
     assert config.draft_model_num_pred_tokens == 10
 
 
+def test_build_llamacpp_local_config_parses_custom_int_env_overrides(tmp_path: Path) -> None:
+    # Regression guard: _env_int previously had no int-parsing body (a stray
+    # try/except had been misplaced after _env_bool's `return default`), so any
+    # non-empty override silently became None instead of the parsed integer.
+    config = build_llamacpp_local_config(
+        runtime_home=tmp_path,
+        env={
+            "NULLA_LLAMACPP_N_GPU_LAYERS": "20",
+            "NULLA_LLAMACPP_DRAFT_MODEL_NUM_PRED_TOKENS": "16",
+        },
+    )
+
+    assert config.n_gpu_layers == 20
+    assert config.draft_model_num_pred_tokens == 16
+
+
+def test_env_int_falls_back_to_default_on_unparseable_value() -> None:
+    assert llamacpp_local._env_int({"X": "not-a-number"}, "X", default=7) == 7
+    assert llamacpp_local._env_int({"X": "42"}, "X", default=7) == 42
+    assert llamacpp_local._env_int({}, "X", default=7) == 7
+
+
 def test_write_llamacpp_local_config_persists_json(tmp_path: Path) -> None:
     config, target = write_llamacpp_local_config(
         runtime_home=tmp_path,

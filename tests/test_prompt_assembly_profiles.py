@@ -351,6 +351,30 @@ def test_provider_facing_messages_keep_context_as_separate_user_evidence_payload
     assert context_result.assembled_context(prompt_profile="chat_minimal")[:200] in provider_evidence[0]["content"]
 
 
+def test_openclaw_chat_includes_web0_null_project_context_for_null_domain_questions() -> None:
+    request, context_result = _build_request(
+        "can we buy a .null address?",
+        task_class="chat_conversation",
+        task_kind="normalization_assist",
+        output_mode="plain_text",
+    )
+
+    provider_messages = request.as_openai_messages()
+    provider_system = next(message for message in provider_messages if message["role"] == "system")
+    provider_evidence = [message for message in provider_messages if "Relevant context and evidence:" in message["content"]]
+    assembled = context_result.assembled_context(prompt_profile="chat_minimal")
+
+    assert request.metadata["system_prompt_profile"] == "chat_minimal"
+    assert "web0/.null project facts" not in provider_system["content"].lower()
+    assert len(provider_evidence) == 1
+    assert provider_evidence[0]["role"] == "user"
+    assert "web0/.null project facts" in provider_evidence[0]["content"].lower()
+    assert "not an icann dns tld" in provider_evidence[0]["content"].lower()
+    assert "nxgqhepfpdcu935h1d4g34g59zybo1jr4tbczwhv8np" in provider_evidence[0]["content"].lower()
+    assert "`nulla resolve <name>.null`" in provider_evidence[0]["content"]
+    assert "web0 .null project facts" in assembled.lower()
+
+
 def test_internal_message_schema_maps_context_to_user_role_for_provider_calls() -> None:
     provider_message = normalize_prompt(
         task=SimpleNamespace(task_id="task-1", task_summary="Do you think boredom is useful?"),

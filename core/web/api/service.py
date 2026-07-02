@@ -15,6 +15,7 @@ from core.runtime_capabilities import runtime_capability_snapshot
 from core.runtime_operator_snapshot import build_runtime_operator_snapshot
 from core.runtime_task_events import list_runtime_session_events, list_runtime_sessions
 from core.runtime_task_rail import render_runtime_task_rail_html
+from core.web0_project_grounding import web0_null_project_response
 from storage.adaptation_store import (
     list_adaptation_eval_runs,
     list_adaptation_job_events,
@@ -27,6 +28,7 @@ from .runtime import (
     extract_user_message,
     normalize_chat_history,
     ollama_chat_response,
+    ollama_stream_chunks,
     openai_chat_response,
     openai_sse_stream_from_ollama_chunks,
     parameter_count_for_model,
@@ -189,6 +191,138 @@ def apply_runtime_headers(response: ApiResponse, runtime: RuntimeServices) -> Ap
     headers.update(response.headers)
     response.headers = headers
     return response
+
+
+def _normalize_web0_name(raw: str) -> str:
+    """A user-typed address -> the bare .null name the resolver expects.
+
+    Accepts 'web0.null', 'web0', 'null://web0.null/path', 'web0://web0', with any
+    trailing path/query stripped, lowercased.
+    """
+    name = str(raw or "").strip().lower()
+    for prefix in ("null://", "web0://", "https://", "http://"):
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+            break
+    name = name.split("/", 1)[0].split("?", 1)[0].strip()
+    if name.endswith(".null"):
+        name = name[: -len(".null")]
+    return name.strip()
+
+
+def _web0_gateway_urls(txid: str) -> list[str]:
+    # Try more than one Arweave gateway: right after a publish a given gateway can
+    # 404 for ~30-60s while another already serves it (AGENTS.md pitfall #5).
+    tx = str(txid or "").strip()
+    if not tx:
+        return []
+    return [f"https://arweave.net/{tx}", f"https://gateway.irys.xyz/{tx}", f"https://{tx}.ar-io.net"]
+
+
+def _web0_resolve_response(query: dict[str, list[str]]) -> ApiResponse:
+    """Read-only: resolve a .null NAME to its Arweave content URL for the /web0 browser.
+
+    Public on-chain read + a public gateway URL. No key, no signing, no payment.
+    Honors local_only_mode (a hard no-remote switch).
+    """
+    from core import policy_engine
+
+    values = query.get("name") or query.get("q") or []
+    name = _normalize_web0_name(str(values[0]) if values else "")
+    if not name:
+        return json_response(400, {"ok": False, "error": "missing 'name' query parameter"})
+    if policy_engine.local_only_mode():
+        return json_response(
+            403,
+            {"ok": False, "name": name, "error": "local_only_mode is on; remote .null resolution is disabled"},
+        )
+    try:
+        from core.null_resolver import resolve_null_domain
+
+        record = resolve_null_domain(name)
+    except Exception as exc:  # noqa: BLE001 - surface resolver failures as a clean 502
+        return json_response(502, {"ok": False, "name": name, "error": f"resolver error: {exc}"})
+    if record is None:
+        return json_response(404, {"ok": False, "name": name, "error": "unregistered or RPC unreachable"})
+    txid = getattr(record, "arweave_txid", None) or ""
+    gateways = _web0_gateway_urls(txid)
+    return json_response(
+        200,
+        {
+            "ok": True,
+            "name": name,
+            "owner": record.owner,
+            "arweave_txid": txid,
+            "gateway_url": gateways[0] if gateways else "",
+            "gateways": gateways,
+            "x402_endpoint": getattr(record, "x402_endpoint", "") or "",
+            "has_content": bool(txid),
+        },
+    )
+
+
+def _looks_like_runtime_model_status_question(text: str) -> bool:
+    clean = " ".join(str(text or "").lower().split())
+    if not clean:
+        return False
+    if any(term in clean for term in ("recommend", "should i download", "which model should")):
+        return False
+    has_model_term = any(term in clean for term in ("llm", "model", "model lane"))
+    has_status_term = any(
+        term in clean
+        for term in (
+            "active",
+            "current",
+            "standard",
+            "using now",
+            "what are you using",
+            "what model",
+            "which model",
+        )
+    )
+    return has_model_term and has_status_term
+
+
+def _runtime_text_model_lanes(runtime: RuntimeServices) -> list[str]:
+    lanes: list[str] = []
+    for item in tuple(runtime.provider_capability_truth or ()):
+        if not isinstance(item, dict):
+            continue
+        provider_id = str(item.get("provider_id") or "").strip()
+        if not provider_id.lower().startswith("ollama-local:"):
+            continue
+        model_id = str(item.get("model_id") or "").strip()
+        if model_id and model_id not in lanes:
+            lanes.append(model_id)
+    default_model = str(runtime.runtime_model_tag or "").strip()
+    if default_model and default_model not in lanes:
+        lanes.insert(0, default_model)
+    return lanes
+
+
+def runtime_model_status_response(text: str, runtime: RuntimeServices) -> dict[str, Any] | None:
+    if not _looks_like_runtime_model_status_question(text):
+        return None
+    default_model = str(runtime.runtime_model_tag or "").strip() or "unknown"
+    lanes = _runtime_text_model_lanes(runtime)
+    largest = max(lanes, key=parameter_count_for_model) if lanes else default_model
+    lane_text = ", ".join(f"`{item}`" for item in lanes) if lanes else "`none`"
+    if largest and largest != default_model:
+        router_line = f"- Routing can select `{largest}` for heavier local turns; no larger local text model is installed right now."
+    else:
+        router_line = "- No separate larger local text model is installed right now."
+    return {
+        "response": (
+            f"- Boot/default local model: `{default_model}` ({parameter_size_for_model(default_model)}).\n"
+            f"- Visible local text lanes: {lane_text}.\n"
+            f"{router_line}"
+        ),
+        "confidence": 1.0,
+        "source": "runtime_model_status",
+        "deterministic": True,
+        "runtime_model_tag": default_model,
+        "local_text_lanes": lanes,
+    }
 
 
 def capability_snapshot_with_runtime(
@@ -366,6 +500,31 @@ def dispatch_get(
             ),
             runtime,
         )
+
+    if normalized_path in {"/web0", "/null-browser"}:
+        # The .null browser: a normal browser can't open a .null site (Arweave, behind
+        # the resolver), so NULLA serves this entry page. Served here on the always-on
+        # API server (11435) - the Meet server (8766) is not guaranteed to be running -
+        # and the page's own JS talks back to this same origin.
+        from core.null_browser_page import render_null_browser_html
+
+        return apply_runtime_headers(
+            html_response(
+                200,
+                render_null_browser_html(),
+                headers={
+                    "X-Nulla-Workstation-Version": NULLA_WORKSTATION_DEPLOYMENT_VERSION,
+                    "X-Nulla-Workstation-Surface": "web0-browser",
+                },
+            ),
+            runtime,
+        )
+
+    if normalized_path == "/api/web0/resolve":
+        # Read-only: a .null NAME -> its Arweave content URL, so the /web0 browser can
+        # load the live site. This is a public on-chain read + a public Arweave gateway
+        # URL; no key, no signing, no payment (distinct from the /api/null dial path).
+        return apply_runtime_headers(_web0_resolve_response(query), runtime)
 
     if normalized_path == "/":
         return apply_runtime_headers(text_response(200, "Ollama is running"), runtime)
@@ -699,6 +858,52 @@ def dispatch_post(
         requested_model = str(model or "").strip()
         if requested_model and requested_model not in {str(model_name or "").strip(), f"{str(model_name or '').strip()}:latest"}:
             source_context["requested_model"] = requested_model
+
+        model_status_result = runtime_model_status_response(user_text, runtime)
+        if model_status_result is not None:
+            result = apply_exact_response_control(dict(model_status_result), user_text)
+            if stream:
+                stream_iter = ollama_stream_chunks(result, str(model))
+                if normalized_path.startswith("/v1/"):
+                    return apply_runtime_headers(
+                        stream_response(
+                            200,
+                            openai_sse_stream_from_ollama_chunks(stream_iter, str(model)),
+                            content_type="text/event-stream; charset=utf-8",
+                            headers={"Cache-Control": "no-cache"},
+                        ),
+                        runtime,
+                    )
+                return apply_runtime_headers(
+                    stream_response(200, stream_iter, content_type="application/x-ndjson"),
+                    runtime,
+                )
+            payload = openai_chat_response(result, model) if normalized_path.startswith("/v1/") else ollama_chat_response(result, model, runtime)
+            payload = _attach_work_receipt(payload, result=result, session_id=session_id)
+            return apply_runtime_headers(json_response(200, payload), runtime)
+
+        grounded_result = web0_null_project_response(user_text)
+        if grounded_result is not None:
+            result = apply_exact_response_control(dict(grounded_result), user_text)
+            if stream:
+                stream_iter = ollama_stream_chunks(result, str(model))
+                if normalized_path.startswith("/v1/"):
+                    return apply_runtime_headers(
+                        stream_response(
+                            200,
+                            openai_sse_stream_from_ollama_chunks(stream_iter, str(model)),
+                            content_type="text/event-stream; charset=utf-8",
+                            headers={"Cache-Control": "no-cache"},
+                        ),
+                        runtime,
+                    )
+                return apply_runtime_headers(
+                    stream_response(200, stream_iter, content_type="application/x-ndjson"),
+                    runtime,
+                )
+            payload = openai_chat_response(result, model) if normalized_path.startswith("/v1/") else ollama_chat_response(result, model, runtime)
+            payload = _attach_work_receipt(payload, result=result, session_id=session_id)
+            return apply_runtime_headers(json_response(200, payload), runtime)
 
         if stream:
             stream_iter = stream_agent_with_events_provider(

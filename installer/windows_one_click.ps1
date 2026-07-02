@@ -34,15 +34,7 @@ function Convert-ProfileForBatch {
 
 function New-InstallerArgs {
     param([bool]$StartAfter)
-    $batchProfile = Convert-ProfileForBatch $InstallProfile
-    $installerArgs = @("/Y", "/OPENCLAW=default", "/INSTALLPROFILE=$batchProfile")
-    if ($StartAfter) {
-        $installerArgs += "/START"
-    }
-    if (-not [string]::IsNullOrWhiteSpace($NullaHome)) {
-        $installerArgs += "/NULLAHOME=$NullaHome"
-    }
-    return $installerArgs
+    return @()
 }
 
 function Invoke-NullaBatchInstaller {
@@ -51,15 +43,51 @@ function Invoke-NullaBatchInstaller {
         throw "Missing installer: $InstallerBat"
     }
     $installerArgs = New-InstallerArgs -StartAfter:$StartAfter
+    $batchProfile = Convert-ProfileForBatch $InstallProfile
     Write-InstallLog "Running installer: $InstallerBat $($installerArgs -join ' ')"
-    $commandLine = '"' + $InstallerBat + '" ' + (($installerArgs | ForEach-Object {
-        $item = [string]$_
-        if ($item -match '\s') { '"' + $item.Replace('"', '\"') + '"' } else { $item }
-    }) -join ' ')
-    $process = Start-Process -FilePath $env:ComSpec -ArgumentList @("/c", $commandLine) -Wait -PassThru
-    Write-InstallLog "Installer exited with code $($process.ExitCode). Log: $LogPath"
-    if ($process.ExitCode -ne 0) {
-        throw "NULLA installer failed with exit code $($process.ExitCode)."
+    $previousInstallProfile = $env:NULLA_INSTALL_PROFILE
+    $previousNullaHome = $env:NULLA_HOME
+    $previousHeadless = $env:NULLA_HEADLESS
+    $previousAutoStart = $env:NULLA_AUTO_START
+    try {
+        $env:NULLA_INSTALL_PROFILE = $batchProfile
+        $env:NULLA_HEADLESS = "1"
+        $env:NULLA_AUTO_START = if ($StartAfter) { "1" } else { "0" }
+        if (-not [string]::IsNullOrWhiteSpace($NullaHome)) {
+            $env:NULLA_HOME = $NullaHome
+        }
+        & $InstallerBat @installerArgs
+        $installerExitCode = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+    }
+    finally {
+        if ($null -eq $previousInstallProfile) {
+            Remove-Item Env:NULLA_INSTALL_PROFILE -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:NULLA_INSTALL_PROFILE = $previousInstallProfile
+        }
+        if ($null -eq $previousNullaHome) {
+            Remove-Item Env:NULLA_HOME -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:NULLA_HOME = $previousNullaHome
+        }
+        if ($null -eq $previousHeadless) {
+            Remove-Item Env:NULLA_HEADLESS -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:NULLA_HEADLESS = $previousHeadless
+        }
+        if ($null -eq $previousAutoStart) {
+            Remove-Item Env:NULLA_AUTO_START -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:NULLA_AUTO_START = $previousAutoStart
+        }
+    }
+    Write-InstallLog "Installer exited with code $installerExitCode. Log: $LogPath"
+    if ($installerExitCode -ne 0) {
+        throw "NULLA installer failed with exit code $installerExitCode."
     }
 }
 

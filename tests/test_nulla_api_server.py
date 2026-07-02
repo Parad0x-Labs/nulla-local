@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import socket
@@ -39,9 +40,55 @@ from core.web.api.runtime import (
     RuntimeServices,
     bootstrap_runtime_services,
     build_runtime_version_stamp,
+    extract_user_message,
     log_prewarm_results,
+    message_text,
     startup_provider_capability_truth,
+    strip_openclaw_turn_scaffolding,
 )
+
+
+class OpenClawTurnScaffoldingTests(unittest.TestCase):
+    QUEUED = "[Queued user message that arrived while the previous turn was still active]"
+
+    def test_recovers_newest_message_from_queued_turn_merge(self) -> None:
+        # Exact shape OpenClaw sends when a message arrives mid-turn: marker line,
+        # newest message, blank line, then the original in-flight prompt.
+        blob = f"{self.QUEUED}\nwhats the weather in Riga?\n\nhi"
+        self.assertEqual(strip_openclaw_turn_scaffolding(blob), "whats the weather in Riga?")
+
+    def test_strips_marker_and_leading_gmt_bracket_on_one_line(self) -> None:
+        # The live-repro'd shape: a GMT timestamp bracket ahead of the marker, all
+        # collapsed onto one line. Everything up to and including the marker is
+        # scaffolding and must be dropped.
+        blob = f"[Wed 2026-07-01 18:07 GMT+3]{self.QUEUED} whats the riga? hi"
+        self.assertEqual(strip_openclaw_turn_scaffolding(blob), "whats the riga? hi")
+
+    def test_strips_leading_gmt_bracket_without_marker(self) -> None:
+        self.assertEqual(
+            strip_openclaw_turn_scaffolding("[Wed 2026-07-01 18:07 GMT+3] whats the weather in Riga?"),
+            "whats the weather in Riga?",
+        )
+
+    def test_plain_message_passes_through_untouched(self) -> None:
+        self.assertEqual(
+            strip_openclaw_turn_scaffolding("whats the weather in Riga?"),
+            "whats the weather in Riga?",
+        )
+
+    def test_does_not_strip_legitimate_user_brackets(self) -> None:
+        # A real user question that happens to contain brackets (and no GMT/marker)
+        # must be left entirely alone - no false positives.
+        text = "is [a] a valid variable name in python?"
+        self.assertEqual(strip_openclaw_turn_scaffolding(text), text)
+
+    def test_message_text_and_extract_user_message_apply_sanitizer(self) -> None:
+        blob = f"[Wed 2026-07-01 18:07 GMT+3]{self.QUEUED} whats the riga? hi"
+        self.assertEqual(message_text(blob), "whats the riga? hi")
+        self.assertEqual(
+            extract_user_message([{"role": "user", "content": blob}]),
+            "whats the riga? hi",
+        )
 from core.web.api.service import json_response
 from tests.asgi_harness import asgi_request
 
@@ -344,6 +391,40 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(payload["choices"][0]["message"]["content"], "OPENCLAW_NULLA_OK")
 
+    def test_dispatch_post_clamps_timestamped_exact_reply_for_openclaw_cli(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+
+        def fake_run_agent(
+            user_text: str,
+            *,
+            session_id: str | None = None,
+            source_context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            return {"response": "OPENCLAW_NULLA_OK\n- Reply exactly OPENCLAW_NULLA_OK", "confidence": 1.0}
+
+        with mock.patch("apps.nulla_api_server._run_agent", side_effect=fake_run_agent):
+            response = _dispatch_post(
+                path="/api/chat",
+                body={
+                    "model": "nulla",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "[Tue 2026-06-30 11:00 GMT+3] Reply exactly OPENCLAW_NULLA_OK",
+                        }
+                    ],
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp",
+            )
+
+        payload = json.loads(response.body.decode("utf-8"))
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["message"]["content"], "OPENCLAW_NULLA_OK")
+
     def test_dispatch_post_does_not_clamp_file_read_exactly_requests_without_target(self) -> None:
         runtime = RuntimeServices(display_name="NULLA")
 
@@ -372,6 +453,146 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
 
         self.assertEqual(response.status, 200)
         self.assertEqual(payload["message"]["content"], "file body\nline two")
+
+    def test_dispatch_post_answers_web0_null_registration_from_project_grounding(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+
+        with mock.patch("apps.nulla_api_server._run_agent") as run_agent_mock:
+            response = _dispatch_post(
+                path="/api/chat",
+                body={
+                    "model": "nulla",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "[Tue 2026-06-30 14:29 GMT+3] can we buy a .null address? answer in 3 bullets",
+                        }
+                    ],
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp",
+            )
+
+        payload = json.loads(response.body.decode("utf-8"))
+        text = payload["message"]["content"]
+
+        self.assertEqual(response.status, 200)
+        run_agent_mock.assert_not_called()
+        self.assertIn("not as a normal ICANN/DNS purchase", text)
+        self.assertIn("null_registrar v2", text)
+        self.assertIn("NXgQhepFpDCu935H1D4g34g59ZYbo1jR4tBCZWhV8Np", text)
+        self.assertIn("nulla resolve <name>.null", text)
+        self.assertNotIn("domain registrars that might support .null", text)
+
+    def test_dispatch_post_streams_web0_null_registration_grounding_without_model(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+
+        with mock.patch("apps.nulla_api_server._run_agent") as run_agent_mock, mock.patch(
+            "apps.nulla_api_server._stream_agent_with_events"
+        ) as stream_mock:
+            response = _dispatch_post(
+                path="/api/chat",
+                body={
+                    "model": "nulla",
+                    "messages": [{"role": "user", "content": "Can we register a .null domain?"}],
+                    "stream": True,
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp",
+            )
+
+        body = b"".join(response.stream or ())
+        streamed_text = "".join(
+            str(json.loads(line.decode("utf-8")).get("message", {}).get("content") or "")
+            for line in body.splitlines()
+            if line.strip()
+        )
+
+        self.assertEqual(response.status, 200)
+        self.assertIn("application/x-ndjson", response.content_type)
+        run_agent_mock.assert_not_called()
+        stream_mock.assert_not_called()
+        self.assertIn("ICANN/DNS", streamed_text)
+        self.assertIn("null_registrar", streamed_text)
+        self.assertIn("nulla resolve <name>.null", streamed_text)
+
+    def test_dispatch_post_answers_named_web0_null_registration_as_workflow(self) -> None:
+        runtime = RuntimeServices(display_name="NULLA")
+
+        with mock.patch("apps.nulla_api_server._run_agent") as run_agent_mock:
+            response = _dispatch_post(
+                path="/api/chat",
+                body={
+                    "model": "nulla",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "right. can you help me to buy a .null name? I want for example test123.null",
+                        }
+                    ],
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp",
+            )
+
+        payload = json.loads(response.body.decode("utf-8"))
+        text = payload["message"]["content"]
+
+        self.assertEqual(response.status, 200)
+        run_agent_mock.assert_not_called()
+        self.assertIn("`test123.null`", text)
+        self.assertIn("nulla resolve test123.null", text)
+        self.assertIn("will not sign, spend, or submit", text)
+        self.assertIn("wallet prompt", text)
+        self.assertNotIn("not as a normal ICANN/DNS purchase", text)
+
+    def test_dispatch_post_answers_runtime_model_status_from_runtime_truth(self) -> None:
+        runtime = RuntimeServices(
+            display_name="NULLA",
+            runtime_model_tag="gemma3:4b",
+            runtime_parameter_size="4B",
+            provider_capability_truth=(
+                {
+                    "provider_id": "ollama-local:gemma3:4b",
+                    "model_id": "gemma3:4b",
+                    "availability_state": "ready",
+                },
+                {
+                    "provider_id": "ollama-local:qwen2.5:7b",
+                    "model_id": "qwen2.5:7b",
+                    "availability_state": "ready",
+                },
+            ),
+        )
+
+        with mock.patch("apps.nulla_api_server._run_agent") as run_agent_mock:
+            response = _dispatch_post(
+                path="/api/chat",
+                body={
+                    "model": "nulla",
+                    "messages": [{"role": "user", "content": "what standard LLM are you using now?"}],
+                },
+                headers={"content-type": "application/json"},
+                runtime=runtime,
+                model_name="nulla",
+                workspace_root_provider=lambda: "/tmp",
+            )
+
+        payload = json.loads(response.body.decode("utf-8"))
+        text = payload["message"]["content"]
+
+        self.assertEqual(response.status, 200)
+        run_agent_mock.assert_not_called()
+        self.assertIn("Boot/default local model: `gemma3:4b`", text)
+        self.assertIn("`qwen2.5:7b`", text)
+        self.assertIn("Routing can select `qwen2.5:7b`", text)
+        self.assertNotIn("nomic-embed-text", text)
 
     def test_dispatch_post_rehydrates_history_from_session_log_when_client_history_is_sparse(self) -> None:
         runtime = RuntimeServices(display_name="NULLA")
@@ -755,7 +976,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                 "NULLA_KIMI_MODEL": "kimi-latest",
             },
             clear=False,
-        ):
+        ), mock.patch("core.runtime_provider_defaults.installed_ollama_model_names", return_value=[]):
             _ensure_default_provider(registry, "qwen2.5:14b")
 
         self.assertIn(("ollama-local", "qwen2.5:14b"), manifests)
@@ -784,7 +1005,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                 "VLLM_CONTEXT_WINDOW": "65536",
             },
             clear=False,
-        ):
+        ), mock.patch("core.runtime_provider_defaults.installed_ollama_model_names", return_value=[]):
             _ensure_default_provider(registry, "qwen2.5:14b")
 
         self.assertIn(("ollama-local", "qwen2.5:14b"), manifests)
@@ -814,7 +1035,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                 "LLAMACPP_CONTEXT_WINDOW": "16384",
             },
             clear=False,
-        ):
+        ), mock.patch("core.runtime_provider_defaults.installed_ollama_model_names", return_value=[]):
             _ensure_default_provider(registry, "qwen2.5:14b")
 
         self.assertIn(("ollama-local", "qwen2.5:14b"), manifests)
@@ -836,7 +1057,8 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         registry.get_manifest.side_effect = _get_manifest
         registry.register_manifest.side_effect = _register_manifest
 
-        _ensure_default_provider(registry, "qwen2.5:14b")
+        with mock.patch("core.runtime_provider_defaults.installed_ollama_model_names", return_value=[]):
+            _ensure_default_provider(registry, "qwen2.5:14b")
 
         manifest = manifests[("ollama-local", "qwen2.5:14b")]
         self.assertEqual(manifest.runtime_config["prewarm"]["strategy"], "ollama_chat")
@@ -856,7 +1078,7 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         model_registry.startup_warnings.return_value = []
         runtime_home = "/tmp/runtime-home"
 
-        with mock.patch(
+        with mock.patch.dict(os.environ, {"NULLA_OLLAMA_MODEL": ""}, clear=False), mock.patch(
             "core.web.api.runtime.bootstrap_runtime_mode",
             return_value=mock.Mock(
                 backend_selection=mock.Mock(backend_name="mlx", device="mps"),
@@ -995,6 +1217,167 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
         self.assertEqual(provider_args[:2], (model_registry, "qwen3:8b"))
         self.assertIn("env", provider_kwargs)
         self.assertIn("runtime_home", provider_kwargs)
+
+    def test_bootstrap_runtime_services_uses_persisted_provider_env_selected_model(self) -> None:
+        persona = mock.Mock(persona_id="default")
+        agent = mock.Mock()
+        daemon = mock.Mock(config=mock.Mock(bind_port=49152))
+        compute_daemon = mock.Mock()
+        model_registry = mock.Mock()
+        model_registry.startup_warnings.return_value = []
+        runtime_home = "/tmp/runtime-home"
+        provider_env = {
+            "NULLA_INSTALL_PROFILE": "local-only",
+            "NULLA_OLLAMA_MODEL": "gemma3:4b",
+        }
+
+        with mock.patch.dict(os.environ, {"NULLA_OLLAMA_MODEL": ""}, clear=False), mock.patch(
+            "core.web.api.runtime.bootstrap_runtime_mode",
+            return_value=mock.Mock(
+                backend_selection=mock.Mock(backend_name="mlx", device="mps"),
+                context=SimpleNamespace(paths=SimpleNamespace(runtime_home=runtime_home)),
+            ),
+        ), mock.patch(
+            "core.web.api.runtime.merge_provider_env",
+            return_value=provider_env,
+        ), mock.patch(
+            "core.web.api.runtime.is_first_boot",
+            return_value=False,
+        ), mock.patch(
+            "core.credit_ledger.ensure_starter_credits",
+            return_value=False,
+        ), mock.patch(
+            "core.web.api.runtime.ensure_public_hive_auth",
+            return_value={"ok": True, "status": "ok"},
+        ), mock.patch(
+            "core.web.api.runtime.probe_machine",
+            return_value=mock.Mock(accelerator="mps", gpu_name="Apple GPU"),
+        ), mock.patch(
+            "core.web.api.runtime.default_runtime_model_tag",
+            return_value="qwen2.5:7b",
+        ), mock.patch(
+            "core.web.api.runtime.ensure_ollama_model",
+        ) as ensure_model, mock.patch(
+            "core.web.api.runtime.build_runtime_version_stamp",
+            return_value={"started_at": "2026-03-28T00:00:00.000000Z", "build_id": "test", "branch": "main", "commit": "abc123", "dirty": False},
+        ), mock.patch(
+            "core.web.api.runtime.ComputeModeDaemon",
+            return_value=compute_daemon,
+        ), mock.patch(
+            "core.web.api.runtime.ModelRegistry",
+            return_value=model_registry,
+        ), mock.patch(
+            "core.web.api.runtime.ensure_default_provider",
+        ) as ensure_provider, mock.patch(
+            "core.web.api.runtime.log_prewarm_results",
+        ), mock.patch(
+            "core.web.api.runtime.load_active_persona",
+            return_value=persona,
+        ), mock.patch(
+            "core.web.api.runtime.get_agent_display_name",
+            return_value="NULLA",
+        ), mock.patch(
+            "core.web.api.runtime.ensure_openclaw_registration",
+            return_value=True,
+        ), mock.patch(
+            "core.web.api.runtime.NullaAgent",
+            return_value=agent,
+        ), mock.patch(
+            "core.web.api.runtime.resolve_local_worker_capacity",
+            return_value=(3, 3),
+        ), mock.patch(
+            "core.web.api.runtime.NullaDaemon",
+            return_value=daemon,
+        ):
+            runtime = bootstrap_runtime_services(
+                project_root=PROJECT_ROOT,
+                workstation_version="test-workstation",
+            )
+
+        self.assertEqual(runtime.runtime_model_tag, "gemma3:4b")
+        ensure_model.assert_called_once_with("gemma3:4b")
+        provider_args, provider_kwargs = ensure_provider.call_args
+        self.assertEqual(provider_args[:2], (model_registry, "gemma3:4b"))
+        self.assertEqual(provider_kwargs["env"], provider_env)
+
+    def test_bootstrap_runtime_services_uses_installed_profile_record_selected_model(self) -> None:
+        # NULLA_OLLAMA_MODEL is absent from both the live environment and provider-env.sh
+        # (e.g. it was never refreshed after install), but the cross-platform install-profile
+        # record was updated later (e.g. via `nulla_cli install-profile --set`). The persisted
+        # record must still win over the global default.
+        persona = mock.Mock(persona_id="default")
+        agent = mock.Mock()
+        daemon = mock.Mock(config=mock.Mock(bind_port=49152))
+        compute_daemon = mock.Mock()
+        model_registry = mock.Mock()
+        model_registry.startup_warnings.return_value = []
+        runtime_home = "/tmp/runtime-home"
+        provider_env = {"NULLA_INSTALL_PROFILE": "local-only"}
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(os.environ, {"NULLA_OLLAMA_MODEL": ""}, clear=False))
+            stack.enter_context(
+                mock.patch(
+                    "core.web.api.runtime.bootstrap_runtime_mode",
+                    return_value=mock.Mock(
+                        backend_selection=mock.Mock(backend_name="mlx", device="mps"),
+                        context=SimpleNamespace(paths=SimpleNamespace(runtime_home=runtime_home)),
+                    ),
+                )
+            )
+            stack.enter_context(mock.patch("core.web.api.runtime.merge_provider_env", return_value=provider_env))
+            stack.enter_context(
+                mock.patch("core.web.api.runtime.installed_profile_selected_model", return_value="gemma3:4b")
+            )
+            stack.enter_context(mock.patch("core.web.api.runtime.is_first_boot", return_value=False))
+            stack.enter_context(mock.patch("core.credit_ledger.ensure_starter_credits", return_value=False))
+            stack.enter_context(
+                mock.patch("core.web.api.runtime.ensure_public_hive_auth", return_value={"ok": True, "status": "ok"})
+            )
+            stack.enter_context(
+                mock.patch(
+                    "core.web.api.runtime.probe_machine",
+                    return_value=mock.Mock(accelerator="mps", gpu_name="Apple GPU"),
+                )
+            )
+            stack.enter_context(
+                mock.patch("core.web.api.runtime.default_runtime_model_tag", return_value="qwen2.5:7b")
+            )
+            ensure_model = stack.enter_context(mock.patch("core.web.api.runtime.ensure_ollama_model"))
+            stack.enter_context(
+                mock.patch(
+                    "core.web.api.runtime.build_runtime_version_stamp",
+                    return_value={
+                        "started_at": "2026-03-28T00:00:00.000000Z",
+                        "build_id": "test",
+                        "branch": "main",
+                        "commit": "abc123",
+                        "dirty": False,
+                    },
+                )
+            )
+            stack.enter_context(mock.patch("core.web.api.runtime.ComputeModeDaemon", return_value=compute_daemon))
+            stack.enter_context(mock.patch("core.web.api.runtime.ModelRegistry", return_value=model_registry))
+            ensure_provider = stack.enter_context(mock.patch("core.web.api.runtime.ensure_default_provider"))
+            stack.enter_context(mock.patch("core.web.api.runtime.log_prewarm_results"))
+            stack.enter_context(mock.patch("core.web.api.runtime.load_active_persona", return_value=persona))
+            stack.enter_context(mock.patch("core.web.api.runtime.get_agent_display_name", return_value="NULLA"))
+            stack.enter_context(mock.patch("core.web.api.runtime.ensure_openclaw_registration", return_value=True))
+            stack.enter_context(mock.patch("core.web.api.runtime.NullaAgent", return_value=agent))
+            stack.enter_context(
+                mock.patch("core.web.api.runtime.resolve_local_worker_capacity", return_value=(3, 3))
+            )
+            stack.enter_context(mock.patch("core.web.api.runtime.NullaDaemon", return_value=daemon))
+
+            runtime = bootstrap_runtime_services(
+                project_root=PROJECT_ROOT,
+                workstation_version="test-workstation",
+            )
+
+        self.assertEqual(runtime.runtime_model_tag, "gemma3:4b")
+        ensure_model.assert_called_once_with("gemma3:4b")
+        provider_args, _provider_kwargs = ensure_provider.call_args
+        self.assertEqual(provider_args[:2], (model_registry, "gemma3:4b"))
 
     def test_log_prewarm_results_treats_timeout_without_background_as_info(self) -> None:
         registry = mock.Mock()
@@ -1443,6 +1826,116 @@ class NullaAPIServerModelMetadataTests(unittest.TestCase):
                 self.assertIn(NULLA_WORKSTATION_DEPLOYMENT_VERSION, body)
                 self.assertIn('data-workstation-surface="trace-rail"', body)
                 self.assertIn("Trace workstation v1", body)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+
+
+class Web0BrowserRouteTests(unittest.TestCase):
+    def test_web0_alias_serves_the_null_browser_page(self) -> None:
+        from core.null_browser_page import render_null_browser_html
+        from core.web.meet.routes import resolve_static_route
+
+        expected = render_null_browser_html().encode("utf-8")
+        status, content_type, body = resolve_static_route("/web0")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", content_type)
+        self.assertEqual(body, expected)
+
+    def test_web0_and_null_browser_are_identical(self) -> None:
+        from core.web.meet.routes import resolve_static_route
+
+        self.assertEqual(resolve_static_route("/web0")[2], resolve_static_route("/null-browser")[2])
+
+    def test_web0_page_posts_back_to_api_null(self) -> None:
+        # The page must call POST /api/null so the browse action actually resolves a
+        # .null name through the running NULLA API - guard against the endpoint drifting.
+        from core.null_browser_page import render_null_browser_html
+
+        self.assertIn("/api/null", render_null_browser_html())
+
+    def test_web0_page_is_a_browser_with_address_bar_and_resolve_call(self) -> None:
+        from core.null_browser_page import render_null_browser_html
+
+        html = render_null_browser_html()
+        self.assertIn('value="web0.null"', html)          # default address
+        self.assertIn("/api/web0/resolve", html)          # resolves names
+        self.assertIn("sandbox=", html)                   # untrusted Arweave content is sandboxed
+        self.assertIn("/api/null", html)                  # advanced dispatch preserved
+
+    def test_normalize_web0_name_variants(self) -> None:
+        from core.web.api.service import _normalize_web0_name
+
+        self.assertEqual(_normalize_web0_name("web0.null"), "web0")
+        self.assertEqual(_normalize_web0_name("WEB0.NULL"), "web0")
+        self.assertEqual(_normalize_web0_name("null://web0.null/some/path?x=1"), "web0")
+        self.assertEqual(_normalize_web0_name("https://web0.null"), "web0")
+        self.assertEqual(_normalize_web0_name(""), "")
+
+    def test_web0_resolve_returns_gateway_url_for_a_name_with_content(self) -> None:
+        from core.web.api.service import _web0_resolve_response
+
+        rec = SimpleNamespace(owner="9vDnXsPoOwner", arweave_txid="ETIGvFIIa7DXt72Lr", x402_endpoint="")
+        with mock.patch("core.null_resolver.resolve_null_domain", return_value=rec), mock.patch(
+            "core.policy_engine.local_only_mode", return_value=False
+        ):
+            resp = _web0_resolve_response({"name": ["web0.null"]})
+        self.assertEqual(resp.status, 200)
+        body = json.loads(resp.body)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["name"], "web0")
+        self.assertEqual(body["gateway_url"], "https://arweave.net/ETIGvFIIa7DXt72Lr")
+        self.assertTrue(body["has_content"])
+
+    def test_web0_resolve_reports_registered_but_no_content(self) -> None:
+        from core.web.api.service import _web0_resolve_response
+
+        rec = SimpleNamespace(owner="ownerpubkey", arweave_txid=None, x402_endpoint="")
+        with mock.patch("core.null_resolver.resolve_null_domain", return_value=rec), mock.patch(
+            "core.policy_engine.local_only_mode", return_value=False
+        ):
+            resp = _web0_resolve_response({"name": ["parad0x"]})
+        body = json.loads(resp.body)
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(body["ok"])
+        self.assertFalse(body["has_content"])
+        self.assertEqual(body["gateway_url"], "")
+
+    def test_web0_resolve_missing_name_is_400(self) -> None:
+        from core.web.api.service import _web0_resolve_response
+
+        resp = _web0_resolve_response({})
+        self.assertEqual(resp.status, 400)
+
+    def test_web0_resolve_blocked_under_local_only_mode(self) -> None:
+        from core.web.api.service import _web0_resolve_response
+
+        with mock.patch("core.policy_engine.local_only_mode", return_value=True):
+            resp = _web0_resolve_response({"name": ["web0.null"]})
+        self.assertEqual(resp.status, 403)
+        self.assertFalse(json.loads(resp.body)["ok"])
+
+    def test_web0_resolve_unregistered_is_404(self) -> None:
+        from core.web.api.service import _web0_resolve_response
+
+        with mock.patch("core.null_resolver.resolve_null_domain", return_value=None), mock.patch(
+            "core.policy_engine.local_only_mode", return_value=False
+        ):
+            resp = _web0_resolve_response({"name": ["definitely-not-registered"]})
+        self.assertEqual(resp.status, 404)
+
+    @unittest.skipUnless(os.environ.get("NULLA_LIVE_ROUTE_PROOF") == "1", "live route proof only")
+    def test_live_web0_route_served_by_api_server(self) -> None:
+        server = NullaAPIServerModelMetadataTests._server_with_runtime()
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = int(server.server_address[1])
+            with request.urlopen(f"http://127.0.0.1:{port}/web0", timeout=5) as response:
+                body = response.read().decode("utf-8")
+                self.assertEqual(response.headers.get("X-Nulla-Workstation-Surface"), "web0-browser")
+                self.assertIn("/api/null", body)
         finally:
             server.shutdown()
             server.server_close()

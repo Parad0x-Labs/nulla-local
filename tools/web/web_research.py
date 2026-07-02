@@ -21,6 +21,24 @@ from tools.web.http_fetch import http_fetch_text
 from tools.web.searxng_client import SearchResult, SearXNGClient
 
 
+def _weather_keywords() -> tuple[str, ...]:
+    # Same marker list the fast-path classifier uses to recognize weather queries
+    # (core/agent_runtime/fast_live_info_mode_weather_markers.py), including common
+    # misspellings like "wheater"/"wheather". Without sharing this list, a typo'd
+    # query could get correctly classified as weather mode by the classifier, then
+    # silently fail here because this module's own keyword check didn't know the
+    # same typo meant "weather" too.
+    #
+    # Imported locally (not at module level): core.agent_runtime's package
+    # __init__ eagerly imports fast_live_info_search, which imports
+    # retrieval.web_adapter, which imports this module — a module-level import
+    # here would be circular. By the time this function actually runs, both
+    # modules have finished their top-level loading.
+    from core.agent_runtime.fast_live_info_mode_weather_markers import _WEATHER_MARKERS
+
+    return tuple(sorted({token.strip() for token in _WEATHER_MARKERS if token.strip()}))
+
+
 def _domain_from_url(url: str) -> str:
     """Extract bare domain from URL, stripping www. prefix."""
     if not url:
@@ -88,7 +106,7 @@ def _needs_browser(fetch_status: str, text: str) -> bool:
 
 def _looks_like_weather_query(query: str) -> bool:
     lowered = str(query or "").lower()
-    return any(token in lowered for token in ("weather", "forecast", "temperature", "rain", "snow", "wind", "humidity"))
+    return any(token in lowered for token in _weather_keywords())
 
 
 def _looks_like_news_query(query: str) -> bool:
@@ -146,8 +164,42 @@ def _extract_weather_location(query: str) -> str:
     }
     while tokens and tokens[-1] in trailing_noise:
         tokens.pop()
+    # Drop leading question/filler words so "what is the weather?" resolves to IP
+    # geolocation instead of extracting "what is the" as a bogus place name.
+    leading_filler = {
+        "what", "whats", "what's", "how", "hows", "how's", "is", "are",
+        "the", "a", "an", "hi", "hello", "hey", "yo", "tell", "me", "show",
+        "please", "so", "and", "ok", "okay", "um", "like", "about",
+    }
+    while tokens and tokens[0] in leading_filler:
+        tokens.pop(0)
     candidate = " ".join(tokens).strip()
-    return candidate or "current location"
+    if not candidate:
+        # Genuine "weather?" with no place named - let wttr.in use IP geolocation.
+        return "current location"
+    if not _is_plausible_weather_location(candidate):
+        # Non-empty but not a real place name (scaffolding, a merged multi-message
+        # blob, a leaked "[... GMT+N]" bracket, etc.). Returning "" tells
+        # _weather_fallback to bail instead of fuzzy-matching garbage to a random
+        # city - this is what turned "weather in Riga" into "Los Vargas, Mexico".
+        return ""
+    return candidate
+
+
+def _is_plausible_weather_location(candidate: str) -> bool:
+    text = str(candidate or "").strip()
+    if not text:
+        return False
+    # Real place names have no structural/scaffolding characters and are short.
+    if any(ch in text for ch in "[]{}\n\r\t|"):
+        return False
+    lowered = text.lower()
+    if "gmt" in lowered or "queued user message" in lowered:
+        return False
+    if len(text) > 60 or len(text.split()) > 6:
+        return False
+    # Must contain at least one letter (a place name is never pure punctuation/digits).
+    return any(ch.isalpha() for ch in text)
 
 
 def _extract_news_topic(query: str) -> str:
@@ -527,6 +579,11 @@ def _weather_fallback(
     timeout_s: float,
 ) -> tuple[str, list[WebHit], list[PageEvidence], list[str]] | None:
     location = _extract_weather_location(query)
+    if not location:
+        # Extractor rejected the "location" as implausible (scaffolding / merged
+        # blob / not a real place). Bail so this flows to normal handling instead
+        # of wttr.in guessing a random city from garbage.
+        return None
     page_url = "https://wttr.in/" + urllib.parse.quote(location)
     api_url = page_url + "?format=j1"
     request = urllib.request.Request(api_url, headers={"User-Agent": "NULLA-WEATHER/1.0"})

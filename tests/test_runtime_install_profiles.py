@@ -12,6 +12,7 @@ from core.runtime_install_profiles import (
     default_ollama_models_path,
     format_install_profile_id,
     install_profile_display_choices,
+    installed_profile_selected_model,
     normalize_install_profile_id,
     preferred_install_profile_id,
 )
@@ -455,6 +456,23 @@ def test_installed_profile_record_is_used_when_no_env_override_is_present() -> N
     assert profile.profile_id == "hybrid-kimi"
     assert profile.selection_source == "installed_default"
     assert any("operator lane `ollama+kimi`" in reason for reason in profile.reasons)
+
+
+def test_installed_profile_selected_model_reads_persisted_record() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        target = Path(tmpdir) / "config" / "install-profile.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps({"profile_id": "local-only", "selected_model": "gemma3:4b"}),
+            encoding="utf-8",
+        )
+
+        assert installed_profile_selected_model(tmpdir) == "gemma3:4b"
+
+
+def test_installed_profile_selected_model_is_empty_when_no_record_exists() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        assert installed_profile_selected_model(tmpdir) == ""
 
 
 def test_explicit_full_orchestrated_profile_fails_closed_when_keys_and_space_are_missing() -> None:

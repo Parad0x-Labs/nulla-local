@@ -4,7 +4,8 @@ import re
 from typing import Any
 
 _EXACT_RESPONSE_RE = re.compile(
-    r"^\s*(?:reply|respond|answer|return|say|output|print)\s+"
+    r"^\s*(?:\[[^\]\r\n]{1,96}\]\s*)?"
+    r"(?:reply|respond|answer|return|say|output|print)\s+"
     r"(?:with\s+)?exactly"
     r"(?:\s+(?:this|the)\s+(?:marker|text|string|phrase|token))?"
     r"(?:\s+and\s+(?:nothing\s+else|no\s+other\s+text|no\s+extra\s+text|no\s+extra\s+characters))?"

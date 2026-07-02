@@ -7,21 +7,78 @@ from installer.write_install_receipt import build_receipt
 
 
 def test_install_receipt_includes_enabled_web_stack_defaults() -> None:
-    receipt = build_receipt(
-        project_root="/tmp/nulla",
-        runtime_home="/tmp/nulla-home",
-        model_tag="qwen2.5:7b",
-        openclaw_enabled=True,
-        openclaw_config_path="/tmp/openclaw.json",
-        openclaw_agent_dir="/tmp/agent",
-        ollama_binary="ollama",
-    )
+    with mock.patch(
+        "installer.write_install_receipt.build_provider_registry_snapshot",
+        return_value=mock.Mock(capability_truth=()),
+    ):
+        receipt = build_receipt(
+            project_root="/tmp/nulla",
+            runtime_home="/tmp/nulla-home",
+            model_tag="qwen2.5:7b",
+            openclaw_enabled=True,
+            openclaw_config_path="/tmp/openclaw.json",
+            openclaw_agent_dir="/tmp/agent",
+            ollama_binary="ollama",
+        )
 
     web_stack = receipt["web_stack"]
     assert web_stack["provider_order"] == ["searxng", "ddg_instant", "duckduckgo_html"]
     assert web_stack["searxng_url"] == "http://127.0.0.1:8080"
     assert web_stack["playwright_enabled"] is True
     assert web_stack["browser_engine"] == "chromium"
+
+
+def _empty_snapshot() -> mock.Mock:
+    # Isolate from the live provider-registry snapshot (which would try to reach a
+    # local Ollama and is blocked under pytest); the wallet fields don't depend on it.
+    return mock.Mock(capability_truth=())
+
+
+def test_install_receipt_surfaces_agent_wallet_pubkey_only() -> None:
+    pubkey = "5EKQBbMQE6S4LcNP3vuFiFUDbPDiJ5JheUeaWaKxK8Dd"
+    with mock.patch(
+        "installer.write_install_receipt.build_provider_registry_snapshot",
+        return_value=_empty_snapshot(),
+    ):
+        receipt = build_receipt(
+            project_root="/tmp/nulla",
+            runtime_home="/tmp/nulla-home",
+            model_tag="qwen2.5:7b",
+            openclaw_enabled=True,
+            openclaw_config_path="/tmp/openclaw.json",
+            openclaw_agent_dir="/tmp/agent",
+            ollama_binary="ollama",
+            agent_wallet_pubkey=pubkey,
+        )
+
+    wallet = receipt["agent_wallet"]
+    assert wallet["pubkey"] == pubkey
+    assert wallet["created_at_install"] is True
+    assert wallet["storage"] == "encrypted_local:aes-256-gcm"
+    # The receipt must NEVER carry private-key material of any kind.
+    blob = str(receipt).lower()
+    assert "private" not in blob
+    assert "seed" not in blob
+    assert "ciphertext" not in blob
+
+
+def test_install_receipt_wallet_absent_is_marked_not_created() -> None:
+    with mock.patch(
+        "installer.write_install_receipt.build_provider_registry_snapshot",
+        return_value=_empty_snapshot(),
+    ):
+        receipt = build_receipt(
+            project_root="/tmp/nulla",
+            runtime_home="/tmp/nulla-home",
+            model_tag="qwen2.5:7b",
+            openclaw_enabled=False,
+            openclaw_config_path="",
+            openclaw_agent_dir="",
+            ollama_binary="ollama",
+        )
+
+    assert receipt["agent_wallet"]["pubkey"] == ""
+    assert receipt["agent_wallet"]["created_at_install"] is False
 
 
 def test_install_receipt_uses_provider_snapshot_truth_for_profile_and_output() -> None:

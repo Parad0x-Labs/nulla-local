@@ -220,6 +220,7 @@ class OpenAICompatibleAdapter(ModelAdapter):
         )
         response.raise_for_status()
         data = response.json()
+        self._record_benchmark_best_effort(request=request, response_payload=data)
         output_text = _extract_ollama_chat_text(data)
         usage = {
             "prompt_eval_count": data.get("prompt_eval_count"),
@@ -295,10 +296,28 @@ class OpenAICompatibleAdapter(ModelAdapter):
                 if delta_text:
                     yield ModelStreamChunk(delta_text=delta_text, raw_event=event, done=False)
                 if bool(event.get("done")):
+                    self._record_benchmark_best_effort(request=request, response_payload=event)
                     break
         finally:
             response.close()
         yield ModelStreamChunk(delta_text="", done=True)
+
+    def _record_benchmark_best_effort(self, *, request: ModelRequest, response_payload: dict[str, Any]) -> None:
+        """Feed real tok/s from this Ollama call into the local inference benchmark
+        table, so core.local_inference_autopilot's live routing scores providers on
+        actual measured speed instead of static/zero manifest metadata. Never lets
+        a benchmark-recording failure affect the real chat response."""
+        try:
+            from core.local_inference_evidence import record_ollama_generate_benchmark
+
+            record_ollama_generate_benchmark(
+                provider_id=self.manifest.provider_id,
+                model_id=self.manifest.model_name,
+                prompt=request.prompt,
+                response_payload=response_payload,
+            )
+        except Exception:
+            logger.debug("Failed to record local inference benchmark", exc_info=True)
 
     def _build_openai_payload(self, request: ModelRequest, *, force_json: bool, stream: bool) -> dict[str, Any]:
         generation_profile = dict(request.metadata.get("generation_profile") or {})

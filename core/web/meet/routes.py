@@ -123,7 +123,10 @@ def resolve_static_route(path: str) -> tuple[int, str, bytes] | None:
         from core.earnings_page import render_earnings_html
 
         return 200, "text/html; charset=utf-8", render_earnings_html().encode("utf-8")
-    if clean_path == "/null-browser":
+    if clean_path in {"/null-browser", "/web0"}:
+        # /web0 is the public-facing alias for the .null browser: a normal browser
+        # cannot open a .null site (it lives on Arweave behind the resolver), so this
+        # NULLA-served page is the entry point. Both paths render the same UI.
         from core.null_browser_page import render_null_browser_html
 
         return 200, "text/html; charset=utf-8", render_null_browser_html().encode("utf-8")
