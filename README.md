@@ -25,21 +25,30 @@ local NULLA agent → memory + tools → optional trusted helpers → mesh task 
 
 ## ⚡ Install in one command
 
-**Windows** — open **PowerShell**, paste this, done. It installs everything for you — Python if you don't have it, the local AI model, and the chat UI — then opens NULLA in your browser:
+### Windows
+
+1. Press the **Start** button, type **PowerShell**, and open **Windows PowerShell**.
+2. Paste the line below and press **Enter**:
 
 ```powershell
 Invoke-WebRequest https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.ps1 -OutFile bootstrap_nulla.ps1; powershell -ExecutionPolicy Bypass -File .\bootstrap_nulla.ps1
 ```
 
-**macOS / Linux** — paste this in a terminal (uses your Python 3.10+, or `uv`):
+That's the whole install. It sets everything up for you — **including Python if your PC doesn't have it** — downloads the local AI model, and opens a chat window in your browser. No sign-up, no accounts, no API keys.
+
+### macOS / Linux
+
+Open your **Terminal** app (on a Mac: press **Cmd+Space**, type **Terminal**), paste the line below, and press **Enter**:
 
 ```bash
 curl -fsSLo bootstrap_nulla.sh https://raw.githubusercontent.com/Parad0x-Labs/nulla-local/main/installer/bootstrap_nulla.sh && bash bootstrap_nulla.sh
 ```
 
-No sign-up, no API keys, nothing else to install first. The first run downloads a few GB (the local AI model), so give it a few minutes — then your browser opens to NULLA, ready to chat.
+(On macOS/Linux you need **Python 3.10+** already installed — most machines have it.)
 
-Want to choose a model tier, use the click-through GUI installer, or install from a repo you already cloned? See **[Install options](#install-options)** below.
+**What to expect:** the first run downloads a few gigabytes — the local AI model — so the window can look like it's just sitting there for several minutes. That's normal; leave it open. When it's done, your browser opens by itself with NULLA ready to chat.
+
+Want to pick a model size, use the click-through installer, or install from a repo you already cloned? See **[Install options](#install-options)** below.
 
 ---
 
