@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 from unittest import mock
+
+import pytest
 
 from core.hardware_tier import MachineProbe, QwenTier
 from core.provider_routing import ProviderCapabilityTruth
@@ -57,6 +60,10 @@ def test_auto_profile_bundle_sizing_uses_ollama_model_store_disk(monkeypatch, tm
     assert profile.profile_id == "local-only"
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Exercises Windows drive-letter (F:\\) path semantics that POSIX pathlib can't simulate.",
+)
 def test_default_ollama_models_path_skips_missing_windows_override(tmp_path) -> None:
     model_store = (tmp_path / "Ollama" / "models").resolve()
     model_store.mkdir(parents=True)

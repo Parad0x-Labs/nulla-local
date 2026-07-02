@@ -15,13 +15,13 @@ from core.runtime_capabilities import runtime_capability_snapshot
 from core.runtime_operator_snapshot import build_runtime_operator_snapshot
 from core.runtime_task_events import list_runtime_session_events, list_runtime_sessions
 from core.runtime_task_rail import render_runtime_task_rail_html
+from core.web.api.response_control import apply_exact_response_control
 from core.web0_project_grounding import web0_null_project_response
 from storage.adaptation_store import (
     list_adaptation_eval_runs,
     list_adaptation_job_events,
     list_adaptation_jobs,
 )
-from core.web.api.response_control import apply_exact_response_control
 
 from .runtime import (
     RuntimeServices,
@@ -240,7 +240,7 @@ def _web0_resolve_response(query: dict[str, list[str]]) -> ApiResponse:
         from core.null_resolver import resolve_null_domain
 
         record = resolve_null_domain(name)
-    except Exception as exc:  # noqa: BLE001 - surface resolver failures as a clean 502
+    except Exception as exc:
         return json_response(502, {"ok": False, "name": name, "error": f"resolver error: {exc}"})
     if record is None:
         return json_response(404, {"ok": False, "name": name, "error": "unregistered or RPC unreachable"})

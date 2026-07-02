@@ -11,7 +11,6 @@ from core.runtime_paths import project_path
 from core.user_preferences import load_preferences
 from storage.dialogue_memory import get_dialogue_session, recent_dialogue_turns, session_lexicon
 
-
 _WEB0_NULL_FACTS = (
     "Web0/.null project facts: .null is not an ICANN DNS TLD or normal registrar purchase. "
     ".null is a wallet-owned Solana null_registrar v2 name "

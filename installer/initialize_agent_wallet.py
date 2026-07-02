@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     runtime_home = args[0] if args else ""
     try:
         pubkey = initialize_agent_wallet(runtime_home)
-    except Exception as exc:  # noqa: BLE001 - installer step must fail loud but never leak key material
+    except Exception as exc:
         print(f"ERROR: agent wallet initialization failed: {exc}", file=sys.stderr)
         return 1
     # stdout carries ONLY the public key so the caller can capture it for the receipt.

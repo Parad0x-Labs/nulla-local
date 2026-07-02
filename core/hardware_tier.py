@@ -252,7 +252,7 @@ def _try_torch_cuda_devices() -> tuple[GPUDevice, ...]:
             except Exception:
                 try:
                     props = torch.cuda.get_device_properties(index)
-                    vram_gb = float(getattr(props, "total_memory")) / (1024.0 ** 3)
+                    vram_gb = float(props.total_memory) / (1024.0 ** 3)
                 except Exception:
                     vram_gb = None
             devices.append(_cuda_device_result(index=index, gpu_name=name, vram_gb=vram_gb, source="torch"))

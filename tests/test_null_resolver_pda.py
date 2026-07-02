@@ -15,7 +15,6 @@ import hashlib
 import pytest
 
 from core.null_resolver import (
-    NULL_DOMAIN_DISC,
     domain_filters,
     find_program_address,
     pad_name64,

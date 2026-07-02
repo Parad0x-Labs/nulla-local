@@ -23,6 +23,7 @@ set in a normal user install.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import sys
@@ -37,11 +38,11 @@ _SKIP_ENV = "NULLA_WALLET_SKIP_CONSENT_GATE"
 _TEST_OVERRIDE: Callable[[str], bool] | None = None
 
 
-class ConsentDenied(Exception):
+class ConsentDeniedError(Exception):
     """The user was prompted and declined / failed verification."""
 
 
-class ConsentUnavailable(Exception):
+class ConsentUnavailableError(Exception):
     """No OS consent mechanism is available on this platform/config (fail closed)."""
 
 
@@ -58,7 +59,7 @@ def _env_bypass_enabled() -> bool:
 def require_os_user_consent(reason: str) -> bool:
     """Return True only if the OS confirmed a live user consent for `reason`.
 
-    Raises ConsentDenied if the user declined, ConsentUnavailable if no mechanism
+    Raises ConsentDeniedError if the user declined, ConsentUnavailableError if no mechanism
     exists. Callers gating a key reveal should treat any exception as "do not reveal".
     """
     clean_reason = str(reason or "confirm this sensitive action").strip()
@@ -76,21 +77,21 @@ def require_os_user_consent(reason: str) -> bool:
 
     if sys.platform != "win32":
         # macOS (LocalAuthentication) and Linux (polkit/PAM) are not wired yet.
-        raise ConsentUnavailable(
+        raise ConsentUnavailableError(
             "OS consent gate is only implemented on Windows; refusing to reveal without a live prompt"
         )
 
     verified = _try_windows_hello(clean_reason)
     if verified is not None:
         if not verified:
-            raise ConsentDenied("Windows Hello verification was declined or failed")
+            raise ConsentDeniedError("Windows Hello verification was declined or failed")
         return True
 
     present = _try_windows_credential_prompt(clean_reason)
     if present is None:
-        raise ConsentUnavailable("no OS consent mechanism is available on this machine")
+        raise ConsentUnavailableError("no OS consent mechanism is available on this machine")
     if not present:
-        raise ConsentDenied("the consent prompt was cancelled")
+        raise ConsentDeniedError("the consent prompt was cancelled")
     return True
 
 
@@ -105,15 +106,15 @@ def _try_windows_hello(reason: str) -> bool | None:
     try:
         try:
             from winsdk.windows.security.credentials.ui import (  # type: ignore
+                UserConsentVerificationResult,
                 UserConsentVerifier,
                 UserConsentVerifierAvailability,
-                UserConsentVerificationResult,
             )
         except Exception:
             from winrt.windows.security.credentials.ui import (  # type: ignore
+                UserConsentVerificationResult,
                 UserConsentVerifier,
                 UserConsentVerifierAvailability,
-                UserConsentVerificationResult,
             )
     except Exception:
         return None
@@ -148,7 +149,7 @@ def _try_windows_credential_prompt(reason: str) -> bool | None:
     try:
         credui = ctypes.WinDLL("credui.dll")
 
-        class CREDUI_INFOW(ctypes.Structure):
+        class CREDUI_INFOW(ctypes.Structure):  # noqa: N801 - matches the Win32 struct name
             _fields_ = [
                 ("cbSize", wintypes.DWORD),
                 ("hwndParent", wintypes.HWND),
@@ -186,10 +187,8 @@ def _try_windows_credential_prompt(reason: str) -> bool | None:
 
         if out_cred_blob:
             # Wipe and free the returned credential buffer; we never read it.
-            try:
+            with contextlib.suppress(Exception):
                 ctypes.memset(out_cred_blob, 0, out_cred_size.value)
-            except Exception:
-                pass
             ctypes.windll.ole32.CoTaskMemFree(out_cred_blob)
 
         if result == 0:

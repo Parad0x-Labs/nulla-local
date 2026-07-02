@@ -68,7 +68,7 @@ def start_detached(*, command: list[str], cwd: str, stdout_path: str, stderr_pat
             startupinfo.wShowWindow = 0
             kwargs["startupinfo"] = startupinfo
         try:
-            process = subprocess.Popen(  # noqa: S603
+            process = subprocess.Popen(
                 wrapped,
                 creationflags=_creationflags(include_breakaway=True),
                 **kwargs,
@@ -76,7 +76,7 @@ def start_detached(*, command: list[str], cwd: str, stdout_path: str, stderr_pat
         except OSError as exc:
             if os.name != "nt" or getattr(exc, "winerror", None) != 5:
                 raise
-            process = subprocess.Popen(  # noqa: S603
+            process = subprocess.Popen(
                 wrapped,
                 creationflags=_creationflags(include_breakaway=False),
                 **kwargs,

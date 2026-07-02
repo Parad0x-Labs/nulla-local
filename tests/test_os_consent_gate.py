@@ -4,8 +4,8 @@ import pytest
 
 from core import os_consent_gate
 from core.os_consent_gate import (
-    ConsentDenied,
-    ConsentUnavailable,
+    ConsentDeniedError,
+    ConsentUnavailableError,
     require_os_user_consent,
     set_consent_override_for_tests,
 )
@@ -38,13 +38,13 @@ def test_env_bypass_ignores_non_yes_values(monkeypatch):
     # Anything other than the literal "yes" must NOT bypass the gate.
     monkeypatch.setenv("NULLA_WALLET_SKIP_CONSENT_GATE", "1")
     monkeypatch.setattr(os_consent_gate.sys, "platform", "linux")
-    with pytest.raises(ConsentUnavailable):
+    with pytest.raises(ConsentUnavailableError):
         require_os_user_consent("reveal key")
 
 
 def test_non_windows_fails_closed(monkeypatch):
     monkeypatch.setattr(os_consent_gate.sys, "platform", "linux")
-    with pytest.raises(ConsentUnavailable):
+    with pytest.raises(ConsentUnavailableError):
         require_os_user_consent("reveal key")
 
 
@@ -57,7 +57,7 @@ def test_windows_hello_verified_grants(monkeypatch):
 def test_windows_hello_declined_raises_denied(monkeypatch):
     monkeypatch.setattr(os_consent_gate.sys, "platform", "win32")
     monkeypatch.setattr(os_consent_gate, "_try_windows_hello", lambda reason: False)
-    with pytest.raises(ConsentDenied):
+    with pytest.raises(ConsentDeniedError):
         require_os_user_consent("reveal key")
 
 
@@ -72,7 +72,7 @@ def test_credential_prompt_cancelled_raises_denied(monkeypatch):
     monkeypatch.setattr(os_consent_gate.sys, "platform", "win32")
     monkeypatch.setattr(os_consent_gate, "_try_windows_hello", lambda reason: None)
     monkeypatch.setattr(os_consent_gate, "_try_windows_credential_prompt", lambda reason: False)
-    with pytest.raises(ConsentDenied):
+    with pytest.raises(ConsentDeniedError):
         require_os_user_consent("reveal key")
 
 
@@ -80,5 +80,5 @@ def test_no_mechanism_fails_closed(monkeypatch):
     monkeypatch.setattr(os_consent_gate.sys, "platform", "win32")
     monkeypatch.setattr(os_consent_gate, "_try_windows_hello", lambda reason: None)
     monkeypatch.setattr(os_consent_gate, "_try_windows_credential_prompt", lambda reason: None)
-    with pytest.raises(ConsentUnavailable):
+    with pytest.raises(ConsentUnavailableError):
         require_os_user_consent("reveal key")

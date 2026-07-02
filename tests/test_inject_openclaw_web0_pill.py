@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from installer.inject_openclaw_web0_pill import (
+    _PILL_JS,
     END,
     PILL_JS_NAME,
     START,
-    _PILL_JS,
     _strip_existing,
     apply,
     inject_into_html,

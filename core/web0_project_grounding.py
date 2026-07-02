@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 NULL_REGISTRAR_V2_PROGRAM = "NXgQhepFpDCu935H1D4g34g59ZYbo1jR4tBCZWhV8Np"
 _NULL_NAME_RE = re.compile(r"\b([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)\.null\b", re.IGNORECASE)
 

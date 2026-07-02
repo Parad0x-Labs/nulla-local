@@ -31,7 +31,6 @@ from core.runtime_install_profiles import (
     format_install_profile_id,
 )
 
-
 BENCHMARK_MARKER = "NULLA_BENCH_OK"
 
 
@@ -344,9 +343,7 @@ def _model_installed(model_name: str, installed_names: set[str]) -> bool:
         return True
     if ":" not in clean and f"{clean}:latest" in installed_names:
         return True
-    if clean.endswith(":latest") and clean.removesuffix(":latest") in installed_names:
-        return True
-    return False
+    return clean.endswith(":latest") and clean.removesuffix(":latest") in installed_names
 
 
 def _local_model_pull_plan(

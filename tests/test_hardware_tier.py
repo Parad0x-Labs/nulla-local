@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import subprocess
 from unittest import mock
 
-import subprocess
-
-from core.hardware_tier import MachineProbe, _cuda_probe_result, _select_accelerator, detect_gpu_devices, select_qwen_tier, tier_summary
+from core.hardware_tier import (
+    MachineProbe,
+    _cuda_probe_result,
+    _select_accelerator,
+    detect_gpu_devices,
+    select_qwen_tier,
+    tier_summary,
+)
 from core.local_model_bundles import capacity_bucket_for_machine, local_multi_llm_fit_from_probe
 
 
